@@ -1,0 +1,85 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>LanScope — Visual LAN scanner</title>
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <header class="topbar">
+      <div class="brand">
+        <span class="logo">&gt;_</span>
+        <strong>LanScope</strong>
+        <span class="tagline">visual LAN scanner</span>
+      </div>
+      <a class="gh-link" href="https://github.com/DannyRuizB/lanscope" target="_blank" rel="noopener">GitHub</a>
+    </header>
+
+    <main class="layout">
+      <aside class="sidebar">
+        <div class="panel-header">
+          <h2>History</h2>
+          <button id="refresh-history" class="ghost" title="Refresh">↻</button>
+        </div>
+        <ul id="scan-list" class="scan-list">
+          <li class="muted">No scans yet.</li>
+        </ul>
+      </aside>
+
+      <section class="content">
+        <form id="scan-form" class="scan-form">
+          <label for="cidr">Target</label>
+          <input
+            id="cidr"
+            name="cidr"
+            type="text"
+            placeholder="192.168.1.0/24"
+            autocomplete="off"
+            spellcheck="false"
+            required
+          />
+          <button id="scan-btn" type="submit">Scan now</button>
+          <div id="scan-status" class="status" hidden></div>
+        </form>
+
+        <div class="results">
+          <div id="results-header" class="results-header" hidden>
+            <div>
+              <strong id="results-cidr"></strong>
+              <span class="muted" id="results-meta"></span>
+            </div>
+            <button id="delete-scan" class="ghost danger" hidden title="Delete this scan">Delete</button>
+          </div>
+
+          <div id="results-empty" class="empty">
+            Run a scan to see hosts here.
+          </div>
+
+          <table id="results-table" class="hosts-table" hidden>
+            <thead>
+              <tr>
+                <th>IP</th>
+                <th>MAC</th>
+                <th>Vendor</th>
+                <th>Hostname</th>
+                <th>Reason</th>
+              </tr>
+            </thead>
+            <tbody id="results-body"></tbody>
+          </table>
+        </div>
+      </section>
+    </main>
+
+    <footer class="bottombar">
+      <span>v0.1.0</span>
+      <span>·</span>
+      <span>MIT</span>
+      <span>·</span>
+      <span>Built by <a href="https://github.com/DannyRuizB" target="_blank" rel="noopener">DannyRuizB</a></span>
+    </footer>
+
+    <script src="app.js"></script>
+  </body>
+</html>

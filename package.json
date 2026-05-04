@@ -1,0 +1,23 @@
+{
+  "name": "lanscope",
+  "version": "0.1.0",
+  "description": "Visual LAN scanner — point it at a CIDR, see who's there.",
+  "main": "src/server.js",
+  "scripts": {
+    "start": "node src/server.js"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "dependencies": {
+    "better-sqlite3": "^11.3.0",
+    "express": "^4.21.0",
+    "fast-xml-parser": "^4.5.0"
+  },
+  "license": "MIT",
+  "author": "Danny Ruiz Boluda",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/DannyRuizB/lanscope.git"
+  }
+}
