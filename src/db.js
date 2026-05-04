@@ -22,19 +22,44 @@ db.exec(`
   );
 
   CREATE TABLE IF NOT EXISTS hosts (
+    id            INTEGER PRIMARY KEY AUTOINCREMENT,
+    scan_id       INTEGER NOT NULL REFERENCES scans(id) ON DELETE CASCADE,
+    ip            TEXT    NOT NULL,
+    mac           TEXT,
+    vendor        TEXT,
+    hostname      TEXT,
+    status        TEXT    NOT NULL CHECK (status IN ('up','down')),
+    reason        TEXT,
+    portscanned_at INTEGER
+  );
+
+  CREATE TABLE IF NOT EXISTS host_ports (
     id        INTEGER PRIMARY KEY AUTOINCREMENT,
-    scan_id   INTEGER NOT NULL REFERENCES scans(id) ON DELETE CASCADE,
-    ip        TEXT    NOT NULL,
-    mac       TEXT,
-    vendor    TEXT,
-    hostname  TEXT,
-    status    TEXT    NOT NULL CHECK (status IN ('up','down')),
-    reason    TEXT
+    host_id   INTEGER NOT NULL REFERENCES hosts(id) ON DELETE CASCADE,
+    port      INTEGER NOT NULL,
+    protocol  TEXT    NOT NULL DEFAULT 'tcp',
+    state     TEXT    NOT NULL,
+    service   TEXT,
+    product   TEXT,
+    version   TEXT,
+    extra     TEXT
   );
 
   CREATE INDEX IF NOT EXISTS idx_hosts_scan ON hosts(scan_id);
   CREATE INDEX IF NOT EXISTS idx_scans_started ON scans(started_at DESC);
+  CREATE INDEX IF NOT EXISTS idx_ports_host ON host_ports(host_id);
 `);
+
+// Migration for v0.1 DBs that don't have the new columns/tables yet.
+function columnExists(table, column) {
+  return db
+    .prepare(`PRAGMA table_info(${table})`)
+    .all()
+    .some((c) => c.name === column);
+}
+if (!columnExists("hosts", "portscanned_at")) {
+  db.exec(`ALTER TABLE hosts ADD COLUMN portscanned_at INTEGER`);
+}
 
 const stmts = {
   insertScan: db.prepare(
@@ -59,10 +84,31 @@ const stmts = {
        FROM scans WHERE id = ?`,
   ),
   getHostsByScan: db.prepare(
-    `SELECT id, ip, mac, vendor, hostname, status, reason
+    `SELECT id, ip, mac, vendor, hostname, status, reason, portscanned_at
        FROM hosts WHERE scan_id = ? ORDER BY ip`,
   ),
+  getHost: db.prepare(
+    `SELECT id, scan_id, ip, mac, vendor, hostname, status, reason, portscanned_at
+       FROM hosts WHERE id = ?`,
+  ),
   deleteScan: db.prepare(`DELETE FROM scans WHERE id = ?`),
+  clearHostPorts: db.prepare(`DELETE FROM host_ports WHERE host_id = ?`),
+  insertHostPort: db.prepare(
+    `INSERT INTO host_ports (host_id, port, protocol, state, service, product, version, extra)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+  ),
+  getPortsByHost: db.prepare(
+    `SELECT port, protocol, state, service, product, version, extra
+       FROM host_ports WHERE host_id = ? ORDER BY protocol, port`,
+  ),
+  getPortsByScan: db.prepare(
+    `SELECT host_id, port, protocol, state, service, product, version, extra
+       FROM host_ports WHERE host_id IN (SELECT id FROM hosts WHERE scan_id = ?)
+       ORDER BY host_id, protocol, port`,
+  ),
+  markHostPortscanned: db.prepare(
+    `UPDATE hosts SET portscanned_at = ? WHERE id = ?`,
+  ),
 };
 
 const insertHostsTx = db.transaction((scanId, hosts) => {
@@ -77,6 +123,23 @@ const insertHostsTx = db.transaction((scanId, hosts) => {
       h.reason || null,
     );
   }
+});
+
+const replaceHostPortsTx = db.transaction((hostId, ports) => {
+  stmts.clearHostPorts.run(hostId);
+  for (const p of ports) {
+    stmts.insertHostPort.run(
+      hostId,
+      p.port,
+      p.protocol || "tcp",
+      p.state,
+      p.service || null,
+      p.product || null,
+      p.version || null,
+      p.extra || null,
+    );
+  }
+  stmts.markHostPortscanned.run(Date.now(), hostId);
 });
 
 function startScan(cidr) {
@@ -100,12 +163,36 @@ function listScans(limit = 50) {
 function getScan(id) {
   const scan = stmts.getScan.get(id);
   if (!scan) return null;
-  scan.hosts = stmts.getHostsByScan.all(id);
+  const hosts = stmts.getHostsByScan.all(id);
+  const portsByHost = new Map();
+  for (const row of stmts.getPortsByScan.all(id)) {
+    if (!portsByHost.has(row.host_id)) portsByHost.set(row.host_id, []);
+    portsByHost.get(row.host_id).push({
+      port: row.port,
+      protocol: row.protocol,
+      state: row.state,
+      service: row.service,
+      product: row.product,
+      version: row.version,
+      extra: row.extra,
+    });
+  }
+  for (const h of hosts) h.ports = portsByHost.get(h.id) || [];
+  scan.hosts = hosts;
   return scan;
 }
 
 function deleteScan(id) {
   return stmts.deleteScan.run(id).changes > 0;
+}
+
+function getHost(id) {
+  return stmts.getHost.get(id);
+}
+
+function saveHostPorts(hostId, ports) {
+  replaceHostPortsTx(hostId, ports);
+  return stmts.getPortsByHost.all(hostId);
 }
 
 module.exports = {
@@ -115,4 +202,6 @@ module.exports = {
   listScans,
   getScan,
   deleteScan,
+  getHost,
+  saveHostPorts,
 };

@@ -2,9 +2,9 @@
 
 > Visual LAN scanner for your home network or homelab — point it at a CIDR, see who's there.
 
-![LanScope on the dark + terminal-green theme: topbar with the >_ logo and "LanScope visual LAN scanner". Sidebar shows three scans of 192.168.1.0/29 in History (two completed with green dots, one failed with a red dot). The main pane has a Target input pre-filled with 192.168.1.0/29, a Scan now button and a "Done. 4 hosts responded." status line. The results header reads "192.168.1.0/29 · 4/5/2026, 12:08:52 · took 5.8 s · 4 alive" with a Delete button on the right. The hosts table lists four IPs (192.168.1.1 Sagemcom Broadband SAS, 192.168.1.2 Huawei Technologies _gateway, 192.168.1.3 Routerboard.com, 192.168.1.5 D-Link International) with MACs, vendors and "arp-response" as the reason.](screenshots/screenshot.png)
+![LanScope on the dark + terminal-green theme: a 192.168.1.0/29 scan result with all four hosts port-scanned. 192.168.1.1 (Sagemcom router) shows one open port (80/tcp tcpwrapped) and five closed. 192.168.1.2 (Huawei _gateway) shows two open ports (53/tcp domain, 80/tcp http) plus three filtered (21/22/23). 192.168.1.3 (a MikroTik RouterOS box) shows six open ports with detected products: FTP "MikroTik router ftpd 7.16", SSH "MikroTik RouterOS sshd", telnet "Linux telnetd", HTTP, PPTP and "MikroTik bandwidth-test server". 192.168.1.5 (D-Link) shows one open port (80/tcp http). State pills are green for open, amber for filtered and gray for closed.](screenshots/screenshot.png)
 
-🚧 Work in progress — v0.1.0.
+🚧 Work in progress — v0.2.0.
 
 ---
 
@@ -31,12 +31,19 @@ docker compose up -d
 
 Type a CIDR in the **Target** input (for example `192.168.1.0/24`) and hit **Scan now**. Hosts that respond to the ping sweep appear in the table with their IP, MAC, vendor (looked up from the OUI prefix by `nmap`) and reverse-DNS hostname when available. Every scan is saved in the **History** sidebar — click any past scan to reload it.
 
+### Port scan (v0.2)
+
+Each host row has a **Scan ports** button in the *Ports* column. Click it and LanScope runs `nmap --top-ports 100 -sS -sV` against that single host. Results appear in an expandable sub-table showing `port/protocol`, state (open / closed / filtered, color-coded), service name, product and version when nmap can detect them.
+
+Once a host has been port-scanned the button changes to `N open · ▾` and toggles the sub-panel open / closed without re-scanning. Port results are persisted in the database with the host, so they survive a restart.
+
 ### How it works under the hood
 
 - The container runs a small Express server on port `3030`.
 - `POST /api/scan` shells out to `nmap -sn -T4 -oX - <cidr>`. Output is XML, parsed in JavaScript with `fast-xml-parser`.
-- Hosts are stored in a SQLite database mounted on a Docker named volume (`lanscope-data`), so scan history survives restarts.
-- The compose file uses `network_mode: host` and adds the `NET_RAW` and `NET_ADMIN` capabilities to the container — without those, `nmap` can't open the raw sockets the ping sweep needs.
+- `POST /api/hosts/:id/portscan` shells out to `nmap --top-ports 100 -sS -sV -T4 --version-light -oX - <ip>` and persists the result.
+- Hosts and ports are stored in a SQLite database mounted on a Docker named volume (`lanscope-data`), so scan history survives restarts.
+- The compose file uses `network_mode: host` and adds the `NET_RAW` and `NET_ADMIN` capabilities to the container — without those, `nmap` can't open the raw sockets the scans need.
 
 ### Caveats
 
@@ -47,7 +54,7 @@ Type a CIDR in the **Target** input (for example `192.168.1.0/24`) and hit **Sca
 ## Roadmap
 
 - [x] **v0.1** — CIDR ping sweep. Web UI with a "Scan now" form, results table (IP, MAC, vendor, hostname). Persisted scan history in SQLite.
-- [ ] **v0.2** — Per-host TCP port scan (top 100 ports) with detected service names.
+- [x] **v0.2** — Per-host TCP port scan (top 100 ports) with detected service names, products and versions. Expandable sub-table per host, results persisted alongside the host.
 - [ ] **v0.3** — OS fingerprint (`nmap -O`) and host icons by OS family.
 - [ ] **v0.4** — Topology graph (Cytoscape) — hosts grouped by subnet, edges via gateway.
 - [ ] **v0.5** — Diff between scans: which hosts appeared / disappeared / changed since last time.

@@ -6,16 +6,29 @@ const { XMLParser } = require("fast-xml-parser");
 const CIDR_RE =
   /^(?:(?:25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)\.){3}(?:25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)\/(?:3[0-2]|[12]?\d)$/;
 
+const IPV4_RE =
+  /^(?:(?:25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)\.){3}(?:25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)$/;
+
 function validateCidr(cidr) {
   if (typeof cidr !== "string") return "cidr must be a string";
   if (!CIDR_RE.test(cidr)) return "invalid CIDR (expected IPv4 a.b.c.d/n)";
   return null;
 }
 
+function validateIpv4(ip) {
+  if (typeof ip !== "string") return "ip must be a string";
+  if (!IPV4_RE.test(ip)) return "invalid IPv4 address";
+  return null;
+}
+
 const xmlParser = new XMLParser({
   ignoreAttributes: false,
   attributeNamePrefix: "",
-  isArray: (name) => name === "host" || name === "address" || name === "hostname",
+  isArray: (name) =>
+    name === "host" ||
+    name === "address" ||
+    name === "hostname" ||
+    name === "port",
 });
 
 function pickAddress(addresses, type) {
@@ -69,4 +82,71 @@ function runPingSweep(cidr) {
   });
 }
 
-module.exports = { validateCidr, runPingSweep, parseHosts };
+function parsePorts(xml) {
+  const doc = xmlParser.parse(xml);
+  const hosts = doc?.nmaprun?.host || [];
+  // We expect one host (we scanned one IP). Take the first.
+  const host = hosts[0];
+  if (!host) return [];
+  const ports = host.ports?.port || [];
+  return ports.map((p) => {
+    const svc = p.service || {};
+    const extra = [svc.extrainfo, svc.ostype, svc.cpe]
+      .filter((x) => x && typeof x === "string")
+      .join(" · ");
+    return {
+      port: parseInt(p.portid, 10),
+      protocol: p.protocol || "tcp",
+      state: p.state?.state || "unknown",
+      service: svc.name || null,
+      product: svc.product || null,
+      version: svc.version || null,
+      extra: extra || null,
+    };
+  });
+}
+
+function runPortScan(ip) {
+  return new Promise((resolve, reject) => {
+    // --top-ports 100: nmap's most common 100 TCP ports
+    // -sS: SYN scan (default when running as root, explicit for clarity)
+    // -sV: service/version detection
+    // -T4: faster timing (still polite enough for a LAN)
+    // --version-light: faster service probes (skip rare ones)
+    execFile(
+      "nmap",
+      [
+        "--top-ports",
+        "100",
+        "-sS",
+        "-sV",
+        "-T4",
+        "--version-light",
+        "-oX",
+        "-",
+        ip,
+      ],
+      { maxBuffer: 16 * 1024 * 1024, timeout: 180_000 },
+      (err, stdout, stderr) => {
+        if (err) {
+          const msg = stderr?.toString().trim() || err.message;
+          return reject(new Error(`nmap failed: ${msg}`));
+        }
+        try {
+          resolve(parsePorts(stdout));
+        } catch (e) {
+          reject(new Error(`failed to parse nmap output: ${e.message}`));
+        }
+      },
+    );
+  });
+}
+
+module.exports = {
+  validateCidr,
+  validateIpv4,
+  runPingSweep,
+  runPortScan,
+  parseHosts,
+  parsePorts,
+};
