@@ -329,6 +329,38 @@ button.ghost.danger:hover {
 .ports-cell {
   text-align: right;
 }
+
+/* OS column + chip */
+.hosts-table th.os-col {
+  width: 170px;
+}
+.os-cell {
+  text-align: right;
+}
+.os-chip {
+  display: inline-block;
+  width: 18px;
+  height: 18px;
+  line-height: 16px;
+  text-align: center;
+  border: 1px solid var(--accent);
+  color: var(--accent);
+  background: var(--accent-soft);
+  border-radius: 3px;
+  font-size: 11px;
+  font-weight: 700;
+  vertical-align: middle;
+  margin-right: 4px;
+}
+.os-chip-unknown {
+  border-color: var(--border-strong);
+  color: var(--text-mute);
+  background: rgba(100, 116, 139, 0.12);
+}
+.ports-table td.os-name {
+  color: var(--text-strong);
+  width: 280px;
+}
 button.small {
   padding: 4px 10px;
   font-size: 12px;

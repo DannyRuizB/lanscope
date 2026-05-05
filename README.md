@@ -2,9 +2,9 @@
 
 > Visual LAN scanner for your home network or homelab — point it at a CIDR, see who's there.
 
-![LanScope on the dark + terminal-green theme: a 192.168.1.0/29 scan result with all four hosts port-scanned. 192.168.1.1 (Sagemcom router) shows one open port (80/tcp tcpwrapped) and five closed. 192.168.1.2 (Huawei _gateway) shows two open ports (53/tcp domain, 80/tcp http) plus three filtered (21/22/23). 192.168.1.3 (a MikroTik RouterOS box) shows six open ports with detected products: FTP "MikroTik router ftpd 7.16", SSH "MikroTik RouterOS sshd", telnet "Linux telnetd", HTTP, PPTP and "MikroTik bandwidth-test server". 192.168.1.5 (D-Link) shows one open port (80/tcp http). State pills are green for open, amber for filtered and gray for closed.](screenshots/screenshot.png)
+![LanScope on the dark + terminal-green theme: a 192.168.1.0/24 scan result with two hosts expanded. 192.168.1.162 (ASUSTek MAC) is OS-fingerprinted and shows a stack of Windows matches led by "Microsoft Windows 10 1803" at 97% accuracy, then 1903, 11, 1809, 1909, Server 2019 and 20H2 with descending accuracy — its OS button reads "[W] Windows · ▾". 192.168.1.184 (danny.local) is detected as "Linux 5.0 - 6.2" at 100% accuracy with the [L] Linux chip, and its ports sub-row shows 80/tcp open running nginx 1.24.0, 3000/tcp filtered ppp, 7070/tcp open realserver. Other hosts in the table have "Scan OS" and "Scan ports" buttons ready to fire. Family chips encode OS family in a single mono letter inside a green box.](screenshots/screenshot.png)
 
-🚧 Work in progress — v0.2.0.
+🚧 Work in progress — v0.3.0.
 
 ---
 
@@ -37,13 +37,22 @@ Each host row has a **Scan ports** button in the *Ports* column. Click it and La
 
 Once a host has been port-scanned the button changes to `N open · ▾` and toggles the sub-panel open / closed without re-scanning. Port results are persisted in the database with the host, so they survive a restart.
 
+### OS fingerprint (v0.3)
+
+Each host row also has a **Scan OS** button in the *OS* column. Click it and LanScope runs `nmap -O --osscan-guess` against that single host. Results appear in their own expandable sub-table listing every candidate match nmap reports, sorted by accuracy: match name (e.g. *Linux 5.0 - 6.2*, *Microsoft Windows 10 1803*, *Motorola SURFboard 5101 cable modem*), accuracy %, OS family, vendor and device type.
+
+The OS column shows a one-letter family **chip** so you can scan a `/24` and see the OS landscape at a glance — `[L]` Linux, `[W]` Windows, `[M]` macOS / iOS, `[B]` BSD, `[R]` router / embedded, `[U]` other Unix, `[?]` unknown. The chip in the button reflects the top match; the full ranking sits inside the sub-table.
+
+OS sub-row and ports sub-row are independent — you can have both expanded for the same host at the same time. Both are persisted, so revisiting a scan doesn't re-run nmap.
+
 ### How it works under the hood
 
 - The container runs a small Express server on port `3030`.
 - `POST /api/scan` shells out to `nmap -sn -T4 -oX - <cidr>`. Output is XML, parsed in JavaScript with `fast-xml-parser`.
 - `POST /api/hosts/:id/portscan` shells out to `nmap --top-ports 100 -sS -sV -T4 --version-light -oX - <ip>` and persists the result.
-- Hosts and ports are stored in a SQLite database mounted on a Docker named volume (`lanscope-data`), so scan history survives restarts.
-- The compose file uses `network_mode: host` and adds the `NET_RAW` and `NET_ADMIN` capabilities to the container — without those, `nmap` can't open the raw sockets the scans need.
+- `POST /api/hosts/:id/osscan` shells out to `nmap -O --osscan-guess -T4 -oX - <ip>`. Every `osmatch` reported is stored, including its first `osclass` (vendor / family / generation / device type).
+- Hosts, ports and OS matches are stored in a SQLite database mounted on a Docker named volume (`lanscope-data`), so scan history survives restarts.
+- The compose file uses `network_mode: host` and adds the `NET_RAW` and `NET_ADMIN` capabilities to the container — without those, `nmap` can't open the raw sockets that the ping sweep, SYN scan and OS fingerprint need.
 
 ### Caveats
 
@@ -53,12 +62,16 @@ Once a host has been port-scanned the button changes to `N open · ▾` and togg
 
 ## Roadmap
 
+LanScope's direction: cover as many `nmap` options as possible behind a visual UI, **additively** — current defaults stay one click away, advanced flags become opt-in panels.
+
 - [x] **v0.1** — CIDR ping sweep. Web UI with a "Scan now" form, results table (IP, MAC, vendor, hostname). Persisted scan history in SQLite.
 - [x] **v0.2** — Per-host TCP port scan (top 100 ports) with detected service names, products and versions. Expandable sub-table per host, results persisted alongside the host.
-- [ ] **v0.3** — OS fingerprint (`nmap -O`) and host icons by OS family.
-- [ ] **v0.4** — Topology graph (Cytoscape) — hosts grouped by subnet, edges via gateway.
-- [ ] **v0.5** — Diff between scans: which hosts appeared / disappeared / changed since last time.
-- [ ] **v0.6** — Inventory: declare which hosts *should* be on your network and get alerted when an unknown one shows up (or a known one goes missing).
+- [x] **v0.3** — OS fingerprint (`nmap -O --osscan-guess`). Per-host OS column with one-letter family chip, expandable sub-table with every candidate match ranked by accuracy.
+- [ ] **v0.3.x** — Configurable port scan: top-N variable, port range (`-p`), timing (`-T0..T5`), connect vs SYN (`-sT` / `-sS`).
+- [ ] **v0.4** — UDP scan (`-sU`) on its own slower flow.
+- [ ] **v0.5** — NSE scripts: `-sC` defaults plus `--script <category>` with an allowlist (banner grabbing, vuln, safe…).
+- [ ] **v0.6** — Advanced host discovery: `-Pn`, ICMP / TCP / ARP ping types.
+- [ ] **v0.7+** — Topology graph (Cytoscape), diff between scans (appeared / disappeared / changed), declared-host inventory with alerts.
 
 ## Stack
 

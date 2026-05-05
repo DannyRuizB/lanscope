@@ -28,7 +28,9 @@ const xmlParser = new XMLParser({
     name === "host" ||
     name === "address" ||
     name === "hostname" ||
-    name === "port",
+    name === "port" ||
+    name === "osmatch" ||
+    name === "osclass",
 });
 
 function pickAddress(addresses, type) {
@@ -142,11 +144,57 @@ function runPortScan(ip) {
   });
 }
 
+function parseOsMatches(xml) {
+  const doc = xmlParser.parse(xml);
+  const hosts = doc?.nmaprun?.host || [];
+  const host = hosts[0];
+  if (!host) return [];
+  const matches = host.os?.osmatch || [];
+  return matches.map((m) => {
+    const cls = (m.osclass || [])[0] || {};
+    return {
+      name: m.name || "unknown",
+      accuracy: parseInt(m.accuracy, 10) || 0,
+      line: m.line ? parseInt(m.line, 10) : null,
+      vendor: cls.vendor || null,
+      family: cls.osfamily || null,
+      gen: cls.osgen || null,
+      type: cls.type || null,
+    };
+  });
+}
+
+function runOsScan(ip) {
+  return new Promise((resolve, reject) => {
+    // -O: OS detection (requires NET_RAW + NET_ADMIN, already in compose)
+    // --osscan-guess: report best guesses when no perfect match (useful on LAN devices)
+    // -T4: faster timing
+    execFile(
+      "nmap",
+      ["-O", "--osscan-guess", "-T4", "-oX", "-", ip],
+      { maxBuffer: 16 * 1024 * 1024, timeout: 180_000 },
+      (err, stdout, stderr) => {
+        if (err) {
+          const msg = stderr?.toString().trim() || err.message;
+          return reject(new Error(`nmap failed: ${msg}`));
+        }
+        try {
+          resolve(parseOsMatches(stdout));
+        } catch (e) {
+          reject(new Error(`failed to parse nmap output: ${e.message}`));
+        }
+      },
+    );
+  });
+}
+
 module.exports = {
   validateCidr,
   validateIpv4,
   runPingSweep,
   runPortScan,
+  runOsScan,
   parseHosts,
   parsePorts,
+  parseOsMatches,
 };

@@ -1,6 +1,6 @@
 {
   "name": "lanscope",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "Visual LAN scanner — point it at a CIDR, see who's there.",
   "main": "src/server.js",
   "scripts": {

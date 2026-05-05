@@ -1,7 +1,7 @@
 const path = require("node:path");
 const express = require("express");
 const db = require("./db");
-const { validateCidr, runPingSweep, runPortScan } = require("./scanner");
+const { validateCidr, runPingSweep, runPortScan, runOsScan } = require("./scanner");
 
 const PORT = parseInt(process.env.PORT, 10) || 3030;
 
@@ -62,6 +62,28 @@ app.post("/api/hosts/:id/portscan", async (req, res) => {
       ip: host.ip,
       portscanned_at: refreshed.portscanned_at,
       ports: saved,
+    });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+app.post("/api/hosts/:id/osscan", async (req, res) => {
+  const id = parseInt(req.params.id, 10);
+  if (!Number.isInteger(id) || id <= 0) return res.status(400).json({ error: "invalid id" });
+  const host = db.getHost(id);
+  if (!host) return res.status(404).json({ error: "host not found" });
+  if (host.status !== "up") return res.status(400).json({ error: "host is not up" });
+
+  try {
+    const matches = await runOsScan(host.ip);
+    const saved = db.saveHostOsMatches(id, matches);
+    const refreshed = db.getHost(id);
+    res.json({
+      host_id: id,
+      ip: host.ip,
+      osscanned_at: refreshed.osscanned_at,
+      os_matches: saved,
     });
   } catch (e) {
     res.status(500).json({ error: e.message });

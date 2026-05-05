@@ -124,6 +124,41 @@ function renderPortsButton(host) {
   return `<button class="ghost small portscan-btn" data-host-id="${host.id}">${portsButtonLabel(host)}</button>`;
 }
 
+function familyLetter(family) {
+  if (!family) return "?";
+  const f = family.toLowerCase();
+  if (f.includes("linux")) return "L";
+  if (f.includes("windows")) return "W";
+  if (f.includes("mac") || f.includes("ios") || f.includes("apple")) return "M";
+  if (f.includes("bsd")) return "B";
+  if (f.includes("router") || f.includes("embedded") || f.includes("ros")) return "R";
+  if (f.includes("solaris") || f.includes("aix") || f.includes("hp-ux")) return "U";
+  return family[0].toUpperCase();
+}
+
+function topOsMatch(host) {
+  return (host.os_matches || [])[0] || null;
+}
+
+function osChip(family) {
+  const letter = familyLetter(family);
+  const cls = letter === "?" ? "os-chip os-chip-unknown" : "os-chip";
+  return `<span class="${cls}">${escapeHtml(letter)}</span>`;
+}
+
+function osButtonLabel(host) {
+  if (!host.osscanned_at) return "Scan OS";
+  const top = topOsMatch(host);
+  if (!top) return `${osChip(null)} no match · ▾`;
+  const label = top.family || top.name || "unknown";
+  return `${osChip(top.family)} ${escapeHtml(label)} · ▾`;
+}
+
+function renderOsButton(host) {
+  if (host.status !== "up") return `<span class="muted">—</span>`;
+  return `<button class="ghost small osscan-btn" data-host-id="${host.id}">${osButtonLabel(host)}</button>`;
+}
+
 function renderHostRow(h) {
   return `
     <tr class="host-row" data-host-id="${h.id}">
@@ -132,11 +167,41 @@ function renderHostRow(h) {
       <td class="${h.vendor ? "" : "muted"}">${escapeHtml(h.vendor) || "—"}</td>
       <td class="${h.hostname ? "" : "muted"}">${escapeHtml(h.hostname) || "—"}</td>
       <td class="muted">${escapeHtml(h.reason) || "—"}</td>
+      <td class="os-cell">${renderOsButton(h)}</td>
       <td class="ports-cell">${renderPortsButton(h)}</td>
     </tr>
-    <tr class="host-detail" data-host-id="${h.id}" hidden>
-      <td colspan="6">${h.ports?.length ? renderPortsTable(h) : ""}</td>
+    <tr class="host-detail" data-host-id="${h.id}" data-kind="os" hidden>
+      <td colspan="7">${h.os_matches?.length ? renderOsTable(h) : ""}</td>
+    </tr>
+    <tr class="host-detail" data-host-id="${h.id}" data-kind="ports" hidden>
+      <td colspan="7">${h.ports?.length ? renderPortsTable(h) : ""}</td>
     </tr>`;
+}
+
+function renderOsTable(host) {
+  const matches = host.os_matches || [];
+  if (!matches.length) {
+    return `<div class="ports-empty">No OS match (host fingerprint inconclusive).</div>`;
+  }
+  const rows = matches
+    .map(
+      (m) => `
+      <tr>
+        <td class="os-name">${osChip(m.family)} ${escapeHtml(m.name)}</td>
+        <td><span class="state-pill state-open">${m.accuracy}%</span></td>
+        <td class="${m.family ? "" : "muted"}">${escapeHtml(m.family) || "—"}</td>
+        <td class="${m.vendor ? "" : "muted"}">${escapeHtml(m.vendor) || "—"}</td>
+        <td class="${m.type ? "" : "muted"}">${escapeHtml(m.type) || "—"}</td>
+      </tr>`,
+    )
+    .join("");
+  return `
+    <table class="ports-table">
+      <thead>
+        <tr><th>Match</th><th>Accuracy</th><th>Family</th><th>Vendor</th><th>Type</th></tr>
+      </thead>
+      <tbody>${rows}</tbody>
+    </table>`;
 }
 
 function renderPortsTable(host) {
@@ -196,6 +261,7 @@ function renderScan(scan) {
   els.table.hidden = false;
   els.body.innerHTML = scan.hosts.map(renderHostRow).join("");
   attachPortscanHandlers();
+  attachOsscanHandlers();
 }
 
 function attachPortscanHandlers() {
@@ -204,14 +270,30 @@ function attachPortscanHandlers() {
   });
 }
 
+function attachOsscanHandlers() {
+  els.body.querySelectorAll(".osscan-btn").forEach((btn) => {
+    btn.addEventListener("click", () => onOsscanClick(parseInt(btn.dataset.hostId, 10)));
+  });
+}
+
 async function onPortscanClick(hostId) {
   const host = currentHostsById().get(hostId);
   if (!host) return;
   if (host.portscanned_at) {
-    toggleHostDetail(hostId);
+    toggleHostDetail(hostId, "ports");
     return;
   }
   await runPortscan(hostId);
+}
+
+async function onOsscanClick(hostId) {
+  const host = currentHostsById().get(hostId);
+  if (!host) return;
+  if (host.osscanned_at) {
+    toggleHostDetail(hostId, "os");
+    return;
+  }
+  await runOsscan(hostId);
 }
 
 function currentHostsById() {
@@ -224,8 +306,10 @@ function currentHostsById() {
 
 let lastScan = null;
 
-function toggleHostDetail(hostId) {
-  const detail = els.body.querySelector(`tr.host-detail[data-host-id="${hostId}"]`);
+function toggleHostDetail(hostId, kind = "ports") {
+  const detail = els.body.querySelector(
+    `tr.host-detail[data-host-id="${hostId}"][data-kind="${kind}"]`,
+  );
   if (!detail) return;
   detail.hidden = !detail.hidden;
 }
@@ -238,7 +322,6 @@ async function runPortscan(hostId) {
   btn.textContent = "Scanning…";
   try {
     const data = await fetchJson(`/api/hosts/${hostId}/portscan`, { method: "POST" });
-    // Patch lastScan in memory and re-render this row + detail.
     if (lastScan) {
       const h = lastScan.hosts.find((x) => x.id === hostId);
       if (h) {
@@ -246,18 +329,52 @@ async function runPortscan(hostId) {
         h.portscanned_at = data.portscanned_at;
       }
     }
-    const detail = els.body.querySelector(`tr.host-detail[data-host-id="${hostId}"]`);
+    const detail = els.body.querySelector(
+      `tr.host-detail[data-host-id="${hostId}"][data-kind="ports"]`,
+    );
     if (detail) {
       const host = lastScan?.hosts.find((x) => x.id === hostId);
       detail.querySelector("td").innerHTML = host ? renderPortsTable(host) : "";
       detail.hidden = false;
     }
-    btn.textContent = portsButtonLabel(lastScan.hosts.find((x) => x.id === hostId));
+    btn.innerHTML = portsButtonLabel(lastScan.hosts.find((x) => x.id === hostId));
     btn.disabled = false;
   } catch (e) {
     btn.disabled = false;
     btn.textContent = original;
     setStatus(`Port scan failed: ${e.message}`, true);
+  }
+}
+
+async function runOsscan(hostId) {
+  const btn = els.body.querySelector(`button.osscan-btn[data-host-id="${hostId}"]`);
+  if (!btn) return;
+  btn.disabled = true;
+  const original = btn.innerHTML;
+  btn.textContent = "Scanning…";
+  try {
+    const data = await fetchJson(`/api/hosts/${hostId}/osscan`, { method: "POST" });
+    if (lastScan) {
+      const h = lastScan.hosts.find((x) => x.id === hostId);
+      if (h) {
+        h.os_matches = data.os_matches;
+        h.osscanned_at = data.osscanned_at;
+      }
+    }
+    const detail = els.body.querySelector(
+      `tr.host-detail[data-host-id="${hostId}"][data-kind="os"]`,
+    );
+    if (detail) {
+      const host = lastScan?.hosts.find((x) => x.id === hostId);
+      detail.querySelector("td").innerHTML = host ? renderOsTable(host) : "";
+      detail.hidden = false;
+    }
+    btn.innerHTML = osButtonLabel(lastScan.hosts.find((x) => x.id === hostId));
+    btn.disabled = false;
+  } catch (e) {
+    btn.disabled = false;
+    btn.innerHTML = original;
+    setStatus(`OS scan failed: ${e.message}`, true);
   }
 }
 

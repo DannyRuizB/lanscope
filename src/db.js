@@ -45,9 +45,22 @@ db.exec(`
     extra     TEXT
   );
 
+  CREATE TABLE IF NOT EXISTS host_os_matches (
+    id        INTEGER PRIMARY KEY AUTOINCREMENT,
+    host_id   INTEGER NOT NULL REFERENCES hosts(id) ON DELETE CASCADE,
+    name      TEXT    NOT NULL,
+    accuracy  INTEGER NOT NULL,
+    line      INTEGER,
+    vendor    TEXT,
+    family    TEXT,
+    gen       TEXT,
+    type      TEXT
+  );
+
   CREATE INDEX IF NOT EXISTS idx_hosts_scan ON hosts(scan_id);
   CREATE INDEX IF NOT EXISTS idx_scans_started ON scans(started_at DESC);
   CREATE INDEX IF NOT EXISTS idx_ports_host ON host_ports(host_id);
+  CREATE INDEX IF NOT EXISTS idx_os_matches_host ON host_os_matches(host_id);
 `);
 
 // Migration for v0.1 DBs that don't have the new columns/tables yet.
@@ -59,6 +72,9 @@ function columnExists(table, column) {
 }
 if (!columnExists("hosts", "portscanned_at")) {
   db.exec(`ALTER TABLE hosts ADD COLUMN portscanned_at INTEGER`);
+}
+if (!columnExists("hosts", "osscanned_at")) {
+  db.exec(`ALTER TABLE hosts ADD COLUMN osscanned_at INTEGER`);
 }
 
 const stmts = {
@@ -84,11 +100,11 @@ const stmts = {
        FROM scans WHERE id = ?`,
   ),
   getHostsByScan: db.prepare(
-    `SELECT id, ip, mac, vendor, hostname, status, reason, portscanned_at
+    `SELECT id, ip, mac, vendor, hostname, status, reason, portscanned_at, osscanned_at
        FROM hosts WHERE scan_id = ? ORDER BY ip`,
   ),
   getHost: db.prepare(
-    `SELECT id, scan_id, ip, mac, vendor, hostname, status, reason, portscanned_at
+    `SELECT id, scan_id, ip, mac, vendor, hostname, status, reason, portscanned_at, osscanned_at
        FROM hosts WHERE id = ?`,
   ),
   deleteScan: db.prepare(`DELETE FROM scans WHERE id = ?`),
@@ -108,6 +124,23 @@ const stmts = {
   ),
   markHostPortscanned: db.prepare(
     `UPDATE hosts SET portscanned_at = ? WHERE id = ?`,
+  ),
+  clearHostOsMatches: db.prepare(`DELETE FROM host_os_matches WHERE host_id = ?`),
+  insertHostOsMatch: db.prepare(
+    `INSERT INTO host_os_matches (host_id, name, accuracy, line, vendor, family, gen, type)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+  ),
+  getOsMatchesByHost: db.prepare(
+    `SELECT name, accuracy, line, vendor, family, gen, type
+       FROM host_os_matches WHERE host_id = ? ORDER BY accuracy DESC, name`,
+  ),
+  getOsMatchesByScan: db.prepare(
+    `SELECT host_id, name, accuracy, line, vendor, family, gen, type
+       FROM host_os_matches WHERE host_id IN (SELECT id FROM hosts WHERE scan_id = ?)
+       ORDER BY host_id, accuracy DESC, name`,
+  ),
+  markHostOsScanned: db.prepare(
+    `UPDATE hosts SET osscanned_at = ? WHERE id = ?`,
   ),
 };
 
@@ -140,6 +173,23 @@ const replaceHostPortsTx = db.transaction((hostId, ports) => {
     );
   }
   stmts.markHostPortscanned.run(Date.now(), hostId);
+});
+
+const replaceHostOsMatchesTx = db.transaction((hostId, matches) => {
+  stmts.clearHostOsMatches.run(hostId);
+  for (const m of matches) {
+    stmts.insertHostOsMatch.run(
+      hostId,
+      m.name,
+      m.accuracy,
+      m.line ?? null,
+      m.vendor || null,
+      m.family || null,
+      m.gen || null,
+      m.type || null,
+    );
+  }
+  stmts.markHostOsScanned.run(Date.now(), hostId);
 });
 
 function startScan(cidr) {
@@ -177,7 +227,23 @@ function getScan(id) {
       extra: row.extra,
     });
   }
-  for (const h of hosts) h.ports = portsByHost.get(h.id) || [];
+  const osByHost = new Map();
+  for (const row of stmts.getOsMatchesByScan.all(id)) {
+    if (!osByHost.has(row.host_id)) osByHost.set(row.host_id, []);
+    osByHost.get(row.host_id).push({
+      name: row.name,
+      accuracy: row.accuracy,
+      line: row.line,
+      vendor: row.vendor,
+      family: row.family,
+      gen: row.gen,
+      type: row.type,
+    });
+  }
+  for (const h of hosts) {
+    h.ports = portsByHost.get(h.id) || [];
+    h.os_matches = osByHost.get(h.id) || [];
+  }
   scan.hosts = hosts;
   return scan;
 }
@@ -195,6 +261,11 @@ function saveHostPorts(hostId, ports) {
   return stmts.getPortsByHost.all(hostId);
 }
 
+function saveHostOsMatches(hostId, matches) {
+  replaceHostOsMatchesTx(hostId, matches);
+  return stmts.getOsMatchesByHost.all(hostId);
+}
+
 module.exports = {
   startScan,
   finishScan,
@@ -204,4 +275,5 @@ module.exports = {
   deleteScan,
   getHost,
   saveHostPorts,
+  saveHostOsMatches,
 };
