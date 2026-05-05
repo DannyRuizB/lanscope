@@ -4,7 +4,7 @@
 
 ![LanScope on the dark + terminal-green theme: a 192.168.1.0/24 scan result with two hosts expanded. 192.168.1.162 (ASUSTek MAC) is OS-fingerprinted and shows a stack of Windows matches led by "Microsoft Windows 10 1803" at 97% accuracy, then 1903, 11, 1809, 1909, Server 2019 and 20H2 with descending accuracy — its OS button reads "[W] Windows · ▾". 192.168.1.184 (danny.local) is detected as "Linux 5.0 - 6.2" at 100% accuracy with the [L] Linux chip, and its ports sub-row shows 80/tcp open running nginx 1.24.0, 3000/tcp filtered ppp, 7070/tcp open realserver. Other hosts in the table have "Scan OS" and "Scan ports" buttons ready to fire. Family chips encode OS family in a single mono letter inside a green box.](screenshots/screenshot.png)
 
-🚧 Work in progress — v0.3.0.
+🚧 Work in progress — v0.3.1.
 
 ---
 
@@ -31,11 +31,18 @@ docker compose up -d
 
 Type a CIDR in the **Target** input (for example `192.168.1.0/24`) and hit **Scan now**. Hosts that respond to the ping sweep appear in the table with their IP, MAC, vendor (looked up from the OUI prefix by `nmap`) and reverse-DNS hostname when available. Every scan is saved in the **History** sidebar — click any past scan to reload it.
 
-### Port scan (v0.2)
+### Port scan (v0.2, refined in v0.3.1)
 
-Each host row has a **Scan ports** button in the *Ports* column. Click it and LanScope runs `nmap --top-ports 100 -sS -sV` against that single host. Results appear in an expandable sub-table showing `port/protocol`, state (open / closed / filtered, color-coded), service name, product and version when nmap can detect them.
+Each host row has a **Scan ports** button in the *Ports* column. Click it and LanScope runs `nmap --top-ports 100 -sT -sV --version-light --reason` against that single host. Using a full TCP-connect scan (`-sT`) instead of SYN means an `open` result is a *real* completed handshake — no ambiguous `filtered` middle ground. The UI reflects this with two binary states:
 
-Once a host has been port-scanned the button changes to `N open · ▾` and toggles the sub-panel open / closed without re-scanning. Port results are persisted in the database with the host, so they survive a restart.
+- 🟢 **`accessible (TCP)`** — handshake completed, something is listening on that port.
+- ⚪ **`not available`** — anything else (closed, filtered, no response, refused…).
+
+Below each pill the **technical reason** is shown in small text (`syn-ack`, `conn-refused`, `no-response`…) so you keep the underlying detail.
+
+If nmap identifies the service as web (`http`, `https`, `http-alt`, `http-proxy`, `https-alt`…), the port number itself becomes a clickable green link that opens `http://ip:port` (or `https`) in a new tab. Non-web services stay as plain text — *accessible (TCP)* doesn't mean a browser will get a useful response, just that the port is alive.
+
+Once a host has been port-scanned the button changes to `N accessible · ▾` and toggles the sub-panel open / closed without re-scanning. Port results are persisted in the database with the host, so they survive a restart.
 
 ### OS fingerprint (v0.3)
 
@@ -49,7 +56,7 @@ OS sub-row and ports sub-row are independent — you can have both expanded for 
 
 - The container runs a small Express server on port `3030`.
 - `POST /api/scan` shells out to `nmap -sn -T4 -oX - <cidr>`. Output is XML, parsed in JavaScript with `fast-xml-parser`.
-- `POST /api/hosts/:id/portscan` shells out to `nmap --top-ports 100 -sS -sV -T4 --version-light -oX - <ip>` and persists the result.
+- `POST /api/hosts/:id/portscan` shells out to `nmap --top-ports 100 -sT -sV -T4 --version-light --reason -oX - <ip>` and persists the result, including each port's `state_reason` from nmap.
 - `POST /api/hosts/:id/osscan` shells out to `nmap -O --osscan-guess -T4 -oX - <ip>`. Every `osmatch` reported is stored, including its first `osclass` (vendor / family / generation / device type).
 - Hosts, ports and OS matches are stored in a SQLite database mounted on a Docker named volume (`lanscope-data`), so scan history survives restarts.
 - The compose file uses `network_mode: host` and adds the `NET_RAW` and `NET_ADMIN` capabilities to the container — without those, `nmap` can't open the raw sockets that the ping sweep, SYN scan and OS fingerprint need.
@@ -67,7 +74,8 @@ LanScope's direction: cover as many `nmap` options as possible behind a visual U
 - [x] **v0.1** — CIDR ping sweep. Web UI with a "Scan now" form, results table (IP, MAC, vendor, hostname). Persisted scan history in SQLite.
 - [x] **v0.2** — Per-host TCP port scan (top 100 ports) with detected service names, products and versions. Expandable sub-table per host, results persisted alongside the host.
 - [x] **v0.3** — OS fingerprint (`nmap -O --osscan-guess`). Per-host OS column with one-letter family chip, expandable sub-table with every candidate match ranked by accuracy.
-- [ ] **v0.3.x** — Configurable port scan: top-N variable, port range (`-p`), timing (`-T0..T5`), connect vs SYN (`-sT` / `-sS`).
+- [x] **v0.3.1** — Port scan switched to full TCP connect (`-sT`) for confirmed reachability. Binary `accessible (TCP)` / `not available` pills with the underlying nmap reason in small text. Web services (`http`, `https`, …) become clickable links to `http(s)://ip:port`.
+- [ ] **v0.3.x** — Configurable port scan: top-N variable, port range (`-p`), timing (`-T0..T5`), connect vs SYN toggle.
 - [ ] **v0.4** — UDP scan (`-sU`) on its own slower flow.
 - [ ] **v0.5** — NSE scripts: `-sC` defaults plus `--script <category>` with an allowlist (banner grabbing, vuln, safe…).
 - [ ] **v0.6** — Advanced host discovery: `-Pn`, ICMP / TCP / ARP ping types.

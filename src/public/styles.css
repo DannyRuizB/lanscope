@@ -422,6 +422,26 @@ tr.host-detail td {
   color: var(--warn);
   border: 1px solid rgba(245, 158, 11, 0.35);
 }
+.state-unavailable {
+  background: rgba(100, 116, 139, 0.18);
+  color: var(--text-mute);
+  border: 1px solid var(--border-strong);
+}
+.state-reason {
+  margin-top: 3px;
+  font-size: 10px;
+  color: var(--text-mute);
+  letter-spacing: 0.4px;
+}
+.port-link {
+  color: var(--accent);
+  text-decoration: none;
+  border-bottom: 1px dashed transparent;
+}
+.port-link:hover {
+  border-bottom-color: var(--accent);
+  text-decoration: none;
+}
 .ports-empty {
   padding: 18px 28px;
   color: var(--text-mute);

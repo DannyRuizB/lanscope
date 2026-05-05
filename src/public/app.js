@@ -116,7 +116,7 @@ async function loadScan(id) {
 function portsButtonLabel(host) {
   if (!host.portscanned_at) return "Scan ports";
   const open = (host.ports || []).filter((p) => p.state === "open").length;
-  return `${open} open · ▾`;
+  return `${open} accessible · ▾`;
 }
 
 function renderPortsButton(host) {
@@ -204,17 +204,56 @@ function renderOsTable(host) {
     </table>`;
 }
 
+function renderPortStateCell(p) {
+  const accessible = p.state === "open";
+  const pillClass = accessible ? "state-open" : "state-unavailable";
+  const label = accessible ? "accessible (TCP)" : "not available";
+  const reason = p.state_reason || p.state;
+  return `
+    <span class="state-pill ${pillClass}">${label}</span>
+    <div class="state-reason">${escapeHtml(reason)}</div>`;
+}
+
+const HTTP_SERVICES = new Set([
+  "http",
+  "http-alt",
+  "http-proxy",
+  "http-mgmt",
+  "http-rpc-epmap",
+]);
+const HTTPS_SERVICES = new Set([
+  "https",
+  "https-alt",
+  "ssl/http",
+  "ssl/https",
+]);
+
+function portUrl(host, p) {
+  if (!p.service || p.state !== "open") return null;
+  const svc = p.service.toLowerCase();
+  if (HTTP_SERVICES.has(svc)) return `http://${host.ip}:${p.port}`;
+  if (HTTPS_SERVICES.has(svc)) return `https://${host.ip}:${p.port}`;
+  return null;
+}
+
+function renderPortNumCell(host, p) {
+  const label = `${p.port}/${escapeHtml(p.protocol)}`;
+  const url = portUrl(host, p);
+  if (!url) return label;
+  return `<a class="port-link" href="${escapeHtml(url)}" target="_blank" rel="noopener" title="Open ${escapeHtml(url)} in a new tab">${label} ↗</a>`;
+}
+
 function renderPortsTable(host) {
   const ports = host.ports || [];
   if (!ports.length) {
-    return `<div class="ports-empty">No open ports detected on top 100.</div>`;
+    return `<div class="ports-empty">No accessible ports detected on top 100.</div>`;
   }
   const rows = ports
     .map(
       (p) => `
       <tr>
-        <td class="port-num">${p.port}/${escapeHtml(p.protocol)}</td>
-        <td><span class="state-pill state-${escapeHtml(p.state)}">${escapeHtml(p.state)}</span></td>
+        <td class="port-num">${renderPortNumCell(host, p)}</td>
+        <td>${renderPortStateCell(p)}</td>
         <td class="${p.service ? "" : "muted"}">${escapeHtml(p.service) || "—"}</td>
         <td class="${p.product ? "" : "muted"}">${escapeHtml(p.product) || "—"}</td>
         <td class="${p.version ? "" : "muted"}">${escapeHtml(p.version) || "—"}</td>

@@ -100,6 +100,7 @@ function parsePorts(xml) {
       port: parseInt(p.portid, 10),
       protocol: p.protocol || "tcp",
       state: p.state?.state || "unknown",
+      state_reason: p.state?.reason || null,
       service: svc.name || null,
       product: svc.product || null,
       version: svc.version || null,
@@ -111,19 +112,24 @@ function parsePorts(xml) {
 function runPortScan(ip) {
   return new Promise((resolve, reject) => {
     // --top-ports 100: nmap's most common 100 TCP ports
-    // -sS: SYN scan (default when running as root, explicit for clarity)
+    // -sT: full TCP connect scan — open means a real handshake completed,
+    //      so users get a binary "accessible / not available" answer instead
+    //      of the SYN-scan ambiguity (filtered ≠ confirmed unreachable).
     // -sV: service/version detection
     // -T4: faster timing (still polite enough for a LAN)
     // --version-light: faster service probes (skip rare ones)
+    // --reason: include why nmap classified each port (syn-ack, conn-refused,
+    //           no-response…) so the UI can show the technical detail.
     execFile(
       "nmap",
       [
         "--top-ports",
         "100",
-        "-sS",
+        "-sT",
         "-sV",
         "-T4",
         "--version-light",
+        "--reason",
         "-oX",
         "-",
         ip,

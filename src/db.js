@@ -76,6 +76,9 @@ if (!columnExists("hosts", "portscanned_at")) {
 if (!columnExists("hosts", "osscanned_at")) {
   db.exec(`ALTER TABLE hosts ADD COLUMN osscanned_at INTEGER`);
 }
+if (!columnExists("host_ports", "state_reason")) {
+  db.exec(`ALTER TABLE host_ports ADD COLUMN state_reason TEXT`);
+}
 
 const stmts = {
   insertScan: db.prepare(
@@ -110,15 +113,15 @@ const stmts = {
   deleteScan: db.prepare(`DELETE FROM scans WHERE id = ?`),
   clearHostPorts: db.prepare(`DELETE FROM host_ports WHERE host_id = ?`),
   insertHostPort: db.prepare(
-    `INSERT INTO host_ports (host_id, port, protocol, state, service, product, version, extra)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+    `INSERT INTO host_ports (host_id, port, protocol, state, state_reason, service, product, version, extra)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
   ),
   getPortsByHost: db.prepare(
-    `SELECT port, protocol, state, service, product, version, extra
+    `SELECT port, protocol, state, state_reason, service, product, version, extra
        FROM host_ports WHERE host_id = ? ORDER BY protocol, port`,
   ),
   getPortsByScan: db.prepare(
-    `SELECT host_id, port, protocol, state, service, product, version, extra
+    `SELECT host_id, port, protocol, state, state_reason, service, product, version, extra
        FROM host_ports WHERE host_id IN (SELECT id FROM hosts WHERE scan_id = ?)
        ORDER BY host_id, protocol, port`,
   ),
@@ -166,6 +169,7 @@ const replaceHostPortsTx = db.transaction((hostId, ports) => {
       p.port,
       p.protocol || "tcp",
       p.state,
+      p.state_reason || null,
       p.service || null,
       p.product || null,
       p.version || null,
@@ -221,6 +225,7 @@ function getScan(id) {
       port: row.port,
       protocol: row.protocol,
       state: row.state,
+      state_reason: row.state_reason,
       service: row.service,
       product: row.product,
       version: row.version,
