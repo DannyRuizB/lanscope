@@ -1,7 +1,13 @@
 const path = require("node:path");
 const express = require("express");
 const db = require("./db");
-const { validateCidr, runPingSweep, runPortScan, runOsScan } = require("./scanner");
+const {
+  validateCidr,
+  validateTiming,
+  runPingSweep,
+  runPortScan,
+  runOsScan,
+} = require("./scanner");
 
 const PORT = parseInt(process.env.PORT, 10) || 3030;
 
@@ -53,8 +59,11 @@ app.post("/api/hosts/:id/portscan", async (req, res) => {
   if (!host) return res.status(404).json({ error: "host not found" });
   if (host.status !== "up") return res.status(400).json({ error: "host is not up" });
 
+  const timing = validateTiming(req.body?.timing);
+  if (timing.error) return res.status(400).json({ error: timing.error });
+
   try {
-    const ports = await runPortScan(host.ip);
+    const ports = await runPortScan(host.ip, { timing: timing.value });
     const saved = db.saveHostPorts(id, ports);
     const refreshed = db.getHost(id);
     res.json({

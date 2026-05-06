@@ -44,6 +44,10 @@ If nmap identifies the service as web (`http`, `https`, `http-alt`, `http-proxy`
 
 Once a host has been port-scanned the button changes to `N accessible · ▾` and toggles the sub-panel open / closed without re-scanning. Port results are persisted in the database with the host, so they survive a restart.
 
+### Advanced options
+
+A collapsible **Advanced options** panel sits below the *Scan now* form. The first option exposed there is **port scan timing**: nmap's `-T0..T5` template, defaulting to `T4` (Aggressive). Lower values are slower and stealthier (`T0` Paranoid, `T1` Sneaky, `T2` Polite); higher values are faster but more likely to lose results on flaky networks (`T5` Insane). The chosen value applies to the next port scan you trigger.
+
 ### OS fingerprint (v0.3)
 
 Each host row also has a **Scan OS** button in the *OS* column. Click it and LanScope runs `nmap -O --osscan-guess` against that single host. Results appear in their own expandable sub-table listing every candidate match nmap reports, sorted by accuracy: match name (e.g. *Linux 5.0 - 6.2*, *Microsoft Windows 10 1803*, *Motorola SURFboard 5101 cable modem*), accuracy %, OS family, vendor and device type.
@@ -56,7 +60,7 @@ OS sub-row and ports sub-row are independent — you can have both expanded for 
 
 - The container runs a small Express server on port `3030`.
 - `POST /api/scan` shells out to `nmap -sn -T4 -oX - <cidr>`. Output is XML, parsed in JavaScript with `fast-xml-parser`.
-- `POST /api/hosts/:id/portscan` shells out to `nmap --top-ports 100 -sT -sV -T4 --version-light --reason -oX - <ip>` and persists the result, including each port's `state_reason` from nmap.
+- `POST /api/hosts/:id/portscan` shells out to `nmap --top-ports 100 -sT -sV -T<n> --version-light --reason -oX - <ip>` (timing `-T4` by default, overridable via the *Advanced options* panel) and persists the result, including each port's `state_reason` from nmap.
 - `POST /api/hosts/:id/osscan` shells out to `nmap -O --osscan-guess -T4 -oX - <ip>`. Every `osmatch` reported is stored, including its first `osclass` (vendor / family / generation / device type).
 - Hosts, ports and OS matches are stored in a SQLite database mounted on a Docker named volume (`lanscope-data`), so scan history survives restarts.
 - The compose file uses `network_mode: host` and adds the `NET_RAW` and `NET_ADMIN` capabilities to the container — without those, `nmap` can't open the raw sockets that the ping sweep, SYN scan and OS fingerprint need.

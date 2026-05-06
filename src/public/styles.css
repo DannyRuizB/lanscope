@@ -257,6 +257,75 @@ button.ghost.danger:hover {
   color: var(--danger);
 }
 
+/* Advanced options */
+.advanced {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  margin-bottom: 22px;
+  margin-top: -10px;
+}
+.advanced > summary {
+  cursor: pointer;
+  list-style: none;
+  padding: 10px 16px;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 1.5px;
+  color: var(--text-mute);
+  user-select: none;
+}
+.advanced > summary::-webkit-details-marker {
+  display: none;
+}
+.advanced > summary::before {
+  content: "▸ ";
+  color: var(--accent);
+}
+.advanced[open] > summary::before {
+  content: "▾ ";
+}
+.advanced > summary:hover {
+  color: var(--text-strong);
+}
+.advanced-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: 14px;
+  padding: 4px 16px 14px;
+  border-top: 1px solid var(--border);
+}
+.adv-field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.adv-label {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 1.5px;
+  color: var(--text-mute);
+}
+.adv-field select {
+  padding: 8px 10px;
+  background: var(--bg);
+  border: 1px solid var(--border-strong);
+  border-radius: 4px;
+  color: var(--text-strong);
+  font-family: var(--mono);
+  font-size: 13px;
+  cursor: pointer;
+}
+.adv-field select:focus {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-soft);
+}
+.adv-hint {
+  font-size: 11px;
+  color: var(--text-mute);
+}
+
 /* Results */
 .results-header {
   display: flex;

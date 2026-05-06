@@ -43,6 +43,24 @@
           <div id="scan-status" class="status" hidden></div>
         </form>
 
+        <details class="advanced">
+          <summary>Advanced options</summary>
+          <div class="advanced-grid">
+            <label class="adv-field" for="adv-timing">
+              <span class="adv-label">Port scan timing</span>
+              <select id="adv-timing" name="adv-timing">
+                <option value="T0">T0 — Paranoid</option>
+                <option value="T1">T1 — Sneaky</option>
+                <option value="T2">T2 — Polite</option>
+                <option value="T3">T3 — Normal</option>
+                <option value="T4" selected>T4 — Aggressive (default)</option>
+                <option value="T5">T5 — Insane</option>
+              </select>
+              <span class="adv-hint">Lower = slower &amp; stealthier. Higher = faster, may miss results.</span>
+            </label>
+          </div>
+        </details>
+
         <div class="results">
           <div id="results-header" class="results-header" hidden>
             <div>
@@ -75,7 +93,7 @@
     </main>
 
     <footer class="bottombar">
-      <span>v0.3.1</span>
+      <span>v0.3.2</span>
       <span>·</span>
       <span>MIT</span>
       <span>·</span>

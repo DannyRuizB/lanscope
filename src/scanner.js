@@ -21,6 +21,17 @@ function validateIpv4(ip) {
   return null;
 }
 
+const TIMING_VALUES = new Set(["T0", "T1", "T2", "T3", "T4", "T5"]);
+
+// timing is optional; null/undefined means "use scan default".
+// Returns { value: "T4" | null, error: string | null }.
+function validateTiming(t) {
+  if (t === undefined || t === null || t === "") return { value: null, error: null };
+  if (typeof t !== "string") return { value: null, error: "timing must be a string" };
+  if (!TIMING_VALUES.has(t)) return { value: null, error: "timing must be one of T0..T5" };
+  return { value: t, error: null };
+}
+
 const xmlParser = new XMLParser({
   ignoreAttributes: false,
   attributeNamePrefix: "",
@@ -109,14 +120,17 @@ function parsePorts(xml) {
   });
 }
 
-function runPortScan(ip) {
+const PORTSCAN_DEFAULT_TIMING = "T4";
+
+function runPortScan(ip, opts = {}) {
+  const timing = opts.timing || PORTSCAN_DEFAULT_TIMING;
   return new Promise((resolve, reject) => {
     // --top-ports 100: nmap's most common 100 TCP ports
     // -sT: full TCP connect scan — open means a real handshake completed,
     //      so users get a binary "accessible / not available" answer instead
     //      of the SYN-scan ambiguity (filtered ≠ confirmed unreachable).
     // -sV: service/version detection
-    // -T4: faster timing (still polite enough for a LAN)
+    // -T<n>: timing template (T0 paranoid … T5 insane). Default T4.
     // --version-light: faster service probes (skip rare ones)
     // --reason: include why nmap classified each port (syn-ack, conn-refused,
     //           no-response…) so the UI can show the technical detail.
@@ -127,7 +141,7 @@ function runPortScan(ip) {
         "100",
         "-sT",
         "-sV",
-        "-T4",
+        `-${timing}`,
         "--version-light",
         "--reason",
         "-oX",
@@ -197,6 +211,7 @@ function runOsScan(ip) {
 module.exports = {
   validateCidr,
   validateIpv4,
+  validateTiming,
   runPingSweep,
   runPortScan,
   runOsScan,
