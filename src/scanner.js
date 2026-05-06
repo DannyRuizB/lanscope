@@ -32,6 +32,47 @@ function validateTiming(t) {
   return { value: t, error: null };
 }
 
+// Range spec: comma-separated list of `N` or `N-M`, no spaces, no other chars.
+// Each port in [1,65535], N<=M, max 100 tokens to keep argv sane.
+const RANGE_SPEC_RE = /^(\d+(-\d+)?)(,\d+(-\d+)?)*$/;
+const PORTS_DEFAULT_ARGS = ["--top-ports", "100"];
+
+// ports is optional; null/undefined means default top-100.
+// Accepts { mode: "top", value: 1..65535 } or { mode: "range", value: "<spec>" }.
+// Returns { args: ["--top-ports","N"] | ["-p","<spec>"], error: string | null }.
+function validatePortsSpec(ports) {
+  if (ports === undefined || ports === null) return { args: PORTS_DEFAULT_ARGS, error: null };
+  if (typeof ports !== "object") return { args: null, error: "ports must be an object" };
+
+  const { mode, value } = ports;
+  if (mode === "top") {
+    const n = typeof value === "number" ? value : parseInt(value, 10);
+    if (!Number.isInteger(n) || n < 1 || n > 65535) {
+      return { args: null, error: "top-N must be an integer 1..65535" };
+    }
+    return { args: ["--top-ports", String(n)], error: null };
+  }
+
+  if (mode === "range") {
+    if (typeof value !== "string" || !RANGE_SPEC_RE.test(value)) {
+      return { args: null, error: "range must be like 80, 1-1024, or 22,80,443,8000-8100" };
+    }
+    const tokens = value.split(",");
+    if (tokens.length > 100) return { args: null, error: "range has too many tokens (max 100)" };
+    for (const tok of tokens) {
+      const [a, b] = tok.split("-").map((s) => parseInt(s, 10));
+      const lo = a;
+      const hi = b === undefined ? a : b;
+      if (lo < 1 || hi > 65535 || lo > hi) {
+        return { args: null, error: `invalid port token: ${tok}` };
+      }
+    }
+    return { args: ["-p", value], error: null };
+  }
+
+  return { args: null, error: "ports.mode must be 'top' or 'range'" };
+}
+
 const xmlParser = new XMLParser({
   ignoreAttributes: false,
   attributeNamePrefix: "",
@@ -124,8 +165,10 @@ const PORTSCAN_DEFAULT_TIMING = "T4";
 
 function runPortScan(ip, opts = {}) {
   const timing = opts.timing || PORTSCAN_DEFAULT_TIMING;
+  const portsArgs = opts.portsArgs || PORTS_DEFAULT_ARGS;
   return new Promise((resolve, reject) => {
-    // --top-ports 100: nmap's most common 100 TCP ports
+    // portsArgs: either ["--top-ports", N] (nmap's most common N TCP ports)
+    //            or ["-p", "<spec>"] (explicit comma/range list).
     // -sT: full TCP connect scan — open means a real handshake completed,
     //      so users get a binary "accessible / not available" answer instead
     //      of the SYN-scan ambiguity (filtered ≠ confirmed unreachable).
@@ -137,8 +180,7 @@ function runPortScan(ip, opts = {}) {
     execFile(
       "nmap",
       [
-        "--top-ports",
-        "100",
+        ...portsArgs,
         "-sT",
         "-sV",
         `-${timing}`,
@@ -212,6 +254,7 @@ module.exports = {
   validateCidr,
   validateIpv4,
   validateTiming,
+  validatePortsSpec,
   runPingSweep,
   runPortScan,
   runOsScan,

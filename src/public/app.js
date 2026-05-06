@@ -15,7 +15,30 @@ const els = {
   body: $("#results-body"),
   deleteBtn: $("#delete-scan"),
   advTiming: $("#adv-timing"),
+  advPortsTop: $("#adv-ports-top"),
+  advPortsRange: $("#adv-ports-range"),
 };
+
+function currentPortsSpec() {
+  const mode = document.querySelector('input[name="adv-ports-mode"]:checked')?.value || "top";
+  if (mode === "range") {
+    return { mode: "range", value: els.advPortsRange?.value.trim() || "" };
+  }
+  const n = parseInt(els.advPortsTop?.value, 10);
+  return { mode: "top", value: Number.isInteger(n) ? n : 100 };
+}
+
+function bindPortsModeToggle() {
+  const radios = document.querySelectorAll('input[name="adv-ports-mode"]');
+  const sync = () => {
+    const mode = document.querySelector('input[name="adv-ports-mode"]:checked')?.value || "top";
+    if (els.advPortsTop) els.advPortsTop.disabled = mode !== "top";
+    if (els.advPortsRange) els.advPortsRange.disabled = mode !== "range";
+  };
+  radios.forEach((r) => r.addEventListener("change", sync));
+  sync();
+}
+bindPortsModeToggle();
 
 let activeScanId = null;
 
@@ -362,10 +385,11 @@ async function runPortscan(hostId) {
   btn.textContent = "Scanning…";
   try {
     const timing = els.advTiming?.value || "T4";
+    const ports = currentPortsSpec();
     const data = await fetchJson(`/api/hosts/${hostId}/portscan`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ timing }),
+      body: JSON.stringify({ timing, ports }),
     });
     if (lastScan) {
       const h = lastScan.hosts.find((x) => x.id === hostId);

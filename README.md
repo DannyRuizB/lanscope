@@ -46,7 +46,10 @@ Once a host has been port-scanned the button changes to `N accessible · ▾` an
 
 ### Advanced options
 
-A collapsible **Advanced options** panel sits below the *Scan now* form. The first option exposed there is **port scan timing**: nmap's `-T0..T5` template, defaulting to `T4` (Aggressive). Lower values are slower and stealthier (`T0` Paranoid, `T1` Sneaky, `T2` Polite); higher values are faster but more likely to lose results on flaky networks (`T5` Insane). The chosen value applies to the next port scan you trigger.
+A collapsible **Advanced options** panel sits below the *Scan now* form. The chosen values apply to the next port scan you trigger.
+
+- **Port scan timing** — nmap's `-T0..T5` template, default `T4` (Aggressive). Lower values are slower and stealthier (`T0` Paranoid, `T1` Sneaky, `T2` Polite); higher values are faster but more likely to lose results on flaky networks (`T5` Insane).
+- **Ports** — pick between *Top N* (the default, runs `nmap --top-ports N` over nmap's most common TCP ports — 10 / 100 / 1000 / 5000) and *Range* (an explicit `-p` spec like `80`, `1-1024` or `22,80,443,8000-8100`). Range input is validated server-side as a strict regex before reaching nmap, with each token checked against `1 ≤ N ≤ M ≤ 65535`.
 
 ### OS fingerprint (v0.3)
 
@@ -60,7 +63,7 @@ OS sub-row and ports sub-row are independent — you can have both expanded for 
 
 - The container runs a small Express server on port `3030`.
 - `POST /api/scan` shells out to `nmap -sn -T4 -oX - <cidr>`. Output is XML, parsed in JavaScript with `fast-xml-parser`.
-- `POST /api/hosts/:id/portscan` shells out to `nmap --top-ports 100 -sT -sV -T<n> --version-light --reason -oX - <ip>` (timing `-T4` by default, overridable via the *Advanced options* panel) and persists the result, including each port's `state_reason` from nmap.
+- `POST /api/hosts/:id/portscan` shells out to `nmap (--top-ports N | -p <spec>) -sT -sV -T<n> --version-light --reason -oX - <ip>` and persists the result, including each port's `state_reason` from nmap. Defaults are `--top-ports 100 -T4`; both ports selection and timing are overridable via the *Advanced options* panel and validated server-side before reaching `execFile`.
 - `POST /api/hosts/:id/osscan` shells out to `nmap -O --osscan-guess -T4 -oX - <ip>`. Every `osmatch` reported is stored, including its first `osclass` (vendor / family / generation / device type).
 - Hosts, ports and OS matches are stored in a SQLite database mounted on a Docker named volume (`lanscope-data`), so scan history survives restarts.
 - The compose file uses `network_mode: host` and adds the `NET_RAW` and `NET_ADMIN` capabilities to the container — without those, `nmap` can't open the raw sockets that the ping sweep, SYN scan and OS fingerprint need.
@@ -70,6 +73,7 @@ OS sub-row and ports sub-row are independent — you can have both expanded for 
 - **Linux only.** `network_mode: host` doesn't behave the same on Docker Desktop for macOS / Windows: the container would only see Docker's internal network, not your real LAN.
 - **Same subnet.** LanScope scans whatever subnet the host machine can reach. To scan a remote network you'd need a VPN or to run LanScope on a host inside that network.
 - **Not a security scanner.** No exploit detection, no CVE matching. If you need that, use Nessus, OpenVAS or similar.
+- **Large port ranges with mostly-closed ports show only the interesting ones.** When more than 25 ports share the same state (e.g. `closed`), nmap collapses them into an `<extraports>` summary in its XML output and only emits individual `<port>` entries for the ones that stand out (typically `open`). LanScope currently shows just the individual ports, so a `Range` of `1-65535` against a sparsely-listening host may render as a short list. The handful of *accessible* ports you do see are still accurate.
 
 ## Roadmap
 
@@ -79,7 +83,9 @@ LanScope's direction: cover as many `nmap` options as possible behind a visual U
 - [x] **v0.2** — Per-host TCP port scan (top 100 ports) with detected service names, products and versions. Expandable sub-table per host, results persisted alongside the host.
 - [x] **v0.3** — OS fingerprint (`nmap -O --osscan-guess`). Per-host OS column with one-letter family chip, expandable sub-table with every candidate match ranked by accuracy.
 - [x] **v0.3.1** — Port scan switched to full TCP connect (`-sT`) for confirmed reachability. Binary `accessible (TCP)` / `not available` pills with the underlying nmap reason in small text. Web services (`http`, `https`, …) become clickable links to `http(s)://ip:port`.
-- [ ] **v0.3.x** — Configurable port scan: top-N variable, port range (`-p`), timing (`-T0..T5`), connect vs SYN toggle.
+- [x] **v0.3.2** — Collapsible **Advanced options** panel, with timing template `-T0..T5` (default `T4`) configurable per port scan.
+- [x] **v0.3.3** — *Ports* selector in Advanced options: *Top N* (10 / 100 / 1000 / 5000) or explicit *Range* (`-p` spec). Strict server-side validation.
+- [ ] **v0.3.x** — Connect vs SYN toggle (interacts with the binary pills introduced in v0.3.1, so handled with care).
 - [ ] **v0.4** — UDP scan (`-sU`) on its own slower flow.
 - [ ] **v0.5** — NSE scripts: `-sC` defaults plus `--script <category>` with an allowlist (banner grabbing, vuln, safe…).
 - [ ] **v0.6** — Advanced host discovery: `-Pn`, ICMP / TCP / ARP ping types.

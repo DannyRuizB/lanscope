@@ -4,6 +4,7 @@ const db = require("./db");
 const {
   validateCidr,
   validateTiming,
+  validatePortsSpec,
   runPingSweep,
   runPortScan,
   runOsScan,
@@ -62,8 +63,14 @@ app.post("/api/hosts/:id/portscan", async (req, res) => {
   const timing = validateTiming(req.body?.timing);
   if (timing.error) return res.status(400).json({ error: timing.error });
 
+  const portsSpec = validatePortsSpec(req.body?.ports);
+  if (portsSpec.error) return res.status(400).json({ error: portsSpec.error });
+
   try {
-    const ports = await runPortScan(host.ip, { timing: timing.value });
+    const ports = await runPortScan(host.ip, {
+      timing: timing.value,
+      portsArgs: portsSpec.args,
+    });
     const saved = db.saveHostPorts(id, ports);
     const refreshed = db.getHost(id);
     res.json({

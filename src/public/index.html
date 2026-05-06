@@ -58,6 +58,38 @@
               </select>
               <span class="adv-hint">Lower = slower &amp; stealthier. Higher = faster, may miss results.</span>
             </label>
+
+            <div class="adv-field">
+              <span class="adv-label">Ports</span>
+              <div class="adv-ports-row">
+                <label class="adv-radio">
+                  <input type="radio" name="adv-ports-mode" value="top" checked />
+                  <span>Top N</span>
+                </label>
+                <select id="adv-ports-top" name="adv-ports-top">
+                  <option value="10">10</option>
+                  <option value="100" selected>100 (default)</option>
+                  <option value="1000">1000</option>
+                  <option value="5000">5000</option>
+                </select>
+              </div>
+              <div class="adv-ports-row">
+                <label class="adv-radio">
+                  <input type="radio" name="adv-ports-mode" value="range" />
+                  <span>Range</span>
+                </label>
+                <input
+                  id="adv-ports-range"
+                  name="adv-ports-range"
+                  type="text"
+                  placeholder="22,80,443,8000-8100"
+                  autocomplete="off"
+                  spellcheck="false"
+                  disabled
+                />
+              </div>
+              <span class="adv-hint">Top = nmap's most common N TCP ports. Range = explicit list.</span>
+            </div>
           </div>
         </details>
 
@@ -93,7 +125,7 @@
     </main>
 
     <footer class="bottombar">
-      <span>v0.3.2</span>
+      <span>v0.3.3</span>
       <span>·</span>
       <span>MIT</span>
       <span>·</span>

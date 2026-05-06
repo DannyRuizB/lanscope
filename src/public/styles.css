@@ -326,6 +326,69 @@ button.ghost.danger:hover {
   color: var(--text-mute);
 }
 
+.adv-ports-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.adv-ports-row > select,
+.adv-ports-row > input[type="text"] {
+  flex: 1;
+  padding: 8px 10px;
+  background: var(--bg);
+  border: 1px solid var(--border-strong);
+  border-radius: 4px;
+  color: var(--text-strong);
+  font-family: var(--mono);
+  font-size: 13px;
+}
+.adv-ports-row > select:focus,
+.adv-ports-row > input[type="text"]:focus {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-soft);
+}
+.adv-ports-row > select:disabled,
+.adv-ports-row > input[type="text"]:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+.adv-radio {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--text);
+  cursor: pointer;
+  min-width: 80px;
+}
+.adv-radio input[type="radio"] {
+  appearance: none;
+  -webkit-appearance: none;
+  width: 14px;
+  height: 14px;
+  border: 1px solid var(--border-strong);
+  border-radius: 50%;
+  background: var(--bg);
+  cursor: pointer;
+  position: relative;
+  margin: 0;
+}
+.adv-radio input[type="radio"]:checked {
+  border-color: var(--accent);
+}
+.adv-radio input[type="radio"]:checked::after {
+  content: "";
+  position: absolute;
+  inset: 3px;
+  border-radius: 50%;
+  background: var(--accent);
+}
+.adv-radio input[type="radio"]:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 3px var(--accent-soft);
+}
+
 /* Results */
 .results-header {
   display: flex;
