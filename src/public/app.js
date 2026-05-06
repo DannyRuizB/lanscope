@@ -18,6 +18,8 @@ const els = {
   advScanType: $("#adv-scantype"),
   advPortsTop: $("#adv-ports-top"),
   advPortsRange: $("#adv-ports-range"),
+  advNseDefault: $("#adv-nse-default"),
+  advNseSafe: $("#adv-nse-safe"),
 };
 
 function currentPortsSpec() {
@@ -27,6 +29,13 @@ function currentPortsSpec() {
   }
   const n = parseInt(els.advPortsTop?.value, 10);
   return { mode: "top", value: Number.isInteger(n) ? n : 100 };
+}
+
+function currentScriptsSpec() {
+  const out = [];
+  if (els.advNseDefault?.checked) out.push("default");
+  if (els.advNseSafe?.checked) out.push("safe");
+  return out;
 }
 
 function bindPortsModeToggle() {
@@ -335,24 +344,49 @@ function renderUdpPortsTable(host) {
     </table>`;
 }
 
+function renderScriptBlock(s) {
+  return `
+    <div class="script-row">
+      <span class="script-id">${escapeHtml(s.script_id)}</span>
+      <pre class="script-output">${escapeHtml(s.output || "")}</pre>
+    </div>`;
+}
+
+function renderHostScriptsBlock(host) {
+  const scripts = host.host_scripts || [];
+  if (!scripts.length) return "";
+  return `
+    <div class="host-scripts">
+      <div class="host-scripts-title">Host scripts (${scripts.length})</div>
+      ${scripts.map(renderScriptBlock).join("")}
+    </div>`;
+}
+
+function renderPortRow(host, p) {
+  const main = `
+    <tr>
+      <td class="port-num">${renderPortNumCell(host, p)}</td>
+      <td>${renderPortStateCell(p)}</td>
+      <td class="${p.service ? "" : "muted"}">${escapeHtml(p.service) || "—"}</td>
+      <td class="${p.product ? "" : "muted"}">${escapeHtml(p.product) || "—"}</td>
+      <td class="${p.version ? "" : "muted"}">${escapeHtml(p.version) || "—"}</td>
+    </tr>`;
+  const scripts = p.scripts || [];
+  if (!scripts.length) return main;
+  return `${main}
+    <tr class="port-scripts-row">
+      <td colspan="5">${scripts.map(renderScriptBlock).join("")}</td>
+    </tr>`;
+}
+
 function renderPortsTable(host) {
   const ports = host.ports || [];
-  if (!ports.length) {
+  if (!ports.length && !(host.host_scripts || []).length) {
     return `<div class="ports-empty">No accessible ports detected on top 100.</div>`;
   }
-  const rows = ports
-    .map(
-      (p) => `
-      <tr>
-        <td class="port-num">${renderPortNumCell(host, p)}</td>
-        <td>${renderPortStateCell(p)}</td>
-        <td class="${p.service ? "" : "muted"}">${escapeHtml(p.service) || "—"}</td>
-        <td class="${p.product ? "" : "muted"}">${escapeHtml(p.product) || "—"}</td>
-        <td class="${p.version ? "" : "muted"}">${escapeHtml(p.version) || "—"}</td>
-      </tr>`,
-    )
-    .join("");
+  const rows = ports.map((p) => renderPortRow(host, p)).join("");
   return `
+    ${renderHostScriptsBlock(host)}
     <table class="ports-table">
       <thead>
         <tr><th>Port</th><th>State</th><th>Service</th><th>Product</th><th>Version</th></tr>
@@ -473,15 +507,17 @@ async function runPortscan(hostId) {
     const timing = els.advTiming?.value || "T4";
     const scanType = els.advScanType?.value || "connect";
     const ports = currentPortsSpec();
+    const scripts = currentScriptsSpec();
     const data = await fetchJson(`/api/hosts/${hostId}/portscan`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ timing, scanType, ports }),
+      body: JSON.stringify({ timing, scanType, ports, scripts }),
     });
     if (lastScan) {
       const h = lastScan.hosts.find((x) => x.id === hostId);
       if (h) {
         h.ports = data.ports;
+        h.host_scripts = data.host_scripts || [];
         h.portscanned_at = data.portscanned_at;
       }
     }

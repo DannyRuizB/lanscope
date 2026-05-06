@@ -389,6 +389,58 @@ button.ghost.danger:hover {
   box-shadow: 0 0 0 3px var(--accent-soft);
 }
 
+.adv-checks-row {
+  display: flex;
+  gap: 18px;
+  flex-wrap: wrap;
+}
+.adv-check {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--text);
+  cursor: pointer;
+}
+.adv-check input[type="checkbox"] {
+  appearance: none;
+  -webkit-appearance: none;
+  width: 14px;
+  height: 14px;
+  border: 1px solid var(--border-strong);
+  border-radius: 3px;
+  background: var(--bg);
+  cursor: pointer;
+  position: relative;
+  margin: 0;
+}
+.adv-check input[type="checkbox"]:checked {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+}
+.adv-check input[type="checkbox"]:checked::after {
+  content: "✓";
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  font-size: 10px;
+  color: var(--accent);
+  font-weight: 700;
+}
+.adv-check input[type="checkbox"]:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 3px var(--accent-soft);
+}
+.adv-hint code {
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  padding: 0 4px;
+  font-size: 10px;
+  color: var(--text);
+}
+
 /* Results */
 .results-header {
   display: flex;
@@ -594,6 +646,58 @@ tr.host-detail td {
   color: var(--text-mute);
   font-style: italic;
   font-size: 12px;
+}
+
+/* NSE script output blocks */
+.host-scripts {
+  padding: 14px 28px 4px;
+  border-bottom: 1px solid var(--border);
+}
+.host-scripts-title {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 1.2px;
+  color: var(--text-mute);
+  font-weight: 600;
+  margin-bottom: 8px;
+}
+.script-row {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  margin-bottom: 8px;
+  overflow: hidden;
+}
+.script-id {
+  display: block;
+  padding: 6px 10px;
+  background: var(--surface-2);
+  border-bottom: 1px solid var(--border);
+  font-size: 11px;
+  color: var(--accent);
+  letter-spacing: 0.4px;
+}
+.script-output {
+  padding: 8px 12px;
+  margin: 0;
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--text);
+  white-space: pre-wrap;
+  word-break: break-word;
+  line-height: 1.4;
+}
+.ports-table tr.port-scripts-row td {
+  padding: 6px 28px 12px;
+  background: transparent;
+  border-bottom: 1px solid var(--border);
+}
+.port-scripts-row .script-row {
+  margin-left: 100px; /* line up under the port content, past port-num column */
+  margin-bottom: 6px;
+}
+.port-scripts-row .script-row:last-child {
+  margin-bottom: 0;
 }
 
 /* Bottombar */

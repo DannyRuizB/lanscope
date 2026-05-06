@@ -99,6 +99,21 @@
               </div>
               <span class="adv-hint">Top = nmap's most common N TCP ports. Range = explicit list.</span>
             </div>
+
+            <div class="adv-field">
+              <span class="adv-label">NSE scripts</span>
+              <div class="adv-checks-row">
+                <label class="adv-check">
+                  <input type="checkbox" id="adv-nse-default" name="adv-nse-default" />
+                  <span>Default</span>
+                </label>
+                <label class="adv-check">
+                  <input type="checkbox" id="adv-nse-safe" name="adv-nse-safe" />
+                  <span>Safe</span>
+                </label>
+              </div>
+              <span class="adv-hint">Run nmap NSE scripts during the TCP scan. Default = the <code>-sC</code> set (banners, http-title, ssh-hostkey…). Safe = broader, still classified non-intrusive. Both unchecked = no scripts. <strong>Adds time</strong> to the scan.</span>
+            </div>
           </div>
         </details>
 
@@ -135,7 +150,7 @@
     </main>
 
     <footer class="bottombar">
-      <span>v0.4.0</span>
+      <span>v0.5.0</span>
       <span>·</span>
       <span>MIT</span>
       <span>·</span>

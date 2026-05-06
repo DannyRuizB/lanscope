@@ -4,7 +4,7 @@
 
 ![LanScope on the dark + terminal-green theme: a 192.168.1.0/24 scan result with two hosts expanded. 192.168.1.162 (ASUSTek MAC) is OS-fingerprinted and shows a stack of Windows matches led by "Microsoft Windows 10 1803" at 97% accuracy, then 1903, 11, 1809, 1909, Server 2019 and 20H2 with descending accuracy — its OS button reads "[W] Windows · ▾". 192.168.1.184 (danny.local) is detected as "Linux 5.0 - 6.2" at 100% accuracy with the [L] Linux chip, and its ports sub-row shows 80/tcp open running nginx 1.24.0, 3000/tcp filtered ppp, 7070/tcp open realserver. Other hosts in the table have "Scan OS" and "Scan ports" buttons ready to fire. Family chips encode OS family in a single mono letter inside a green box.](screenshots/screenshot.png)
 
-🚧 Work in progress — v0.3.1.
+🚧 Work in progress — v0.5.0.
 
 ---
 
@@ -51,6 +51,7 @@ A collapsible **Advanced options** panel sits below the *Scan now* form. The cho
 - **Port scan timing** — nmap's `-T0..T5` template, default `T4` (Aggressive). Lower values are slower and stealthier (`T0` Paranoid, `T1` Sneaky, `T2` Polite); higher values are faster but more likely to lose results on flaky networks (`T5` Insane).
 - **Scan technique** — *Connect (TCP)* (default, `-sT`) completes the full TCP handshake, so an `accessible (TCP)` pill means nmap really shook hands. *SYN* (`-sS`) sends a SYN and waits for SYN-ACK without completing the handshake — faster and stealthier, but firewalls that drop SYN-ACK silently can leave ports indistinguishable from genuinely closed. The pills stay binary in both modes; the underlying nmap reason (`syn-ack`, `reset`, `conn-refused`, `no-response`…) appears in small text and is what tells the two techniques apart.
 - **Ports** — pick between *Top N* (the default, runs `nmap --top-ports N` over nmap's most common TCP ports — 10 / 100 / 1000 / 5000) and *Range* (an explicit `-p` spec like `80`, `1-1024` or `22,80,443,8000-8100`). Range input is validated server-side as a strict regex before reaching nmap, with each token checked against `1 ≤ N ≤ M ≤ 65535`.
+- **NSE scripts** *(v0.5)* — two checkboxes: *Default* (the same set nmap runs with `-sC`: banner grabs, `http-title`, `ssh-hostkey`, `ssl-cert` …) and *Safe* (broader — everything nmap classifies as non-intrusive). You can enable one, both or neither (default). Output appears inside the existing TCP sub-row — host-level scripts in a block above the ports table, port-level scripts in a panel directly under the row that triggered them. Other categories (`vuln`, `exploit`, `brute`, `intrusive`, `dos`) are deliberately **not exposed**: LanScope is a visibility tool, not a security scanner. Validation is allowlist-only — anything outside `{default, safe}` is rejected before reaching `execFile`.
 
 ### UDP scan (v0.4)
 
@@ -78,7 +79,7 @@ OS sub-row and ports sub-row are independent — you can have both expanded for 
 
 - The container runs a small Express server on port `3030`.
 - `POST /api/scan` shells out to `nmap -sn -T4 -oX - <cidr>`. Output is XML, parsed in JavaScript with `fast-xml-parser`.
-- `POST /api/hosts/:id/portscan` shells out to `nmap (--top-ports N | -p <spec>) (-sT | -sS) -sV -T<n> --version-light --reason -oX - <ip>` and persists the result, including each port's `state_reason` from nmap. Defaults are `--top-ports 100 -sT -T4`; ports selection, scan technique and timing are all overridable via the *Advanced options* panel and validated server-side before reaching `execFile`.
+- `POST /api/hosts/:id/portscan` shells out to `nmap (--top-ports N | -p <spec>) (-sT | -sS) -sV -T<n> --version-light --reason [--script=default,safe] -oX - <ip>` and persists the result, including each port's `state_reason` from nmap. Defaults are `--top-ports 100 -sT -T4`; ports selection, scan technique, timing and NSE script categories are all overridable via the *Advanced options* panel and validated server-side before reaching `execFile`. NSE output is parsed from `<port><script>` (port-level) and `<hostscript><script>` (host-level) and stored alongside the ports.
 - `POST /api/hosts/:id/udp-portscan` shells out to `nmap (--top-ports N | -p <spec>) -sU -sV -T<n> --version-light --reason -oX - <ip>`. Reuses the same ports and timing options; scan technique does not apply (UDP-only flow). 30-minute server-side timeout to accommodate the inherent slowness of UDP scanning.
 - `POST /api/hosts/:id/osscan` shells out to `nmap -O --osscan-guess -T4 -oX - <ip>`. Every `osmatch` reported is stored, including its first `osclass` (vendor / family / generation / device type).
 - Hosts, ports and OS matches are stored in a SQLite database mounted on a Docker named volume (`lanscope-data`), so scan history survives restarts.
@@ -103,7 +104,7 @@ LanScope's direction: cover as many `nmap` options as possible behind a visual U
 - [x] **v0.3.3** — *Ports* selector in Advanced options: *Top N* (10 / 100 / 1000 / 5000) or explicit *Range* (`-p` spec). Strict server-side validation.
 - [x] **v0.3.4** — *Scan technique* selector: *Connect* (`-sT`, default) or *SYN* (`-sS`). Binary pills preserved in both modes; underlying nmap reason carries the technique-specific detail. Closes the v0.3.x line.
 - [x] **v0.4** — UDP scan (`-sU`) on its own slower flow. New *UDP* column with its own button, independent expandable sub-row, tri-state pills (*responsive* / *unknown* / *closed*) suited to UDP semantics. 30-minute server-side timeout, confirmation prompt in the UI.
-- [ ] **v0.5** — NSE scripts: `-sC` defaults plus `--script <category>` with an allowlist (banner grabbing, vuln, safe…).
+- [x] **v0.5** — NSE scripts as an additive option of the TCP scan. Two checkboxes in *Advanced options*: *Default* (`-sC` set) and *Safe*. Allowlist-only — `vuln` / `exploit` / `brute` / `intrusive` / `dos` are deliberately not exposed. Output rendered inside the existing TCP sub-row: host-level scripts above the ports table, port-level scripts directly under the matching row.
 - [ ] **v0.6** — Advanced host discovery: `-Pn`, ICMP / TCP / ARP ping types.
 - [ ] **v0.7+** — Topology graph (Cytoscape), diff between scans (appeared / disappeared / changed), declared-host inventory with alerts.
 

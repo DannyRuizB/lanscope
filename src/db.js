@@ -57,10 +57,20 @@ db.exec(`
     type      TEXT
   );
 
+  CREATE TABLE IF NOT EXISTS host_scripts (
+    id           INTEGER PRIMARY KEY AUTOINCREMENT,
+    host_id      INTEGER NOT NULL REFERENCES hosts(id) ON DELETE CASCADE,
+    host_port_id INTEGER          REFERENCES host_ports(id) ON DELETE CASCADE,
+    script_id    TEXT    NOT NULL,
+    output       TEXT
+  );
+
   CREATE INDEX IF NOT EXISTS idx_hosts_scan ON hosts(scan_id);
   CREATE INDEX IF NOT EXISTS idx_scans_started ON scans(started_at DESC);
   CREATE INDEX IF NOT EXISTS idx_ports_host ON host_ports(host_id);
   CREATE INDEX IF NOT EXISTS idx_os_matches_host ON host_os_matches(host_id);
+  CREATE INDEX IF NOT EXISTS idx_scripts_host ON host_scripts(host_id);
+  CREATE INDEX IF NOT EXISTS idx_scripts_port ON host_scripts(host_port_id);
 `);
 
 // Migration for v0.1 DBs that don't have the new columns/tables yet.
@@ -124,7 +134,7 @@ const stmts = {
        FROM host_ports WHERE host_id = ? AND protocol = 'tcp' ORDER BY port`,
   ),
   getPortsByScan: db.prepare(
-    `SELECT host_id, port, protocol, state, state_reason, service, product, version, extra
+    `SELECT id, host_id, port, protocol, state, state_reason, service, product, version, extra
        FROM host_ports WHERE host_id IN (SELECT id FROM hosts WHERE scan_id = ?)
        ORDER BY host_id, protocol, port`,
   ),
@@ -155,6 +165,31 @@ const stmts = {
   markHostOsScanned: db.prepare(
     `UPDATE hosts SET osscanned_at = ? WHERE id = ?`,
   ),
+  // NSE scripts. Two delete shapes: (a) host-level (no port) and (b) all
+  // scripts attached to a TCP port. UDP scripts aren't generated yet, but
+  // when they are, the same delete-by-protocol cascade via host_ports FK
+  // will keep them coherent with their parent ports.
+  clearHostScriptsHostLevel: db.prepare(
+    `DELETE FROM host_scripts WHERE host_id = ? AND host_port_id IS NULL`,
+  ),
+  insertHostScript: db.prepare(
+    `INSERT INTO host_scripts (host_id, host_port_id, script_id, output)
+     VALUES (?, ?, ?, ?)`,
+  ),
+  getHostScriptsByHost: db.prepare(
+    `SELECT script_id, output FROM host_scripts
+       WHERE host_id = ? AND host_port_id IS NULL
+       ORDER BY script_id`,
+  ),
+  getPortScriptsByHostPort: db.prepare(
+    `SELECT script_id, output FROM host_scripts
+       WHERE host_port_id = ? ORDER BY script_id`,
+  ),
+  getScriptsByScan: db.prepare(
+    `SELECT host_id, host_port_id, script_id, output FROM host_scripts
+       WHERE host_id IN (SELECT id FROM hosts WHERE scan_id = ?)
+       ORDER BY host_id, host_port_id, script_id`,
+  ),
 };
 
 const insertHostsTx = db.transaction((scanId, hosts) => {
@@ -171,10 +206,16 @@ const insertHostsTx = db.transaction((scanId, hosts) => {
   }
 });
 
-const replaceHostPortsTx = db.transaction((hostId, ports) => {
+const replaceHostPortsTx = db.transaction((hostId, ports, hostScripts) => {
+  // TCP rescan is the source of truth for both ports and TCP-scoped NSE
+  // output. Cascading delete on host_ports drops port-level scripts; the
+  // host-level scripts have no FK to ports so we wipe them explicitly.
+  // If the new scan was run without --script, both lists end up empty,
+  // which is the correct state.
   stmts.clearHostPortsByProto.run(hostId, "tcp");
+  stmts.clearHostScriptsHostLevel.run(hostId);
   for (const p of ports) {
-    stmts.insertHostPort.run(
+    const info = stmts.insertHostPort.run(
       hostId,
       p.port,
       p.protocol || "tcp",
@@ -185,6 +226,13 @@ const replaceHostPortsTx = db.transaction((hostId, ports) => {
       p.version || null,
       p.extra || null,
     );
+    const portId = Number(info.lastInsertRowid);
+    for (const s of p.scripts || []) {
+      stmts.insertHostScript.run(hostId, portId, s.script_id, s.output || null);
+    }
+  }
+  for (const s of hostScripts || []) {
+    stmts.insertHostScript.run(hostId, null, s.script_id, s.output || null);
   }
   stmts.markHostPortscanned.run(Date.now(), hostId);
 });
@@ -248,10 +296,11 @@ function getScan(id) {
   const hosts = stmts.getHostsByScan.all(id);
   const tcpByHost = new Map();
   const udpByHost = new Map();
+  const portByDbId = new Map(); // host_ports.id -> port object (for script attach)
   for (const row of stmts.getPortsByScan.all(id)) {
     const target = row.protocol === "udp" ? udpByHost : tcpByHost;
     if (!target.has(row.host_id)) target.set(row.host_id, []);
-    target.get(row.host_id).push({
+    const port = {
       port: row.port,
       protocol: row.protocol,
       state: row.state,
@@ -260,7 +309,20 @@ function getScan(id) {
       product: row.product,
       version: row.version,
       extra: row.extra,
-    });
+      scripts: [],
+    };
+    target.get(row.host_id).push(port);
+    portByDbId.set(row.id, port);
+  }
+  const hostScriptsByHost = new Map();
+  for (const row of stmts.getScriptsByScan.all(id)) {
+    if (row.host_port_id == null) {
+      if (!hostScriptsByHost.has(row.host_id)) hostScriptsByHost.set(row.host_id, []);
+      hostScriptsByHost.get(row.host_id).push({ script_id: row.script_id, output: row.output });
+      continue;
+    }
+    const port = portByDbId.get(row.host_port_id);
+    if (port) port.scripts.push({ script_id: row.script_id, output: row.output });
   }
   const osByHost = new Map();
   for (const row of stmts.getOsMatchesByScan.all(id)) {
@@ -279,6 +341,7 @@ function getScan(id) {
     h.ports = tcpByHost.get(h.id) || [];
     h.udp_ports = udpByHost.get(h.id) || [];
     h.os_matches = osByHost.get(h.id) || [];
+    h.host_scripts = hostScriptsByHost.get(h.id) || [];
   }
   scan.hosts = hosts;
   return scan;
@@ -292,9 +355,29 @@ function getHost(id) {
   return stmts.getHost.get(id);
 }
 
-function saveHostPorts(hostId, ports) {
-  replaceHostPortsTx(hostId, ports);
-  return stmts.getTcpPortsByHost.all(hostId);
+function saveHostPorts(hostId, ports, hostScripts) {
+  replaceHostPortsTx(hostId, ports, hostScripts || []);
+  // Re-fetch ports along with their scripts so the response reflects exactly
+  // what's stored. We get port ids via a fresh query, attach scripts to each.
+  const portRows = db
+    .prepare(
+      `SELECT id, port, protocol, state, state_reason, service, product, version, extra
+         FROM host_ports WHERE host_id = ? AND protocol = 'tcp' ORDER BY port`,
+    )
+    .all(hostId);
+  const ports2 = portRows.map((r) => ({
+    port: r.port,
+    protocol: r.protocol,
+    state: r.state,
+    state_reason: r.state_reason,
+    service: r.service,
+    product: r.product,
+    version: r.version,
+    extra: r.extra,
+    scripts: stmts.getPortScriptsByHostPort.all(r.id),
+  }));
+  const host_scripts = stmts.getHostScriptsByHost.all(hostId);
+  return { ports: ports2, host_scripts };
 }
 
 function saveHostUdpPorts(hostId, ports) {

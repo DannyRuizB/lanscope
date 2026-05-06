@@ -43,6 +43,30 @@ function validateScanType(t) {
   return { value: t, error: null };
 }
 
+// NSE script categories we expose. Curated allowlist: "default" (the same set
+// nmap runs with -sC, includes banner/http-title/ssh-hostkey…) and "safe"
+// (broader but still classified by nmap as not intrusive). Categories like
+// "vuln", "exploit", "brute", "intrusive", "dos" are NOT exposed — lanscope
+// is a visibility tool, not a security scanner. Input is an array; backend
+// validates each entry against this set, no free-form strings reach nmap.
+const ALLOWED_SCRIPT_CATEGORIES = new Set(["default", "safe"]);
+
+// scripts is optional; null/undefined/[] means "no NSE".
+// Returns { args: ["--script=default,safe"] | [], error: string | null }.
+function validateScripts(scripts) {
+  if (scripts === undefined || scripts === null) return { args: [], error: null };
+  if (!Array.isArray(scripts)) return { args: null, error: "scripts must be an array" };
+  if (scripts.length === 0) return { args: [], error: null };
+  const seen = new Set();
+  for (const s of scripts) {
+    if (typeof s !== "string" || !ALLOWED_SCRIPT_CATEGORIES.has(s)) {
+      return { args: null, error: `script category not allowed: ${s}` };
+    }
+    seen.add(s);
+  }
+  return { args: [`--script=${[...seen].join(",")}`], error: null };
+}
+
 // Range spec: comma-separated list of `N` or `N-M`, no spaces, no other chars.
 // Each port in [1,65535], N<=M, max 100 tokens to keep argv sane.
 const RANGE_SPEC_RE = /^(\d+(-\d+)?)(,\d+(-\d+)?)*$/;
@@ -93,8 +117,42 @@ const xmlParser = new XMLParser({
     name === "hostname" ||
     name === "port" ||
     name === "osmatch" ||
-    name === "osclass",
+    name === "osclass" ||
+    name === "script",
 });
+
+// Pulls every <script id="..." output="..."/> under a parent node.
+// Used both for <port><script>…</script></port> (port-level) and
+// <hostscript><script>…</script></hostscript> (host-level). nmap's XML
+// nests detail tables inside, but for v0.5 we just keep the flat `output`
+// attribute (already a human-readable summary) — structured tables can
+// come later if a script's flat output is unusable.
+function extractScripts(parent) {
+  const list = parent?.script || [];
+  return list
+    .map((s) => ({
+      script_id: s.id || "unknown",
+      output: decodeXmlNumericEntities(typeof s.output === "string" ? s.output : ""),
+    }))
+    .filter((s) => s.script_id);
+}
+
+// nmap's XML escapes newlines/tabs inside script output attributes as
+// numeric character references (&#xa; &#xd; &#9; …). fast-xml-parser only
+// decodes the named entities by default, so we reverse the numeric ones
+// here. Without this the UI would print literal "&#xa;" instead of newlines.
+function decodeXmlNumericEntities(s) {
+  if (typeof s !== "string") return s;
+  return s
+    .replace(/&#x([0-9a-fA-F]+);/g, (_, hex) => {
+      const cp = parseInt(hex, 16);
+      return Number.isFinite(cp) ? String.fromCodePoint(cp) : "";
+    })
+    .replace(/&#(\d+);/g, (_, dec) => {
+      const cp = parseInt(dec, 10);
+      return Number.isFinite(cp) ? String.fromCodePoint(cp) : "";
+    });
+}
 
 function pickAddress(addresses, type) {
   return addresses?.find((a) => a.addrtype === type);
@@ -168,8 +226,17 @@ function parsePorts(xml) {
       product: svc.product || null,
       version: svc.version || null,
       extra: extra || null,
+      scripts: extractScripts(p),
     };
   });
+}
+
+function parseHostScripts(xml) {
+  const doc = xmlParser.parse(xml);
+  const hosts = doc?.nmaprun?.host || [];
+  const host = hosts[0];
+  if (!host) return [];
+  return extractScripts(host.hostscript);
 }
 
 const PORTSCAN_DEFAULT_TIMING = "T4";
@@ -180,6 +247,11 @@ function runPortScan(ip, opts = {}) {
   const timing = opts.timing || PORTSCAN_DEFAULT_TIMING;
   const portsArgs = opts.portsArgs || PORTS_DEFAULT_ARGS;
   const scanFlag = SCAN_TYPE_FLAG[opts.scanType || PORTSCAN_DEFAULT_SCAN_TYPE];
+  const scriptsArgs = opts.scriptsArgs || [];
+  // NSE adds variable wall time per script (banner waits, http probes,
+  // ssh handshakes…). Bump the per-scan timeout when scripts are enabled
+  // so a top-1000 + safe doesn't get killed mid-run.
+  const timeoutMs = scriptsArgs.length ? 600_000 : 180_000;
   return new Promise((resolve, reject) => {
     // portsArgs: either ["--top-ports", N] (nmap's most common N TCP ports)
     //            or ["-p", "<spec>"] (explicit comma/range list).
@@ -192,6 +264,8 @@ function runPortScan(ip, opts = {}) {
     // --version-light: faster service probes (skip rare ones)
     // --reason: include why nmap classified each port (syn-ack, conn-refused,
     //           no-response…) so the UI can show the technical detail.
+    // scriptsArgs: optional ["--script=default,safe"] — categories validated
+    //              upstream, never user-provided strings.
     execFile(
       "nmap",
       [
@@ -201,18 +275,22 @@ function runPortScan(ip, opts = {}) {
         `-${timing}`,
         "--version-light",
         "--reason",
+        ...scriptsArgs,
         "-oX",
         "-",
         ip,
       ],
-      { maxBuffer: 16 * 1024 * 1024, timeout: 180_000 },
+      { maxBuffer: 16 * 1024 * 1024, timeout: timeoutMs },
       (err, stdout, stderr) => {
         if (err) {
           const msg = stderr?.toString().trim() || err.message;
           return reject(new Error(`nmap failed: ${msg}`));
         }
         try {
-          resolve(parsePorts(stdout));
+          resolve({
+            ports: parsePorts(stdout),
+            host_scripts: parseHostScripts(stdout),
+          });
         } catch (e) {
           reject(new Error(`failed to parse nmap output: ${e.message}`));
         }
@@ -311,11 +389,13 @@ module.exports = {
   validateTiming,
   validatePortsSpec,
   validateScanType,
+  validateScripts,
   runPingSweep,
   runPortScan,
   runUdpPortScan,
   runOsScan,
   parseHosts,
   parsePorts,
+  parseHostScripts,
   parseOsMatches,
 };
