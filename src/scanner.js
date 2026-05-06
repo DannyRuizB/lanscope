@@ -32,6 +32,17 @@ function validateTiming(t) {
   return { value: t, error: null };
 }
 
+const SCAN_TYPE_VALUES = new Set(["connect", "syn"]);
+
+// scanType is optional; null/undefined means "use scan default" (connect).
+// Returns { value: "connect" | "syn" | null, error: string | null }.
+function validateScanType(t) {
+  if (t === undefined || t === null || t === "") return { value: null, error: null };
+  if (typeof t !== "string") return { value: null, error: "scanType must be a string" };
+  if (!SCAN_TYPE_VALUES.has(t)) return { value: null, error: "scanType must be 'connect' or 'syn'" };
+  return { value: t, error: null };
+}
+
 // Range spec: comma-separated list of `N` or `N-M`, no spaces, no other chars.
 // Each port in [1,65535], N<=M, max 100 tokens to keep argv sane.
 const RANGE_SPEC_RE = /^(\d+(-\d+)?)(,\d+(-\d+)?)*$/;
@@ -162,16 +173,20 @@ function parsePorts(xml) {
 }
 
 const PORTSCAN_DEFAULT_TIMING = "T4";
+const PORTSCAN_DEFAULT_SCAN_TYPE = "connect";
+const SCAN_TYPE_FLAG = { connect: "-sT", syn: "-sS" };
 
 function runPortScan(ip, opts = {}) {
   const timing = opts.timing || PORTSCAN_DEFAULT_TIMING;
   const portsArgs = opts.portsArgs || PORTS_DEFAULT_ARGS;
+  const scanFlag = SCAN_TYPE_FLAG[opts.scanType || PORTSCAN_DEFAULT_SCAN_TYPE];
   return new Promise((resolve, reject) => {
     // portsArgs: either ["--top-ports", N] (nmap's most common N TCP ports)
     //            or ["-p", "<spec>"] (explicit comma/range list).
-    // -sT: full TCP connect scan — open means a real handshake completed,
-    //      so users get a binary "accessible / not available" answer instead
-    //      of the SYN-scan ambiguity (filtered ≠ confirmed unreachable).
+    // scanFlag: -sT (default) for full TCP connect — "open" means a real
+    //           handshake completed, no ambiguous filtered middle state.
+    //           -sS for SYN scan — faster, more stealthy, but firewalls
+    //           that drop SYN-ACK silently make some ports look unreachable.
     // -sV: service/version detection
     // -T<n>: timing template (T0 paranoid … T5 insane). Default T4.
     // --version-light: faster service probes (skip rare ones)
@@ -181,7 +196,7 @@ function runPortScan(ip, opts = {}) {
       "nmap",
       [
         ...portsArgs,
-        "-sT",
+        scanFlag,
         "-sV",
         `-${timing}`,
         "--version-light",
@@ -255,6 +270,7 @@ module.exports = {
   validateIpv4,
   validateTiming,
   validatePortsSpec,
+  validateScanType,
   runPingSweep,
   runPortScan,
   runOsScan,

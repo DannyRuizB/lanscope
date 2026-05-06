@@ -15,6 +15,7 @@ const els = {
   body: $("#results-body"),
   deleteBtn: $("#delete-scan"),
   advTiming: $("#adv-timing"),
+  advScanType: $("#adv-scantype"),
   advPortsTop: $("#adv-ports-top"),
   advPortsRange: $("#adv-ports-range"),
 };
@@ -385,11 +386,12 @@ async function runPortscan(hostId) {
   btn.textContent = "Scanning…";
   try {
     const timing = els.advTiming?.value || "T4";
+    const scanType = els.advScanType?.value || "connect";
     const ports = currentPortsSpec();
     const data = await fetchJson(`/api/hosts/${hostId}/portscan`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ timing, ports }),
+      body: JSON.stringify({ timing, scanType, ports }),
     });
     if (lastScan) {
       const h = lastScan.hosts.find((x) => x.id === hostId);

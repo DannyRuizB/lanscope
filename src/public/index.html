@@ -59,6 +59,15 @@
               <span class="adv-hint">Lower = slower &amp; stealthier. Higher = faster, may miss results.</span>
             </label>
 
+            <label class="adv-field" for="adv-scantype">
+              <span class="adv-label">Scan technique</span>
+              <select id="adv-scantype" name="adv-scantype">
+                <option value="connect" selected>Connect (TCP) — confirmed handshake</option>
+                <option value="syn">SYN — faster, may hide filtered ports</option>
+              </select>
+              <span class="adv-hint">Connect completes the TCP handshake. SYN is stealthier and faster but loses the closed/filtered distinction.</span>
+            </label>
+
             <div class="adv-field">
               <span class="adv-label">Ports</span>
               <div class="adv-ports-row">
@@ -125,7 +134,7 @@
     </main>
 
     <footer class="bottombar">
-      <span>v0.3.3</span>
+      <span>v0.3.4</span>
       <span>·</span>
       <span>MIT</span>
       <span>·</span>
