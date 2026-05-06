@@ -8,6 +8,7 @@ const {
   validateScanType,
   runPingSweep,
   runPortScan,
+  runUdpPortScan,
   runOsScan,
 } = require("./scanner");
 
@@ -83,6 +84,37 @@ app.post("/api/hosts/:id/portscan", async (req, res) => {
       ip: host.ip,
       portscanned_at: refreshed.portscanned_at,
       ports: saved,
+    });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+app.post("/api/hosts/:id/udp-portscan", async (req, res) => {
+  const id = parseInt(req.params.id, 10);
+  if (!Number.isInteger(id) || id <= 0) return res.status(400).json({ error: "invalid id" });
+  const host = db.getHost(id);
+  if (!host) return res.status(404).json({ error: "host not found" });
+  if (host.status !== "up") return res.status(400).json({ error: "host is not up" });
+
+  const timing = validateTiming(req.body?.timing);
+  if (timing.error) return res.status(400).json({ error: timing.error });
+
+  const portsSpec = validatePortsSpec(req.body?.ports);
+  if (portsSpec.error) return res.status(400).json({ error: portsSpec.error });
+
+  try {
+    const ports = await runUdpPortScan(host.ip, {
+      timing: timing.value,
+      portsArgs: portsSpec.args,
+    });
+    const saved = db.saveHostUdpPorts(id, ports);
+    const refreshed = db.getHost(id);
+    res.json({
+      host_id: id,
+      ip: host.ip,
+      udp_portscanned_at: refreshed.udp_portscanned_at,
+      udp_ports: saved,
     });
   } catch (e) {
     res.status(500).json({ error: e.message });

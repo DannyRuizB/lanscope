@@ -149,6 +149,34 @@ function renderPortsButton(host) {
   return `<button class="ghost small portscan-btn" data-host-id="${host.id}">${portsButtonLabel(host)}</button>`;
 }
 
+function udpStateClass(state) {
+  if (state === "open") return "responsive";
+  if (state === "open|filtered") return "unknown";
+  return "closed-udp";
+}
+
+function udpStateLabel(state) {
+  if (state === "open") return "responsive";
+  if (state === "open|filtered") return "unknown";
+  if (state === "closed") return "closed";
+  return "filtered";
+}
+
+function udpButtonLabel(host) {
+  if (!host.udp_portscanned_at) return "Scan UDP";
+  const ports = host.udp_ports || [];
+  const responsive = ports.filter((p) => p.state === "open").length;
+  const unknown = ports.filter((p) => p.state === "open|filtered").length;
+  if (responsive) return `${responsive} responsive · ▾`;
+  if (unknown) return `${unknown} unknown · ▾`;
+  return `0 responsive · ▾`;
+}
+
+function renderUdpButton(host) {
+  if (host.status !== "up") return `<span class="muted">—</span>`;
+  return `<button class="ghost small udpscan-btn" data-host-id="${host.id}">${udpButtonLabel(host)}</button>`;
+}
+
 function familyLetter(family) {
   if (!family) return "?";
   const f = family.toLowerCase();
@@ -194,12 +222,16 @@ function renderHostRow(h) {
       <td class="muted">${escapeHtml(h.reason) || "—"}</td>
       <td class="os-cell">${renderOsButton(h)}</td>
       <td class="ports-cell">${renderPortsButton(h)}</td>
+      <td class="udp-cell">${renderUdpButton(h)}</td>
     </tr>
     <tr class="host-detail" data-host-id="${h.id}" data-kind="os" hidden>
-      <td colspan="7">${h.os_matches?.length ? renderOsTable(h) : ""}</td>
+      <td colspan="8">${h.os_matches?.length ? renderOsTable(h) : ""}</td>
     </tr>
     <tr class="host-detail" data-host-id="${h.id}" data-kind="ports" hidden>
-      <td colspan="7">${h.ports?.length ? renderPortsTable(h) : ""}</td>
+      <td colspan="8">${h.ports?.length ? renderPortsTable(h) : ""}</td>
+    </tr>
+    <tr class="host-detail" data-host-id="${h.id}" data-kind="udp" hidden>
+      <td colspan="8">${h.udp_ports?.length ? renderUdpPortsTable(h) : ""}</td>
     </tr>`;
 }
 
@@ -268,6 +300,41 @@ function renderPortNumCell(host, p) {
   return `<a class="port-link" href="${escapeHtml(url)}" target="_blank" rel="noopener" title="Open ${escapeHtml(url)} in a new tab">${label} ↗</a>`;
 }
 
+function renderUdpStateCell(p) {
+  const cls = udpStateClass(p.state);
+  const label = udpStateLabel(p.state);
+  const reason = p.state_reason || p.state;
+  return `
+    <span class="state-pill state-${cls}">${label}</span>
+    <div class="state-reason">${escapeHtml(reason)}</div>`;
+}
+
+function renderUdpPortsTable(host) {
+  const ports = host.udp_ports || [];
+  if (!ports.length) {
+    return `<div class="ports-empty">No UDP ports detected.</div>`;
+  }
+  const rows = ports
+    .map(
+      (p) => `
+      <tr>
+        <td class="port-num">${p.port}/udp</td>
+        <td>${renderUdpStateCell(p)}</td>
+        <td class="${p.service ? "" : "muted"}">${escapeHtml(p.service) || "—"}</td>
+        <td class="${p.product ? "" : "muted"}">${escapeHtml(p.product) || "—"}</td>
+        <td class="${p.version ? "" : "muted"}">${escapeHtml(p.version) || "—"}</td>
+      </tr>`,
+    )
+    .join("");
+  return `
+    <table class="ports-table">
+      <thead>
+        <tr><th>Port</th><th>State</th><th>Service</th><th>Product</th><th>Version</th></tr>
+      </thead>
+      <tbody>${rows}</tbody>
+    </table>`;
+}
+
 function renderPortsTable(host) {
   const ports = host.ports || [];
   if (!ports.length) {
@@ -326,6 +393,7 @@ function renderScan(scan) {
   els.body.innerHTML = scan.hosts.map(renderHostRow).join("");
   attachPortscanHandlers();
   attachOsscanHandlers();
+  attachUdpscanHandlers();
 }
 
 function attachPortscanHandlers() {
@@ -337,6 +405,12 @@ function attachPortscanHandlers() {
 function attachOsscanHandlers() {
   els.body.querySelectorAll(".osscan-btn").forEach((btn) => {
     btn.addEventListener("click", () => onOsscanClick(parseInt(btn.dataset.hostId, 10)));
+  });
+}
+
+function attachUdpscanHandlers() {
+  els.body.querySelectorAll(".udpscan-btn").forEach((btn) => {
+    btn.addEventListener("click", () => onUdpscanClick(parseInt(btn.dataset.hostId, 10)));
   });
 }
 
@@ -358,6 +432,17 @@ async function onOsscanClick(hostId) {
     return;
   }
   await runOsscan(hostId);
+}
+
+async function onUdpscanClick(hostId) {
+  const host = currentHostsById().get(hostId);
+  if (!host) return;
+  if (host.udp_portscanned_at) {
+    toggleHostDetail(hostId, "udp");
+    return;
+  }
+  if (!confirm("UDP scans are slow — top 100 typically takes 5–15 minutes. Continue?")) return;
+  await runUdpscan(hostId);
 }
 
 function currentHostsById() {
@@ -414,6 +499,46 @@ async function runPortscan(hostId) {
     btn.disabled = false;
     btn.textContent = original;
     setStatus(`Port scan failed: ${e.message}`, true);
+  }
+}
+
+async function runUdpscan(hostId) {
+  const btn = els.body.querySelector(`button.udpscan-btn[data-host-id="${hostId}"]`);
+  if (!btn) return;
+  btn.disabled = true;
+  const original = btn.textContent;
+  btn.textContent = "Scanning UDP…";
+  setStatus("UDP scan running — this can take several minutes.");
+  try {
+    const timing = els.advTiming?.value || "T4";
+    const ports = currentPortsSpec();
+    const data = await fetchJson(`/api/hosts/${hostId}/udp-portscan`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ timing, ports }),
+    });
+    if (lastScan) {
+      const h = lastScan.hosts.find((x) => x.id === hostId);
+      if (h) {
+        h.udp_ports = data.udp_ports;
+        h.udp_portscanned_at = data.udp_portscanned_at;
+      }
+    }
+    const detail = els.body.querySelector(
+      `tr.host-detail[data-host-id="${hostId}"][data-kind="udp"]`,
+    );
+    if (detail) {
+      const host = lastScan?.hosts.find((x) => x.id === hostId);
+      detail.querySelector("td").innerHTML = host ? renderUdpPortsTable(host) : "";
+      detail.hidden = false;
+    }
+    btn.innerHTML = udpButtonLabel(lastScan.hosts.find((x) => x.id === hostId));
+    btn.disabled = false;
+    setStatus("UDP scan finished.");
+  } catch (e) {
+    btn.disabled = false;
+    btn.textContent = original;
+    setStatus(`UDP scan failed: ${e.message}`, true);
   }
 }
 

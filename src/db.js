@@ -79,6 +79,9 @@ if (!columnExists("hosts", "osscanned_at")) {
 if (!columnExists("host_ports", "state_reason")) {
   db.exec(`ALTER TABLE host_ports ADD COLUMN state_reason TEXT`);
 }
+if (!columnExists("hosts", "udp_portscanned_at")) {
+  db.exec(`ALTER TABLE hosts ADD COLUMN udp_portscanned_at INTEGER`);
+}
 
 const stmts = {
   insertScan: db.prepare(
@@ -103,22 +106,22 @@ const stmts = {
        FROM scans WHERE id = ?`,
   ),
   getHostsByScan: db.prepare(
-    `SELECT id, ip, mac, vendor, hostname, status, reason, portscanned_at, osscanned_at
+    `SELECT id, ip, mac, vendor, hostname, status, reason, portscanned_at, osscanned_at, udp_portscanned_at
        FROM hosts WHERE scan_id = ? ORDER BY ip`,
   ),
   getHost: db.prepare(
-    `SELECT id, scan_id, ip, mac, vendor, hostname, status, reason, portscanned_at, osscanned_at
+    `SELECT id, scan_id, ip, mac, vendor, hostname, status, reason, portscanned_at, osscanned_at, udp_portscanned_at
        FROM hosts WHERE id = ?`,
   ),
   deleteScan: db.prepare(`DELETE FROM scans WHERE id = ?`),
-  clearHostPorts: db.prepare(`DELETE FROM host_ports WHERE host_id = ?`),
+  clearHostPortsByProto: db.prepare(`DELETE FROM host_ports WHERE host_id = ? AND protocol = ?`),
   insertHostPort: db.prepare(
     `INSERT INTO host_ports (host_id, port, protocol, state, state_reason, service, product, version, extra)
      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
   ),
-  getPortsByHost: db.prepare(
+  getTcpPortsByHost: db.prepare(
     `SELECT port, protocol, state, state_reason, service, product, version, extra
-       FROM host_ports WHERE host_id = ? ORDER BY protocol, port`,
+       FROM host_ports WHERE host_id = ? AND protocol = 'tcp' ORDER BY port`,
   ),
   getPortsByScan: db.prepare(
     `SELECT host_id, port, protocol, state, state_reason, service, product, version, extra
@@ -127,6 +130,13 @@ const stmts = {
   ),
   markHostPortscanned: db.prepare(
     `UPDATE hosts SET portscanned_at = ? WHERE id = ?`,
+  ),
+  markHostUdpPortscanned: db.prepare(
+    `UPDATE hosts SET udp_portscanned_at = ? WHERE id = ?`,
+  ),
+  getUdpPortsByHost: db.prepare(
+    `SELECT port, protocol, state, state_reason, service, product, version, extra
+       FROM host_ports WHERE host_id = ? AND protocol = 'udp' ORDER BY port`,
   ),
   clearHostOsMatches: db.prepare(`DELETE FROM host_os_matches WHERE host_id = ?`),
   insertHostOsMatch: db.prepare(
@@ -162,7 +172,7 @@ const insertHostsTx = db.transaction((scanId, hosts) => {
 });
 
 const replaceHostPortsTx = db.transaction((hostId, ports) => {
-  stmts.clearHostPorts.run(hostId);
+  stmts.clearHostPortsByProto.run(hostId, "tcp");
   for (const p of ports) {
     stmts.insertHostPort.run(
       hostId,
@@ -177,6 +187,24 @@ const replaceHostPortsTx = db.transaction((hostId, ports) => {
     );
   }
   stmts.markHostPortscanned.run(Date.now(), hostId);
+});
+
+const replaceHostUdpPortsTx = db.transaction((hostId, ports) => {
+  stmts.clearHostPortsByProto.run(hostId, "udp");
+  for (const p of ports) {
+    stmts.insertHostPort.run(
+      hostId,
+      p.port,
+      "udp",
+      p.state,
+      p.state_reason || null,
+      p.service || null,
+      p.product || null,
+      p.version || null,
+      p.extra || null,
+    );
+  }
+  stmts.markHostUdpPortscanned.run(Date.now(), hostId);
 });
 
 const replaceHostOsMatchesTx = db.transaction((hostId, matches) => {
@@ -218,10 +246,12 @@ function getScan(id) {
   const scan = stmts.getScan.get(id);
   if (!scan) return null;
   const hosts = stmts.getHostsByScan.all(id);
-  const portsByHost = new Map();
+  const tcpByHost = new Map();
+  const udpByHost = new Map();
   for (const row of stmts.getPortsByScan.all(id)) {
-    if (!portsByHost.has(row.host_id)) portsByHost.set(row.host_id, []);
-    portsByHost.get(row.host_id).push({
+    const target = row.protocol === "udp" ? udpByHost : tcpByHost;
+    if (!target.has(row.host_id)) target.set(row.host_id, []);
+    target.get(row.host_id).push({
       port: row.port,
       protocol: row.protocol,
       state: row.state,
@@ -246,7 +276,8 @@ function getScan(id) {
     });
   }
   for (const h of hosts) {
-    h.ports = portsByHost.get(h.id) || [];
+    h.ports = tcpByHost.get(h.id) || [];
+    h.udp_ports = udpByHost.get(h.id) || [];
     h.os_matches = osByHost.get(h.id) || [];
   }
   scan.hosts = hosts;
@@ -263,7 +294,12 @@ function getHost(id) {
 
 function saveHostPorts(hostId, ports) {
   replaceHostPortsTx(hostId, ports);
-  return stmts.getPortsByHost.all(hostId);
+  return stmts.getTcpPortsByHost.all(hostId);
+}
+
+function saveHostUdpPorts(hostId, ports) {
+  replaceHostUdpPortsTx(hostId, ports);
+  return stmts.getUdpPortsByHost.all(hostId);
 }
 
 function saveHostOsMatches(hostId, matches) {
@@ -280,5 +316,6 @@ module.exports = {
   deleteScan,
   getHost,
   saveHostPorts,
+  saveHostUdpPorts,
   saveHostOsMatches,
 };

@@ -221,6 +221,46 @@ function runPortScan(ip, opts = {}) {
   });
 }
 
+function runUdpPortScan(ip, opts = {}) {
+  const timing = opts.timing || PORTSCAN_DEFAULT_TIMING;
+  const portsArgs = opts.portsArgs || PORTS_DEFAULT_ARGS;
+  return new Promise((resolve, reject) => {
+    // -sU: UDP scan. Slow by nature: nmap waits on timeouts because UDP
+    //      doesn't ack. Combined with -sV's per-service payloads (DNS,
+    //      NTP, SNMP, mDNS…) to coax responses out of services that
+    //      otherwise would never speak unsolicited.
+    // Reuses portsArgs (--top-ports N | -p <spec>) and timing flags.
+    // Timeout 30 min: a top-100 UDP scan against a single host can
+    // realistically take 10-15 min on -T4.
+    execFile(
+      "nmap",
+      [
+        ...portsArgs,
+        "-sU",
+        "-sV",
+        `-${timing}`,
+        "--version-light",
+        "--reason",
+        "-oX",
+        "-",
+        ip,
+      ],
+      { maxBuffer: 16 * 1024 * 1024, timeout: 1_800_000 },
+      (err, stdout, stderr) => {
+        if (err) {
+          const msg = stderr?.toString().trim() || err.message;
+          return reject(new Error(`nmap failed: ${msg}`));
+        }
+        try {
+          resolve(parsePorts(stdout));
+        } catch (e) {
+          reject(new Error(`failed to parse nmap output: ${e.message}`));
+        }
+      },
+    );
+  });
+}
+
 function parseOsMatches(xml) {
   const doc = xmlParser.parse(xml);
   const hosts = doc?.nmaprun?.host || [];
@@ -273,6 +313,7 @@ module.exports = {
   validateScanType,
   runPingSweep,
   runPortScan,
+  runUdpPortScan,
   runOsScan,
   parseHosts,
   parsePorts,
