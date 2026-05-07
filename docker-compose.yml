@@ -1,7 +1,7 @@
 services:
   lanscope:
     build: .
-    image: lanscope:0.5.0
+    image: lanscope:0.6.0
     container_name: lanscope
     network_mode: host
     cap_add:

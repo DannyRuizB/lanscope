@@ -20,6 +20,11 @@ const els = {
   advPortsRange: $("#adv-ports-range"),
   advNseDefault: $("#adv-nse-default"),
   advNseSafe: $("#adv-nse-safe"),
+  advDiscoSkip: $("#adv-disco-skip"),
+  advDiscoPE: $("#adv-disco-pe"),
+  advDiscoPS: $("#adv-disco-ps"),
+  advDiscoPA: $("#adv-disco-pa"),
+  advDiscoPR: $("#adv-disco-pr"),
 };
 
 function currentPortsSpec() {
@@ -49,6 +54,29 @@ function bindPortsModeToggle() {
   sync();
 }
 bindPortsModeToggle();
+
+function currentDiscoverySpec() {
+  if (els.advDiscoSkip?.checked) return { skipPing: true };
+  const pingTypes = [];
+  if (els.advDiscoPE?.checked) pingTypes.push("PE");
+  if (els.advDiscoPS?.checked) pingTypes.push("PS");
+  if (els.advDiscoPA?.checked) pingTypes.push("PA");
+  if (els.advDiscoPR?.checked) pingTypes.push("PR");
+  return pingTypes.length ? { pingTypes } : {};
+}
+
+function bindDiscoverySkipToggle() {
+  const skip = els.advDiscoSkip;
+  if (!skip) return;
+  const others = [els.advDiscoPE, els.advDiscoPS, els.advDiscoPA, els.advDiscoPR];
+  const sync = () => {
+    const disabled = skip.checked;
+    others.forEach((cb) => cb && (cb.disabled = disabled));
+  };
+  skip.addEventListener("change", sync);
+  sync();
+}
+bindDiscoverySkipToggle();
 
 let activeScanId = null;
 
@@ -614,10 +642,11 @@ async function runScan(cidr) {
   els.scanBtn.disabled = true;
   setStatus(`Scanning ${cidr}… this can take a few seconds.`);
   try {
+    const discovery = currentDiscoverySpec();
     const scan = await fetchJson("/api/scan", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ cidr }),
+      body: JSON.stringify({ cidr, discovery }),
     });
     activeScanId = scan.id;
     setStatus(`Done. ${scan.hosts.length} host${scan.hosts.length === 1 ? "" : "s"} responded.`);

@@ -67,6 +67,39 @@ function validateScripts(scripts) {
   return { args: [`--script=${[...seen].join(",")}`], error: null };
 }
 
+// Host discovery flags exposed in v0.6. Allowlist of nmap ping-type letters
+// we route into args. -Pn (skip discovery) is mutually exclusive with the
+// others: when set, nmap treats every host in the CIDR as up and the
+// per-type pings are not used. Per-type values map 1:1 to nmap flags
+// (-PE ICMP echo, -PS TCP SYN ping, -PA TCP ACK ping, -PR ARP).
+const ALLOWED_PING_TYPES = new Set(["PE", "PS", "PA", "PR"]);
+
+// discovery is optional; null/undefined/{} means "use nmap defaults".
+// Returns { args: ["-Pn"] | ["-PE","-PS",…] | [], error: string | null }.
+function validateDiscovery(discovery) {
+  if (discovery === undefined || discovery === null) return { args: [], error: null };
+  if (typeof discovery !== "object" || Array.isArray(discovery)) {
+    return { args: null, error: "discovery must be an object" };
+  }
+  const { skipPing, pingTypes } = discovery;
+  if (skipPing !== undefined && typeof skipPing !== "boolean") {
+    return { args: null, error: "discovery.skipPing must be a boolean" };
+  }
+  if (skipPing === true) return { args: ["-Pn"], error: null };
+
+  if (pingTypes === undefined || pingTypes === null) return { args: [], error: null };
+  if (!Array.isArray(pingTypes)) return { args: null, error: "discovery.pingTypes must be an array" };
+  if (pingTypes.length === 0) return { args: [], error: null };
+  const seen = new Set();
+  for (const t of pingTypes) {
+    if (typeof t !== "string" || !ALLOWED_PING_TYPES.has(t)) {
+      return { args: null, error: `ping type not allowed: ${t}` };
+    }
+    seen.add(t);
+  }
+  return { args: [...seen].map((t) => `-${t}`), error: null };
+}
+
 // Range spec: comma-separated list of `N` or `N-M`, no spaces, no other chars.
 // Each port in [1,65535], N<=M, max 100 tokens to keep argv sane.
 const RANGE_SPEC_RE = /^(\d+(-\d+)?)(,\d+(-\d+)?)*$/;
@@ -179,16 +212,20 @@ function parseHosts(xml) {
     .filter((h) => h.ip);
 }
 
-function runPingSweep(cidr) {
+function runPingSweep(cidr, opts = {}) {
+  const discoveryArgs = opts.discoveryArgs || [];
   return new Promise((resolve, reject) => {
     // -sn: ping scan, no port scan
     // -n: no DNS resolution from nmap (we get rDNS via PTR if available; -n is faster)
     //     ...actually we DO want PTR for hostnames, so omit -n.
     // -oX -: XML output to stdout
     // -T4: faster timing
+    // discoveryArgs (v0.6): optional, validated upstream. Either ["-Pn"]
+    //   (treat all hosts up, skip discovery probes) or any combination of
+    //   ["-PE","-PS","-PA","-PR"]. Empty array = nmap defaults.
     execFile(
       "nmap",
-      ["-sn", "-T4", "-oX", "-", cidr],
+      ["-sn", "-T4", ...discoveryArgs, "-oX", "-", cidr],
       { maxBuffer: 16 * 1024 * 1024, timeout: 120_000 },
       (err, stdout, stderr) => {
         if (err) {
@@ -390,6 +427,7 @@ module.exports = {
   validatePortsSpec,
   validateScanType,
   validateScripts,
+  validateDiscovery,
   runPingSweep,
   runPortScan,
   runUdpPortScan,

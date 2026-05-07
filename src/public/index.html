@@ -114,6 +114,36 @@
               </div>
               <span class="adv-hint">Run nmap NSE scripts during the TCP scan. Default = the <code>-sC</code> set (banners, http-title, ssh-hostkey…). Safe = broader, still classified non-intrusive. Both unchecked = no scripts. <strong>Adds time</strong> to the scan.</span>
             </div>
+
+            <div class="adv-field">
+              <span class="adv-label">Host discovery</span>
+              <div class="adv-checks-row">
+                <label class="adv-check">
+                  <input type="checkbox" id="adv-disco-skip" name="adv-disco-skip" />
+                  <span>Skip discovery (<code>-Pn</code>)</span>
+                </label>
+              </div>
+              <span class="adv-hint adv-disco-skip-hint">When checked, nmap treats <strong>every host in the CIDR as up</strong> and runs no probes — useful when ICMP/SYN are blocked. Other checkboxes below are ignored.</span>
+              <div class="adv-checks-row">
+                <label class="adv-check">
+                  <input type="checkbox" id="adv-disco-pe" name="adv-disco-pe" />
+                  <span>ICMP echo (<code>-PE</code>)</span>
+                </label>
+                <label class="adv-check">
+                  <input type="checkbox" id="adv-disco-ps" name="adv-disco-ps" />
+                  <span>TCP SYN (<code>-PS</code>)</span>
+                </label>
+                <label class="adv-check">
+                  <input type="checkbox" id="adv-disco-pa" name="adv-disco-pa" />
+                  <span>TCP ACK (<code>-PA</code>)</span>
+                </label>
+                <label class="adv-check">
+                  <input type="checkbox" id="adv-disco-pr" name="adv-disco-pr" />
+                  <span>ARP (<code>-PR</code>)</span>
+                </label>
+              </div>
+              <span class="adv-hint">Pick which probes nmap uses to decide who's alive. Nothing checked = nmap defaults (echo + TCP SYN to 443 + TCP ACK to 80 + ICMP timestamp, plus ARP on local LAN). Checking some restricts to <strong>only</strong> those.</span>
+            </div>
           </div>
         </details>
 
@@ -150,7 +180,7 @@
     </main>
 
     <footer class="bottombar">
-      <span>v0.5.0</span>
+      <span>v0.6.0</span>
       <span>·</span>
       <span>MIT</span>
       <span>·</span>

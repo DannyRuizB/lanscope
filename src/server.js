@@ -7,6 +7,7 @@ const {
   validatePortsSpec,
   validateScanType,
   validateScripts,
+  validateDiscovery,
   runPingSweep,
   runPortScan,
   runUdpPortScan,
@@ -45,9 +46,12 @@ app.post("/api/scan", async (req, res) => {
   const error = validateCidr(cidr);
   if (error) return res.status(400).json({ error });
 
+  const discovery = validateDiscovery(req.body?.discovery);
+  if (discovery.error) return res.status(400).json({ error: discovery.error });
+
   const scanId = db.startScan(cidr);
   try {
-    const hosts = await runPingSweep(cidr);
+    const hosts = await runPingSweep(cidr, { discoveryArgs: discovery.args });
     db.finishScan(scanId, hosts);
     res.json(db.getScan(scanId));
   } catch (e) {
