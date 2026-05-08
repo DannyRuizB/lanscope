@@ -2,9 +2,9 @@
 
 > Visual LAN scanner for your home network or homelab — point it at a CIDR, see who's there.
 
-![LanScope on the dark + terminal-green theme: a 192.168.1.0/24 scan result with two hosts expanded. 192.168.1.162 (ASUSTek MAC) is OS-fingerprinted and shows a stack of Windows matches led by "Microsoft Windows 10 1803" at 97% accuracy, then 1903, 11, 1809, 1909, Server 2019 and 20H2 with descending accuracy — its OS button reads "[W] Windows · ▾". 192.168.1.184 (danny.local) is detected as "Linux 5.0 - 6.2" at 100% accuracy with the [L] Linux chip, and its ports sub-row shows 80/tcp open running nginx 1.24.0, 3000/tcp filtered ppp, 7070/tcp open realserver. Other hosts in the table have "Scan OS" and "Scan ports" buttons ready to fire. Family chips encode OS family in a single mono letter inside a green box.](screenshots/screenshot.png)
+> 📸 *Screenshot refresh pending — a new image showcasing the v0.6.1 visual overhaul (light / dark theme toggle, bulk scans, port hints, refreshed palette) will land with the v0.7 topology graph release. To see the current UI, [run it locally](#use-it).*
 
-🚧 Work in progress — v0.6.0.
+🚧 Work in progress — v0.6.1.
 
 ---
 
@@ -42,7 +42,7 @@ Below each pill the **technical reason** is shown in small text (`syn-ack`, `con
 
 If nmap identifies the service as web (`http`, `https`, `http-alt`, `http-proxy`, `https-alt`…), the port number itself becomes a clickable green link that opens `http://ip:port` (or `https`) in a new tab. Non-web services stay as plain text — *accessible (TCP)* doesn't mean a browser will get a useful response, just that the port is alive.
 
-Once a host has been port-scanned the button changes to `N accessible · ▾` and toggles the sub-panel open / closed without re-scanning. Port results are persisted in the database with the host, so they survive a restart.
+Once a host has been port-scanned the button changes to `N open · ▾` and toggles the sub-panel open / closed without re-scanning. Port results are persisted in the database with the host, so they survive a restart.
 
 ### Advanced options
 
@@ -107,7 +107,9 @@ LanScope's direction: cover as many `nmap` options as possible behind a visual U
 - [x] **v0.4** — UDP scan (`-sU`) on its own slower flow. New *UDP* column with its own button, independent expandable sub-row, tri-state pills (*responsive* / *unknown* / *closed*) suited to UDP semantics. 30-minute server-side timeout, confirmation prompt in the UI.
 - [x] **v0.5** — NSE scripts as an additive option of the TCP scan. Two checkboxes in *Advanced options*: *Default* (`-sC` set) and *Safe*. Allowlist-only — `vuln` / `exploit` / `brute` / `intrusive` / `dos` are deliberately not exposed. Output rendered inside the existing TCP sub-row: host-level scripts above the ports table, port-level scripts directly under the matching row.
 - [x] **v0.6** — Advanced host discovery for the CIDR sweep. *Skip discovery* (`-Pn`) reports every host as up; per-type pings *ICMP echo* (`-PE`), *TCP SYN* (`-PS`), *TCP ACK* (`-PA`) and *ARP* (`-PR`) are mutually combinable in *Advanced options*. Allowlist-validated; default behaviour unchanged.
-- [ ] **v0.7+** — Topology graph (Cytoscape), diff between scans (appeared / disappeared / changed), declared-host inventory with alerts.
+- [x] **v0.6.1** — UI / UX overhaul, no backend or schema changes. Light / dark theme toggle in the topbar (cream / sepia warm light, near-black neutral dark) with smooth fade between themes and persistence in `localStorage`. **Bulk scan** buttons in the results header — *Scan all ports / OS / UDP* run sequentially over every alive host that hasn't been scanned yet, with a live counter and cancellable mid-flight. **History entries deletable** with a per-entry × button and a *Clear all* action. Generic confirmation modal replaces the native `window.confirm` popup. **Port hints**: a short explanation of what client you'd need to connect appears under the port number for non-HTTP services (e.g. *SSH server — connect with an SSH client*, *RDP — Remote Desktop client*). Action-column buttons aligned to the same width via `table-layout: fixed` so the OS chip sticks to the left, label centred, dropdown arrow flush right. Sub-table headers (PORT / STATE / SERVICE …) use a distinct accent so they read separately from the main table headers.
+- [ ] **v0.7** — Topology graph (Cytoscape), diff between scans (appeared / disappeared / changed), and re-scan from the UI without having to delete the scan first.
+- [ ] **v0.8** — Declared-host inventory with alerts on deviation. Pre-built Docker image published to GitHub Container Registry (`ghcr.io/dannyruizb/lanscope`) so a one-line `docker pull` skips the local build. Expanded README with FAQ and troubleshooting section.
 
 ## Stack
 

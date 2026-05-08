@@ -1,23 +1,50 @@
 :root {
-  --bg: #0a0e14;
-  --surface: #0f1620;
-  --surface-2: #131c28;
-  --border: #1c2733;
-  --border-strong: #2a3a4d;
-  --text: #cbd5e1;
-  --text-strong: #e2e8f0;
-  --text-mute: #64748b;
+  --bg: #0a0a0a;
+  --surface: #131313;
+  --surface-2: #1c1c1c;
+  --border: #222222;
+  --border-strong: #353535;
+  --text: #ffffff;
+  --text-strong: #ffffff;
+  --text-mute: #909090;
   --accent: #22c55e;
   --accent-strong: #16a34a;
   --accent-soft: rgba(34, 197, 94, 0.12);
+  --accent-fg: #051a0c;
   --danger: #ef4444;
   --danger-soft: rgba(239, 68, 68, 0.12);
   --warn: #f59e0b;
+  --accent-2: #4d8061;
   --mono: "JetBrains Mono", "Fira Code", "Cascadia Code", "Source Code Pro", Consolas, monospace;
+}
+
+[data-theme="light"] {
+  --bg: #f7f1e6;
+  --surface: #fdf9f1;
+  --surface-2: #f1ead9;
+  --border: #e6dcc6;
+  --border-strong: #d2c4a3;
+  --text: #4a4035;
+  --text-strong: #2a221b;
+  --text-mute: #8a7e6e;
+  --accent: #0284c7;
+  --accent-strong: #0369a1;
+  --accent-soft: rgba(2, 132, 199, 0.10);
+  --accent-fg: #fdf9f1;
+  --danger: #b91c1c;
+  --danger-soft: rgba(185, 28, 28, 0.10);
+  --warn: #b45309;
+  --accent-2: #03627e;
 }
 
 * {
   box-sizing: border-box;
+}
+
+*,
+*::before,
+*::after {
+  transition: background-color 240ms ease, color 240ms ease, border-color 240ms ease;
 }
 
 html,
@@ -77,6 +104,11 @@ a:hover {
   color: var(--text-mute);
   font-size: 12px;
 }
+.topbar-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
 .gh-link {
   color: var(--text-mute);
   font-size: 12px;
@@ -110,6 +142,11 @@ a:hover {
   justify-content: space-between;
   padding: 14px 18px 8px;
 }
+.panel-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
 .panel-header h2 {
   margin: 0;
   font-size: 12px;
@@ -128,6 +165,32 @@ a:hover {
   padding: 10px 18px;
   border-left: 3px solid transparent;
   cursor: pointer;
+  position: relative;
+}
+.scan-list li .scan-delete {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  width: 22px;
+  height: 22px;
+  border-radius: 4px;
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--text-mute);
+  font-size: 14px;
+  line-height: 1;
+  padding: 0;
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 0.12s ease, color 0.12s ease, border-color 0.12s ease;
+}
+.scan-list li:hover .scan-delete,
+.scan-list li.active .scan-delete {
+  opacity: 1;
+}
+.scan-list li .scan-delete:hover {
+  color: var(--danger);
+  border-color: var(--danger);
 }
 .scan-list li.muted {
   color: var(--text-mute);
@@ -216,7 +279,7 @@ a:hover {
 button {
   padding: 8px 16px;
   background: var(--accent);
-  color: #051a0c;
+  color: var(--accent-fg);
   border: 0;
   border-radius: 4px;
   font-family: var(--mono);
@@ -441,6 +504,59 @@ button.ghost.danger:hover {
   color: var(--text);
 }
 
+/* Modal (custom replacement for window.confirm) */
+.modal-root {
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.modal-root[hidden] { display: none; }
+.modal-backdrop {
+  position: absolute;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.55);
+  backdrop-filter: blur(2px);
+}
+.modal-box {
+  position: relative;
+  background: var(--surface);
+  border: 1px solid var(--border-strong);
+  border-radius: 8px;
+  padding: 22px 24px 18px;
+  min-width: 340px;
+  max-width: 480px;
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5);
+}
+.modal-title {
+  margin: 0 0 8px;
+  color: var(--text-strong);
+  font-size: 15px;
+  font-weight: 600;
+  letter-spacing: 0.3px;
+}
+.modal-message {
+  margin: 0 0 18px;
+  color: var(--text);
+  font-size: 13px;
+  line-height: 1.5;
+  white-space: pre-line;
+}
+.modal-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+.modal-box button.danger {
+  background: var(--danger);
+  color: #fff;
+}
+.modal-box button.danger:hover {
+  background: #b91c1c;
+}
+
 /* Results */
 .results-header {
   display: flex;
@@ -459,6 +575,12 @@ button.ghost.danger:hover {
   margin-left: 10px;
   font-size: 12px;
 }
+.results-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
 .empty {
   padding: 60px 24px;
   text-align: center;
@@ -470,17 +592,24 @@ button.ghost.danger:hover {
 
 .hosts-table {
   width: 100%;
+  table-layout: fixed;
   border-collapse: collapse;
   background: var(--surface);
   border: 1px solid var(--border);
   border-radius: 6px;
   overflow: hidden;
 }
+.hosts-table th,
+.hosts-table td {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 .hosts-table th {
   text-align: left;
   padding: 10px 14px;
   background: var(--surface-2);
-  color: var(--text-mute);
+  color: var(--accent);
   font-size: 11px;
   text-transform: uppercase;
   letter-spacing: 1.2px;
@@ -506,20 +635,58 @@ button.ghost.danger:hover {
   color: var(--text-mute);
 }
 
-/* Ports column + sub-table */
+/* Action columns (OS / Ports / UDP) — header and cell both centered
+   so the button doesn't sit on the right of an empty cell with the
+   header label drifted off to the left. */
+.hosts-table th.ports-col,
+.hosts-table th.os-col,
+.hosts-table th.udp-col {
+  text-align: center;
+}
 .hosts-table th.ports-col {
   width: 130px;
 }
-.ports-cell {
-  text-align: right;
-}
-
-/* OS column + chip */
 .hosts-table th.os-col {
   width: 170px;
 }
-.os-cell {
-  text-align: right;
+.hosts-table th.udp-col {
+  width: 130px;
+}
+.ports-cell,
+.os-cell,
+.udp-cell {
+  text-align: center;
+}
+.ports-cell button,
+.os-cell button,
+.udp-cell button {
+  display: block;
+  width: 100%;
+  box-sizing: border-box;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.os-cell button {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+}
+.os-cell button .osb-label {
+  flex: 1;
+  text-align: center;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
+}
+.os-cell button .osb-arrow {
+  flex: 0 0 auto;
+  color: var(--text-mute);
+}
+.os-cell button .os-chip {
+  flex: 0 0 auto;
+  margin-right: 0;
 }
 .os-chip {
   display: inline-block;
@@ -559,26 +726,49 @@ tr.host-detail td {
   border-collapse: collapse;
   background: var(--bg);
 }
-.ports-table th {
-  text-align: left;
-  padding: 8px 14px 8px 28px;
-  background: transparent;
-  color: var(--text-mute);
-  font-size: 10px;
-  text-transform: uppercase;
-  letter-spacing: 1.2px;
-  font-weight: 600;
+.ports-table th,
+.ports-table td {
+  padding: 10px 18px !important;
+  text-align: left !important;
+  text-indent: 0 !important;
+  vertical-align: middle;
   border-bottom: 1px solid var(--border);
 }
+.ports-table th {
+  background: transparent;
+  color: var(--accent-2);
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0;
+  font-weight: 600;
+}
 .ports-table td {
-  padding: 7px 14px 7px 28px;
-  border-bottom: 1px solid var(--border);
   color: var(--text);
+  word-break: break-word;
 }
 .ports-table td.port-num {
   color: var(--text-strong);
   font-weight: 600;
   width: 100px;
+}
+/* UDP sub-table only: keep Port left-aligned and center the remaining
+   columns so headers and values line up visually under one another.
+   OS-match and TCP sub-tables stay left-aligned. */
+.udp-ports-table th:not(:first-child),
+.udp-ports-table td:not(:first-child) {
+  text-align: center;
+}
+/* OS-match: give the Accuracy column extra room so the % pill has
+   visible breathing space before the Family column begins. */
+.os-matches-table th:nth-child(2),
+.os-matches-table td:nth-child(2) {
+  width: 180px;
+}
+/* Shift the accuracy pill left by its own internal left-padding (8px)
+   so the digits inside the pill align under the "A" of the ACCURACY
+   header instead of being offset right by the pill's padding. */
+.os-matches-table .state-pill {
+  margin-left: -8px;
 }
 .ports-table tr:last-child td {
   border-bottom: 0;
@@ -631,6 +821,15 @@ tr.host-detail td {
   font-size: 10px;
   color: var(--text-mute);
   letter-spacing: 0.4px;
+}
+.port-hint {
+  margin-top: 3px;
+  font-size: 10px;
+  color: var(--text-mute);
+  letter-spacing: 0.3px;
+  white-space: normal;
+  line-height: 1.4;
+  max-width: 260px;
 }
 .port-link {
   color: var(--accent);

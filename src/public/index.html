@@ -5,6 +5,20 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>LanScope — Visual LAN scanner</title>
     <link rel="stylesheet" href="styles.css" />
+    <script>
+      // Apply saved theme before paint to avoid flash. Falls back to the
+      // OS-level prefers-color-scheme when there is no stored choice.
+      (function () {
+        var stored = null;
+        try { stored = localStorage.getItem("lanscope-theme"); } catch (_) {}
+        var theme = stored;
+        if (!theme) {
+          theme = window.matchMedia && window.matchMedia("(prefers-color-scheme: light)").matches
+            ? "light" : "dark";
+        }
+        if (theme === "light") document.documentElement.setAttribute("data-theme", "light");
+      })();
+    </script>
   </head>
   <body>
     <header class="topbar">
@@ -13,14 +27,20 @@
         <strong>LanScope</strong>
         <span class="tagline">visual LAN scanner</span>
       </div>
-      <a class="gh-link" href="https://github.com/DannyRuizB/lanscope" target="_blank" rel="noopener">GitHub</a>
+      <div class="topbar-actions">
+        <button id="theme-toggle" class="ghost small" title="Toggle light / dark theme">Light</button>
+        <a class="gh-link" href="https://github.com/DannyRuizB/lanscope" target="_blank" rel="noopener">GitHub</a>
+      </div>
     </header>
 
     <main class="layout">
       <aside class="sidebar">
         <div class="panel-header">
           <h2>History</h2>
-          <button id="refresh-history" class="ghost" title="Refresh">↻</button>
+          <div class="panel-actions">
+            <button id="clear-history" class="ghost small" title="Delete all scans">Clear all</button>
+            <button id="refresh-history" class="ghost" title="Refresh">↻</button>
+          </div>
         </div>
         <ul id="scan-list" class="scan-list">
           <li class="muted">No scans yet.</li>
@@ -153,7 +173,12 @@
               <strong id="results-cidr"></strong>
               <span class="muted" id="results-meta"></span>
             </div>
-            <button id="delete-scan" class="ghost danger" hidden title="Delete this scan">Delete</button>
+            <div class="results-actions">
+              <button id="bulk-portscan" class="ghost small" title="Run TCP port scan on every host that hasn't been scanned yet">Scan all ports</button>
+              <button id="bulk-osscan" class="ghost small" title="Run OS fingerprint on every host that hasn't been scanned yet">Scan all OS</button>
+              <button id="bulk-udpscan" class="ghost small" title="Run UDP scan on every host that hasn't been scanned yet — slow!">Scan all UDP</button>
+              <button id="delete-scan" class="ghost danger small" hidden title="Delete this scan">Delete</button>
+            </div>
           </div>
 
           <div id="results-empty" class="empty">
@@ -179,8 +204,20 @@
       </section>
     </main>
 
+    <div id="modal-root" class="modal-root" hidden role="dialog" aria-modal="true" aria-labelledby="modal-title">
+      <div class="modal-backdrop"></div>
+      <div class="modal-box">
+        <h3 id="modal-title" class="modal-title"></h3>
+        <p id="modal-message" class="modal-message"></p>
+        <div class="modal-actions">
+          <button id="modal-cancel" type="button" class="ghost">Cancel</button>
+          <button id="modal-confirm" type="button">Confirm</button>
+        </div>
+      </div>
+    </div>
+
     <footer class="bottombar">
-      <span>v0.6.0</span>
+      <span>v0.6.1</span>
       <span>·</span>
       <span>MIT</span>
       <span>·</span>
