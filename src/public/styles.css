@@ -1012,6 +1012,24 @@ tr.host-detail td {
   margin-bottom: 0;
 }
 
+/* Re-scan toolbar (v0.7.2) — top of each sub-row (kind=ports/os/udp) */
+.rescan-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 10px;
+}
+.rescan-meta {
+  font-family: var(--mono);
+  font-size: 10.5px;
+  color: var(--text-mute);
+  letter-spacing: 0.3px;
+}
+.rescan-btn:disabled {
+  opacity: 0.7;
+  cursor: progress;
+}
+
 /* View toggle (Table / Graph) */
 .view-toggle {
   display: inline-flex;

@@ -317,10 +317,33 @@ function renderHostRow(h) {
     </tr>`;
 }
 
+const RESCAN_FLAG_FOR_KIND = {
+  ports: "portscanned_at",
+  os: "osscanned_at",
+  udp: "udp_portscanned_at",
+};
+
+const RESCAN_LABEL_FOR_KIND = {
+  ports: "Re-scan ports",
+  os: "Re-scan OS",
+  udp: "Re-scan UDP",
+};
+
+function rescanToolbar(host, kind) {
+  const ts = host[RESCAN_FLAG_FOR_KIND[kind]];
+  const meta = ts ? `<span class="rescan-meta">last scan ${fmtTime(ts)}</span>` : "";
+  return `
+    <div class="rescan-toolbar">
+      <button type="button" class="ghost small rescan-btn" data-host-id="${host.id}" data-kind="${kind}">${RESCAN_LABEL_FOR_KIND[kind]}</button>
+      ${meta}
+    </div>`;
+}
+
 function renderOsTable(host) {
   const matches = host.os_matches || [];
+  const toolbar = rescanToolbar(host, "os");
   if (!matches.length) {
-    return `<div class="ports-empty">No OS match (host fingerprint inconclusive).</div>`;
+    return `${toolbar}<div class="ports-empty">No OS match (host fingerprint inconclusive).</div>`;
   }
   const rows = matches
     .map(
@@ -335,6 +358,7 @@ function renderOsTable(host) {
     )
     .join("");
   return `
+    ${toolbar}
     <table class="ports-table os-matches-table">
       <thead>
         <tr><th>Match</th><th>Accuracy</th><th>Family</th><th>Vendor</th><th>Type</th></tr>
@@ -435,8 +459,9 @@ function renderUdpStateCell(p) {
 
 function renderUdpPortsTable(host) {
   const ports = host.udp_ports || [];
+  const toolbar = rescanToolbar(host, "udp");
   if (!ports.length) {
-    return `<div class="ports-empty">No UDP ports detected.</div>`;
+    return `${toolbar}<div class="ports-empty">No UDP ports detected.</div>`;
   }
   const rows = ports
     .map(
@@ -451,6 +476,7 @@ function renderUdpPortsTable(host) {
     )
     .join("");
   return `
+    ${toolbar}
     <table class="ports-table udp-ports-table">
       <thead>
         <tr><th>Port</th><th>State</th><th>Service</th><th>Product</th><th>Version</th></tr>
@@ -496,11 +522,13 @@ function renderPortRow(host, p) {
 
 function renderPortsTable(host) {
   const ports = host.ports || [];
+  const toolbar = rescanToolbar(host, "ports");
   if (!ports.length && !(host.host_scripts || []).length) {
-    return `<div class="ports-empty">No accessible ports detected on top 100.</div>`;
+    return `${toolbar}<div class="ports-empty">No accessible ports detected on top 100.</div>`;
   }
   const rows = ports.map((p) => renderPortRow(host, p)).join("");
   return `
+    ${toolbar}
     ${renderHostScriptsBlock(host)}
     <table class="ports-table">
       <thead>
@@ -581,48 +609,65 @@ function renderScan(scan) {
 let bulkRunning = null; // "ports" | "os" | "udp" | null
 let bulkCancelRequested = false;
 
-function eligibleHosts(kind) {
+function eligibleHosts(kind, force = false) {
   if (!lastScan?.hosts) return [];
-  const flag = kind === "ports" ? "portscanned_at"
-            : kind === "os" ? "osscanned_at"
-            : "udp_portscanned_at";
+  if (force) return lastScan.hosts.filter((h) => h.status === "up");
+  const flag = RESCAN_FLAG_FOR_KIND[kind];
   return lastScan.hosts.filter((h) => h.status === "up" && !h[flag]);
 }
 
 function updateBulkButtons() {
   const buttons = [
-    { btn: els.bulkPortscan, kind: "ports", label: "Scan all ports" },
-    { btn: els.bulkOsscan,   kind: "os",    label: "Scan all OS" },
-    { btn: els.bulkUdpscan,  kind: "udp",   label: "Scan all UDP" },
+    { btn: els.bulkPortscan, kind: "ports", label: "Scan all ports", rescanLabel: "Re-scan all ports" },
+    { btn: els.bulkOsscan,   kind: "os",    label: "Scan all OS",    rescanLabel: "Re-scan all OS" },
+    { btn: els.bulkUdpscan,  kind: "udp",   label: "Scan all UDP",   rescanLabel: "Re-scan all UDP" },
   ];
-  for (const { btn, kind, label } of buttons) {
+  for (const { btn, kind, label, rescanLabel } of buttons) {
     if (!btn) continue;
     if (bulkRunning === kind) continue; // owner manages its own label/state
     btn.disabled = bulkRunning !== null;
+    btn.dataset.mode = "scan";
     if (!lastScan) { btn.textContent = label; continue; }
     const remaining = eligibleHosts(kind).length;
+    const upCount = lastScan.hosts.filter((h) => h.status === "up").length;
     if (remaining === 0) {
-      const upCount = lastScan.hosts.filter((h) => h.status === "up").length;
-      btn.disabled = true;
-      btn.textContent = upCount === 0 ? `${label} (no hosts)` : `${label} (all done)`;
+      if (upCount === 0) {
+        btn.disabled = true;
+        btn.textContent = `${label} (no hosts)`;
+      } else {
+        btn.dataset.mode = "rescan";
+        btn.textContent = `${rescanLabel} (${upCount})`;
+      }
     } else {
       btn.textContent = `${label} (${remaining})`;
     }
   }
 }
 
-async function runBulk(kind, runOne) {
+async function runBulk(kind, runOne, { force = false } = {}) {
   if (bulkRunning) return;
-  const targets = eligibleHosts(kind);
+  const targets = eligibleHosts(kind, force);
   if (!targets.length) return;
 
-  if (kind === "udp") {
+  const kindLabel = kind === "ports" ? "TCP port" : kind === "os" ? "OS" : "UDP";
+  if (force) {
+    const udpNote = kind === "udp"
+      ? `\n\nUDP scans are slow — top 100 typically takes 5–15 min per host (≈${Math.round(targets.length * 10)} min total).`
+      : "";
+    const ok = await confirmModal({
+      title: `Re-scan all ${kindLabel}`,
+      message: `This will replace existing ${kindLabel} data for ${targets.length} host${targets.length === 1 ? "" : "s"} in this scan.${udpNote}`,
+      confirmText: "Re-scan",
+      danger: true,
+    });
+    if (!ok) return;
+  } else if (kind === "udp") {
     const minutes = Math.round(targets.length * 10);
-    const ok = confirm(
-      `UDP scans are slow — typically 5–15 min each.\n\n` +
-      `${targets.length} host${targets.length === 1 ? "" : "s"} to scan ≈ ${minutes} minutes total.\n\n` +
-      `Continue?`,
-    );
+    const ok = await confirmModal({
+      title: "Scan all UDP",
+      message: `UDP scans are slow — typically 5–15 min each.\n\n${targets.length} host${targets.length === 1 ? "" : "s"} to scan ≈ ${minutes} min total.`,
+      confirmText: "Start",
+    });
     if (!ok) return;
   }
 
@@ -1208,9 +1253,13 @@ function toggleHostDetail(hostId, kind = "ports") {
 async function runPortscan(hostId) {
   const btn = els.body.querySelector(`button.portscan-btn[data-host-id="${hostId}"]`);
   if (!btn) return;
+  const rescanBtn = els.body.querySelector(
+    `button.rescan-btn[data-host-id="${hostId}"][data-kind="ports"]`,
+  );
   btn.disabled = true;
   const original = btn.textContent;
   btn.textContent = "Scanning…";
+  if (rescanBtn) { rescanBtn.disabled = true; rescanBtn.textContent = "Re-scanning…"; }
   try {
     const timing = els.advTiming?.value || "T4";
     const scanType = els.advScanType?.value || "connect";
@@ -1243,6 +1292,7 @@ async function runPortscan(hostId) {
   } catch (e) {
     btn.disabled = false;
     btn.textContent = original;
+    if (rescanBtn) { rescanBtn.disabled = false; rescanBtn.textContent = RESCAN_LABEL_FOR_KIND.ports; }
     setStatus(`Port scan failed: ${e.message}`, true);
     throw e;
   }
@@ -1251,9 +1301,13 @@ async function runPortscan(hostId) {
 async function runUdpscan(hostId) {
   const btn = els.body.querySelector(`button.udpscan-btn[data-host-id="${hostId}"]`);
   if (!btn) return;
+  const rescanBtn = els.body.querySelector(
+    `button.rescan-btn[data-host-id="${hostId}"][data-kind="udp"]`,
+  );
   btn.disabled = true;
   const original = btn.textContent;
   btn.textContent = "Scanning UDP…";
+  if (rescanBtn) { rescanBtn.disabled = true; rescanBtn.textContent = "Re-scanning UDP…"; }
   setStatus("UDP scan running — this can take several minutes.");
   try {
     const timing = els.advTiming?.value || "T4";
@@ -1285,6 +1339,7 @@ async function runUdpscan(hostId) {
   } catch (e) {
     btn.disabled = false;
     btn.textContent = original;
+    if (rescanBtn) { rescanBtn.disabled = false; rescanBtn.textContent = RESCAN_LABEL_FOR_KIND.udp; }
     setStatus(`UDP scan failed: ${e.message}`, true);
     throw e;
   }
@@ -1293,9 +1348,13 @@ async function runUdpscan(hostId) {
 async function runOsscan(hostId) {
   const btn = els.body.querySelector(`button.osscan-btn[data-host-id="${hostId}"]`);
   if (!btn) return;
+  const rescanBtn = els.body.querySelector(
+    `button.rescan-btn[data-host-id="${hostId}"][data-kind="os"]`,
+  );
   btn.disabled = true;
   const original = btn.innerHTML;
   btn.textContent = "Scanning…";
+  if (rescanBtn) { rescanBtn.disabled = true; rescanBtn.textContent = "Re-scanning…"; }
   try {
     const data = await fetchJson(`/api/hosts/${hostId}/osscan`, { method: "POST" });
     if (lastScan) {
@@ -1319,6 +1378,7 @@ async function runOsscan(hostId) {
   } catch (e) {
     btn.disabled = false;
     btn.innerHTML = original;
+    if (rescanBtn) { rescanBtn.disabled = false; rescanBtn.textContent = RESCAN_LABEL_FOR_KIND.os; }
     setStatus(`OS scan failed: ${e.message}`, true);
     throw e;
   }
@@ -1359,17 +1419,20 @@ els.form.addEventListener("submit", (e) => {
 els.bulkPortscan?.addEventListener("click", () => {
   if (bulkRunning === "ports") return; // click as Cancel is handled by inner listener
   if (bulkRunning) return;
-  runBulk("ports", runPortscan);
+  const force = els.bulkPortscan.dataset.mode === "rescan";
+  runBulk("ports", runPortscan, { force });
 });
 els.bulkOsscan?.addEventListener("click", () => {
   if (bulkRunning === "os") return;
   if (bulkRunning) return;
-  runBulk("os", runOsscan);
+  const force = els.bulkOsscan.dataset.mode === "rescan";
+  runBulk("os", runOsscan, { force });
 });
 els.bulkUdpscan?.addEventListener("click", () => {
   if (bulkRunning === "udp") return;
   if (bulkRunning) return;
-  runBulk("udp", runUdpscan);
+  const force = els.bulkUdpscan.dataset.mode === "rescan";
+  runBulk("udp", runUdpscan, { force });
 });
 
 // Theme toggle. The initial theme is applied inline in <head> to avoid
@@ -1537,6 +1600,26 @@ document.addEventListener("click", (e) => {
 
 els.viewTable?.addEventListener("click", () => setViewMode("table"));
 els.viewGraph?.addEventListener("click", () => setViewMode("graph"));
+
+els.body.addEventListener("click", async (e) => {
+  const btn = e.target.closest(".rescan-btn");
+  if (!btn || btn.disabled) return;
+  const hostId = parseInt(btn.dataset.hostId, 10);
+  const kind = btn.dataset.kind;
+  if (Number.isNaN(hostId)) return;
+  if (kind === "udp") {
+    const ok = await confirmModal({
+      title: "Re-scan UDP",
+      message: "UDP scans are slow — top 100 typically takes 5–15 minutes. This will replace the existing UDP data for this host.",
+      confirmText: "Re-scan",
+    });
+    if (!ok) return;
+    runUdpscan(hostId).catch(() => {});
+    return;
+  }
+  if (kind === "ports") { runPortscan(hostId).catch(() => {}); return; }
+  if (kind === "os")    { runOsscan(hostId).catch(() => {});    return; }
+});
 
 setViewMode(viewMode);
 
