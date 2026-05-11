@@ -4,7 +4,7 @@
 
 ![LanScope topology graph of a /24 scan, dark theme, gateway at the centre with concentric rings of hosts by relevance](screenshots/screenshot.png)
 
-🚧 Work in progress — v0.8.1.
+🚧 Work in progress — v0.8.2.
 
 ---
 
@@ -48,7 +48,7 @@ docker compose up -d
 # open http://localhost:3030
 ```
 
-Pin a specific version in production (e.g. `ghcr.io/dannyruizb/lanscope:0.8.1`) so an upgrade is always intentional. Images are multi-arch — `linux/amd64` for desktops / NUCs and `linux/arm64` for Raspberry Pi 4 / 5 and Apple-silicon homelabs.
+Pin a specific version in production (e.g. `ghcr.io/dannyruizb/lanscope:0.8.2`) so an upgrade is always intentional. Images are multi-arch — `linux/amd64` for desktops / NUCs and `linux/arm64` for Raspberry Pi 4 / 5 and Apple-silicon homelabs.
 
 Or build locally from source:
 
@@ -144,7 +144,102 @@ LanScope's direction: cover as many `nmap` options as possible behind a visual U
 - [x] **v0.7.3** — **Diff between two scans** of the same CIDR, frontend-only. A *Compare with…* button in the results header opens a dropdown listing every previous scan of the current CIDR; picking one loads it as the base and a persistent banner reports *N appeared · N disappeared · N changed*. In the table, appeared rows tint green, changed rows tint amber with an inline badge listing which fields differ (`mac` / `hostname` / `os`), and a *Disappeared since base* section at the bottom shows ghost rows in red with strike-through IPs. In the graph, appeared / changed nodes carry a coloured border and disappeared hosts re-enter as ghost nodes with a dashed red border and reduced opacity. Switching to a scan of a different CIDR clears the comparison automatically. Diff was scoped against MAC / hostname / OS family changes only — set-of-open-ports differences are intentionally excluded to avoid noise from partial re-scans.
 - [x] **v0.8.0** — **Declared inventory via baselines**. A new ★ *Set as baseline* button in the results header marks the current scan as the canonical state of its CIDR (`inventory_baselines(cidr UNIQUE, scan_id)` in the schema). When you later open any other scan of the same CIDR, LanScope automatically compares it against the baseline and shows the v0.7.3 diff (appeared / disappeared / changed) without you having to pick anything from the *Compare with…* dropdown. The diff banner switches to a yellow accent and reads *★ Compared against baseline* so you know whether the comparison is auto (against baseline) or manual (against another scan). Sidebar entries that are the baseline of their CIDR carry a ★ marker. Manual *Compare with…* picks override the baseline auto-compare for the current view; *Exit diff* turns it off until you switch to another scan; switching to another scan re-enables it.
 - [x] **v0.8.1** — **Pre-built image on GHCR** (`ghcr.io/dannyruizb/lanscope`). A GitHub Action runs on every `v*` tag, builds the image for `linux/amd64` and `linux/arm64` via QEMU + buildx, and pushes both an exact-version tag (e.g. `:0.8.1`) and `:latest`. `docker-compose.yml` now defaults to the GHCR image so newcomers can `docker compose up -d` without cloning the repo; local development still uses `docker compose up -d --build` and that flag takes precedence over the pinned image.
-- [ ] **v0.8.2** — Expanded README with FAQ and troubleshooting section (Alpine `nmap-scripts`, `cap_add`, `network_mode: host`, restart-vs-rebuild gotcha).
+- [x] **v0.8.2** — **Expanded README**: FAQ and Troubleshooting sections covering the legal angle, the macOS / Windows situation, where the data lives, how to back up and upgrade, plus fixes for the gotchas the project has accumulated (Alpine `nmap-scripts`, `cap_add` capabilities, `network_mode: host`, the restart-vs-rebuild trap, port conflicts, empty MAC fields, the `-Pn` quirk, GHCR auth, SQLite WAL files). Closes the v0.8.x line.
+
+## FAQ
+
+### Is it legal to scan a network with LanScope?
+On a network you own, manage, or have explicit permission to scan — yes. LanScope is built for your home LAN, your homelab, or a customer network where you've been hired to inventory devices. Scanning a network you don't have permission to scan is illegal in most jurisdictions and is **not** what this tool is for. The project deliberately ships with NSE limited to `default` / `safe` (no `vuln` / `exploit` / `brute`) so it can't be twisted into a remote exploitation tool, but you can still get yourself into trouble by pointing it at someone else's network. Don't.
+
+### Does it work on macOS or Windows?
+Not for real scanning. On Docker Desktop (macOS / Windows) the container runs inside a Linux VM, and `network_mode: host` only exposes that VM's network — not your real LAN. You can run LanScope to play with the UI, but it'll only see the VM's tiny internal subnet. For real use, run it on a Linux host (or a Linux VM with bridged networking) on the same LAN you want to scan.
+
+### Does it need root on the host?
+No. `nmap` inside the container runs as the unprivileged `node` user; the Dockerfile uses `setcap cap_net_raw,cap_net_admin,cap_net_bind_service+eip` on the `nmap` binary so it can craft raw packets without root. What the *container* needs is the two capabilities — `NET_RAW` and `NET_ADMIN` — declared in `cap_add`. Compose handles that.
+
+### Where is my data stored?
+Locally, in a single SQLite file inside the Docker named volume `lanscope-data` (mounted at `/var/lib/lanscope/lanscope.db` in the container). Nothing leaves the machine. No telemetry, no analytics, no remote calls beyond what `nmap` itself sends across the LAN.
+
+### How do I back up my scans?
+Copy the SQLite file out of the volume:
+
+```bash
+docker run --rm -v lanscope-data:/data -v "$PWD":/backup alpine \
+  cp /data/lanscope.db /backup/lanscope-$(date +%F).db
+```
+
+Restoring is the reverse direction. The file is a regular SQLite database; you can also open it with the `sqlite3` CLI to inspect or export tables.
+
+### Can I scan a remote network?
+Only by running LanScope on a host that's *inside* that network. The CIDR sweep needs L2 reachability for ARP and `nmap`'s discovery probes to mean anything; routing through a VPN can work for the ping sweep but you'll lose MAC addresses and vendor lookups (vendor is derived from the MAC OUI). The supported use case is "homelab / office LAN you can plug into."
+
+### How do I upgrade?
+If you pull from GHCR:
+
+```bash
+# bump the tag in your docker-compose.yml to the new version
+docker compose pull
+docker compose up -d
+```
+
+If you build from source: `git pull && docker compose up -d --build`. The database migrates itself at boot (`CREATE TABLE IF NOT EXISTS` + idempotent `ALTER`s) so going forward across versions is a no-op for your scan history. Going *backwards* is not supported — older binaries may not understand newer tables, but the existing data won't be destroyed either.
+
+### How do I uninstall?
+```bash
+docker compose down -v   # removes the lanscope-data volume too
+docker image rm ghcr.io/dannyruizb/lanscope:0.8.2  # or whatever tag you have
+```
+
+Without the `-v` flag the volume sticks around, so a future `docker compose up -d` resumes with all your history.
+
+## Troubleshooting
+
+### `nmap: Operation not permitted` even though the container appears to run as root
+Docker doesn't grant `NET_RAW` / `NET_ADMIN` by default, and Alpine's `nmap` binary expects them as file capabilities. The supplied `docker-compose.yml` declares both in `cap_add`; if you wrote your own compose, copy that block over.
+
+```yaml
+cap_add:
+  - NET_RAW
+  - NET_ADMIN
+```
+
+### `could not locate nse_main.lua` when an NSE script runs
+The Alpine `nmap` package ships the binary and data files, but **not** the script library. You need the `nmap-scripts` package too. The official image already has it; if you built a slim variant yourself, add it to the Dockerfile:
+
+```
+RUN apk add --no-cache nmap nmap-scripts libcap
+```
+
+### I changed something under `src/` and ran `docker compose restart`, but the UI is unchanged
+The image is built once; `COPY src/ ./src/` runs at build time. `restart` just re-launches the existing image. After editing source, use `docker compose up -d --build` to rebuild. (Lesson learned during v0.5 development — burned about ten minutes wondering why a script-output decode fix wasn't sticking.)
+
+### Port 3030 is already in use
+Override the host-side port with the `PORT` environment variable inside the container *and* the host port mapping. The simplest path is to keep `network_mode: host` and just change `PORT`:
+
+```yaml
+environment:
+  PORT: 3050
+```
+
+LanScope binds to `0.0.0.0:$PORT`. If you prefer Docker's normal port mapping, drop `network_mode: host` — but you'll lose real LAN visibility, so that only makes sense if you're scanning the Docker network itself.
+
+### MAC column is empty for some hosts
+`nmap` can only fill in MAC addresses for hosts on the **same Layer-2 segment** as the scanning machine. Anything past a router (different subnet) is reachable at L3 but the MAC you'd see would just be the gateway's, so `nmap` doesn't report one. Vendor is derived from MAC, so it follows the same rule.
+
+### Using *Skip discovery* (`-Pn`) on a /24 shows every IP as `up` with no MAC and reason `user-set`
+That's `nmap` working as documented: `-Pn` tells it to skip the discovery phase entirely and treat every host as up. With a `/24` you'll get 256 rows, every one of them marked `up` even if the address is unallocated. The trade-off is intentional — `-Pn` is for when ICMP / ARP / SYN-on-443 are all blocked and you want to brute through anyway. Use the default discovery for a realistic alive count.
+
+### `docker pull ghcr.io/dannyruizb/lanscope:…` fails with `unauthorized`
+The GHCR package is set to **public** so anonymous pulls should just work. If you're getting `unauthorized` anyway, you probably have stale credentials cached from a previous `docker login ghcr.io`. Try `docker logout ghcr.io && docker pull ghcr.io/dannyruizb/lanscope:latest`. If you're behind a corporate proxy, GHCR is reached via `pkg-containers.githubusercontent.com` and you may need to allow that.
+
+### Container died and now I see `lanscope.db-shm` / `lanscope.db-wal` files
+SQLite runs in WAL mode (`PRAGMA journal_mode = WAL`), so a crash leaves the write-ahead log files. They're not corruption — they get checkpointed on the next clean shutdown. To force a checkpoint without restarting:
+
+```bash
+docker exec lanscope sqlite3 /var/lib/lanscope/lanscope.db 'PRAGMA wal_checkpoint(TRUNCATE);'
+```
+
+If you suspect actual corruption, run `PRAGMA integrity_check;` against the same database; a healthy DB returns `ok`.
 
 ## Stack
 
