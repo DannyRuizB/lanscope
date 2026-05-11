@@ -4,7 +4,7 @@
 
 ![LanScope topology graph of a /24 scan, dark theme, gateway at the centre with concentric rings of hosts by relevance](screenshots/screenshot.png)
 
-🚧 Work in progress — v0.8.2.
+🟢 Stable — v0.8.3 (feature-complete, maintenance-only).
 
 ---
 
@@ -48,7 +48,7 @@ docker compose up -d
 # open http://localhost:3030
 ```
 
-Pin a specific version in production (e.g. `ghcr.io/dannyruizb/lanscope:0.8.2`) so an upgrade is always intentional. Images are multi-arch — `linux/amd64` for desktops / NUCs and `linux/arm64` for Raspberry Pi 4 / 5 and Apple-silicon homelabs.
+Pin a specific version in production (e.g. `ghcr.io/dannyruizb/lanscope:0.8.3`) so an upgrade is always intentional. Images are multi-arch — `linux/amd64` for desktops / NUCs and `linux/arm64` for Raspberry Pi 4 / 5 and Apple-silicon homelabs.
 
 Or build locally from source:
 
@@ -144,7 +144,8 @@ LanScope's direction: cover as many `nmap` options as possible behind a visual U
 - [x] **v0.7.3** — **Diff between two scans** of the same CIDR, frontend-only. A *Compare with…* button in the results header opens a dropdown listing every previous scan of the current CIDR; picking one loads it as the base and a persistent banner reports *N appeared · N disappeared · N changed*. In the table, appeared rows tint green, changed rows tint amber with an inline badge listing which fields differ (`mac` / `hostname` / `os`), and a *Disappeared since base* section at the bottom shows ghost rows in red with strike-through IPs. In the graph, appeared / changed nodes carry a coloured border and disappeared hosts re-enter as ghost nodes with a dashed red border and reduced opacity. Switching to a scan of a different CIDR clears the comparison automatically. Diff was scoped against MAC / hostname / OS family changes only — set-of-open-ports differences are intentionally excluded to avoid noise from partial re-scans.
 - [x] **v0.8.0** — **Declared inventory via baselines**. A new ★ *Set as baseline* button in the results header marks the current scan as the canonical state of its CIDR (`inventory_baselines(cidr UNIQUE, scan_id)` in the schema). When you later open any other scan of the same CIDR, LanScope automatically compares it against the baseline and shows the v0.7.3 diff (appeared / disappeared / changed) without you having to pick anything from the *Compare with…* dropdown. The diff banner switches to a yellow accent and reads *★ Compared against baseline* so you know whether the comparison is auto (against baseline) or manual (against another scan). Sidebar entries that are the baseline of their CIDR carry a ★ marker. Manual *Compare with…* picks override the baseline auto-compare for the current view; *Exit diff* turns it off until you switch to another scan; switching to another scan re-enables it.
 - [x] **v0.8.1** — **Pre-built image on GHCR** (`ghcr.io/dannyruizb/lanscope`). A GitHub Action runs on every `v*` tag, builds the image for `linux/amd64` and `linux/arm64` via QEMU + buildx, and pushes both an exact-version tag (e.g. `:0.8.1`) and `:latest`. `docker-compose.yml` now defaults to the GHCR image so newcomers can `docker compose up -d` without cloning the repo; local development still uses `docker compose up -d --build` and that flag takes precedence over the pinned image.
-- [x] **v0.8.2** — **Expanded README**: FAQ and Troubleshooting sections covering the legal angle, the macOS / Windows situation, where the data lives, how to back up and upgrade, plus fixes for the gotchas the project has accumulated (Alpine `nmap-scripts`, `cap_add` capabilities, `network_mode: host`, the restart-vs-rebuild trap, port conflicts, empty MAC fields, the `-Pn` quirk, GHCR auth, SQLite WAL files). Closes the v0.8.x line.
+- [x] **v0.8.2** — **Expanded README**: FAQ and Troubleshooting sections covering the legal angle, the macOS / Windows situation, where the data lives, how to back up and upgrade, plus fixes for the gotchas the project has accumulated (Alpine `nmap-scripts`, `cap_add` capabilities, `network_mode: host`, the restart-vs-rebuild trap, port conflicts, empty MAC fields, the `-Pn` quirk, GHCR auth, SQLite WAL files).
+- [x] **v0.8.3** — **Closing polish** (no app changes): OCI image labels (`org.opencontainers.image.{title, description, source, url, documentation, licenses, authors}`) so the GHCR package page and `docker inspect` show project metadata directly; `.gitignore` covers `preview-*.html` scratch files; GitHub repo topics added for discovery. Marks the project as **feature-complete** — no more roadmap entries planned.
 
 ## FAQ
 

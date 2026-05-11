@@ -34,3 +34,6 @@ logs/
 # Nmap raw output (we keep parsed results in DB, not the XML files)
 *.nmap
 *.xml.scan
+
+# Scratch HTML files used to iterate palettes / mockups (e.g. preview-headers.html)
+preview-*.html
