@@ -29,6 +29,10 @@ const els = {
   bulkPortscan: $("#bulk-portscan"),
   bulkOsscan: $("#bulk-osscan"),
   bulkUdpscan: $("#bulk-udpscan"),
+  portFilterWrap: $("#port-filter-wrap"),
+  portFilterInput: $("#port-filter-input"),
+  portFilterToggle: $("#port-filter-toggle"),
+  portFilterList: $("#port-filter-list"),
 };
 
 function currentPortsSpec() {
@@ -507,11 +511,14 @@ function renderScan(scan) {
   els.deleteBtn.hidden = false;
   els.resultsCidr.textContent = scan.cidr;
 
+  renderPortFilter(scan);
+  const filtered = filterHosts(scan.hosts);
   const upCount = scan.hosts.filter((h) => h.status === "up").length;
   const meta = [
     fmtTime(scan.started_at),
     fmtDuration(scan) ? `took ${fmtDuration(scan)}` : null,
     `${upCount} alive`,
+    filterPort !== null ? `${filtered.length} with port ${filterPort} open` : null,
     scan.status === "error" ? `error: ${scan.error_message}` : null,
   ]
     .filter(Boolean)
@@ -528,8 +535,15 @@ function renderScan(scan) {
     return;
   }
 
+  if (filterPort !== null && !filtered.length) {
+    els.table.hidden = true;
+    els.empty.hidden = false;
+    els.empty.textContent = `No hosts have port ${filterPort} open. (Hosts not yet port-scanned are excluded.)`;
+    return;
+  }
+
   els.table.hidden = false;
-  els.body.innerHTML = scan.hosts.map(renderHostRow).join("");
+  els.body.innerHTML = sortHosts(filtered).map(renderHostRow).join("");
   attachPortscanHandlers();
   attachOsscanHandlers();
   attachUdpscanHandlers();
@@ -693,6 +707,155 @@ function currentHostsById() {
 }
 
 let lastScan = null;
+let sortState = { key: null, dir: null };
+
+function compareIp(a, b) {
+  const pa = (a || "").split(".").map((x) => parseInt(x, 10) || 0);
+  const pb = (b || "").split(".").map((x) => parseInt(x, 10) || 0);
+  for (let i = 0; i < 4; i++) {
+    if (pa[i] !== pb[i]) return pa[i] - pb[i];
+  }
+  return 0;
+}
+
+function osBucket(host) {
+  if (!host.osscanned_at) return null;
+  const top = (host.os_matches || [])[0];
+  if (!top) return null;
+  const f = (top.family || "").toLowerCase();
+  if (f.includes("windows")) return 1;
+  if (f.includes("linux")) return 2;
+  if (f.includes("mac") || f.includes("ios") || f.includes("apple")) return 3;
+  return 4;
+}
+
+function osTopFamily(host) {
+  const top = (host.os_matches || [])[0];
+  return ((top && (top.family || top.name)) || "").toLowerCase();
+}
+
+function portsOpenCount(host) {
+  if (!host.portscanned_at) return null;
+  return (host.ports || []).filter((p) => p.state === "open").length;
+}
+
+const DEFAULT_SORT_DIR = { ip: "asc", vendor: "asc", os: "asc", ports: "desc" };
+
+let filterPort = null;
+
+function hasOpenPort(host, port) {
+  if (!host.portscanned_at) return false;
+  return (host.ports || []).some((p) => p.port === port && p.state === "open");
+}
+
+function filterHosts(hosts) {
+  if (filterPort === null) return hosts;
+  return hosts.filter((h) => hasOpenPort(h, filterPort));
+}
+
+function topOpenPorts(hosts, limit = 5) {
+  const counts = new Map();
+  for (const h of hosts) {
+    if (!h.portscanned_at) continue;
+    const seen = new Set();
+    for (const p of h.ports || []) {
+      if (p.state === "open" && !seen.has(p.port)) {
+        seen.add(p.port);
+        counts.set(p.port, (counts.get(p.port) || 0) + 1);
+      }
+    }
+  }
+  return [...counts.entries()]
+    .sort((a, b) => b[1] - a[1] || a[0] - b[0])
+    .slice(0, limit)
+    .map(([port, count]) => ({ port, count }));
+}
+
+function renderPortFilter(scan) {
+  if (!els.portFilterWrap) return;
+  const top = topOpenPorts(scan.hosts || [], 5);
+  const anyScanned = (scan.hosts || []).some((h) => h.portscanned_at);
+  if (!anyScanned) {
+    els.portFilterWrap.hidden = true;
+    els.portFilterList.hidden = true;
+    if (filterPort !== null) filterPort = null;
+    return;
+  }
+  els.portFilterWrap.hidden = false;
+  els.portFilterInput.value = filterPort !== null ? String(filterPort) : "";
+  if (!top.length) {
+    els.portFilterList.innerHTML =
+      `<li class="port-filter-empty">No open ports yet</li>`;
+    return;
+  }
+  els.portFilterList.innerHTML = top
+    .map(
+      (t) =>
+        `<li class="port-filter-item${
+          t.port === filterPort ? " active" : ""
+        }" data-port="${t.port}">${t.port} <span class="port-filter-count">· ${t.count} host${t.count === 1 ? "" : "s"}</span></li>`,
+    )
+    .join("");
+}
+
+function sortHosts(hosts) {
+  if (!sortState.key) return hosts;
+  const dir = sortState.dir === "desc" ? -1 : 1;
+  return [...hosts].sort((a, b) => {
+    if (sortState.key === "ip") return dir * compareIp(a.ip, b.ip);
+    if (sortState.key === "vendor") {
+      const va = (a.vendor || "").trim();
+      const vb = (b.vendor || "").trim();
+      if (!va && !vb) return 0;
+      if (!va) return 1;
+      if (!vb) return -1;
+      return dir * va.localeCompare(vb, undefined, { sensitivity: "base" });
+    }
+    if (sortState.key === "os") {
+      const ba = osBucket(a);
+      const bb = osBucket(b);
+      if (ba === null && bb === null) return 0;
+      if (ba === null) return 1;
+      if (bb === null) return -1;
+      if (ba !== bb) return dir * (ba - bb);
+      return dir * osTopFamily(a).localeCompare(osTopFamily(b));
+    }
+    if (sortState.key === "ports") {
+      const ca = portsOpenCount(a);
+      const cb = portsOpenCount(b);
+      if (ca === null && cb === null) return 0;
+      if (ca === null) return 1;
+      if (cb === null) return -1;
+      return dir * (ca - cb);
+    }
+    return 0;
+  });
+}
+
+function updateSortIndicators() {
+  document.querySelectorAll("#results-table thead th.sortable").forEach((th) => {
+    th.classList.remove("sort-asc", "sort-desc");
+    if (th.dataset.sortKey === sortState.key) {
+      th.classList.add(sortState.dir === "desc" ? "sort-desc" : "sort-asc");
+    }
+  });
+}
+
+function attachSortHandlers() {
+  document.querySelectorAll("#results-table thead th.sortable").forEach((th) => {
+    th.addEventListener("click", () => {
+      const key = th.dataset.sortKey;
+      if (sortState.key === key) {
+        sortState.dir = sortState.dir === "asc" ? "desc" : "asc";
+      } else {
+        sortState.key = key;
+        sortState.dir = DEFAULT_SORT_DIR[key] || "asc";
+      }
+      updateSortIndicators();
+      if (lastScan) renderScan(lastScan);
+    });
+  });
+}
 
 function toggleHostDetail(hostId, kind = "ports") {
   const detail = els.body.querySelector(
@@ -989,6 +1152,43 @@ els.deleteBtn.addEventListener("click", async () => {
     await loadHistory();
   } catch (e) {
     setStatus(e.message, true);
+  }
+});
+
+attachSortHandlers();
+
+els.portFilterToggle?.addEventListener("click", (e) => {
+  e.stopPropagation();
+  if (!els.portFilterList) return;
+  els.portFilterList.hidden = !els.portFilterList.hidden;
+});
+
+els.portFilterList?.addEventListener("click", (e) => {
+  const item = e.target.closest(".port-filter-item");
+  if (!item) return;
+  const port = parseInt(item.dataset.port, 10);
+  if (isNaN(port)) return;
+  filterPort = port;
+  els.portFilterList.hidden = true;
+  if (lastScan) renderScan(lastScan);
+});
+
+els.portFilterInput?.addEventListener("input", () => {
+  const v = els.portFilterInput.value.trim();
+  const n = parseInt(v, 10);
+  filterPort = v === "" || isNaN(n) || n < 1 || n > 65535 ? null : n;
+  if (lastScan) renderScan(lastScan);
+});
+
+els.portFilterInput?.addEventListener("focus", () => {
+  if (els.portFilterList) els.portFilterList.hidden = false;
+});
+
+document.addEventListener("click", (e) => {
+  if (!els.portFilterWrap || els.portFilterWrap.hidden) return;
+  if (els.portFilterList?.hidden) return;
+  if (!els.portFilterWrap.contains(e.target)) {
+    els.portFilterList.hidden = true;
   }
 });
 

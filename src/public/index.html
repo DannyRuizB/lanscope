@@ -174,6 +174,11 @@
               <span class="muted" id="results-meta"></span>
             </div>
             <div class="results-actions">
+              <div class="port-filter" hidden id="port-filter-wrap">
+                <input id="port-filter-input" class="port-filter-input" type="number" min="1" max="65535" placeholder="Filter port" title="Type a port (1–65535) or pick from the dropdown" />
+                <button type="button" id="port-filter-toggle" class="port-filter-toggle" aria-label="Show top open ports" title="Top open ports in this scan">▾</button>
+                <ul id="port-filter-list" class="port-filter-list" hidden></ul>
+              </div>
               <button id="bulk-portscan" class="ghost small" title="Run TCP port scan on every host that hasn't been scanned yet">Scan all ports</button>
               <button id="bulk-osscan" class="ghost small" title="Run OS fingerprint on every host that hasn't been scanned yet">Scan all OS</button>
               <button id="bulk-udpscan" class="ghost small" title="Run UDP scan on every host that hasn't been scanned yet — slow!">Scan all UDP</button>
@@ -188,13 +193,13 @@
           <table id="results-table" class="hosts-table" hidden>
             <thead>
               <tr>
-                <th>IP</th>
+                <th class="sortable" data-sort-key="ip">IP</th>
                 <th>MAC</th>
-                <th>Vendor</th>
+                <th class="sortable" data-sort-key="vendor">Vendor</th>
                 <th>Hostname</th>
                 <th>Reason</th>
-                <th class="os-col">OS</th>
-                <th class="ports-col">Ports</th>
+                <th class="os-col sortable" data-sort-key="os">OS</th>
+                <th class="ports-col sortable" data-sort-key="ports">Ports</th>
                 <th class="udp-col">UDP</th>
               </tr>
             </thead>
@@ -217,7 +222,7 @@
     </div>
 
     <footer class="bottombar">
-      <span>v0.6.1</span>
+      <span>v0.6.2</span>
       <span>·</span>
       <span>MIT</span>
       <span>·</span>
