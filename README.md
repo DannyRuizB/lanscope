@@ -4,7 +4,7 @@
 
 ![LanScope topology graph of a /24 scan, dark theme, gateway at the centre with concentric rings of hosts by relevance](screenshots/screenshot.png)
 
-🚧 Work in progress — v0.8.0.
+🚧 Work in progress — v0.8.1.
 
 ---
 
@@ -22,10 +22,40 @@ It is **not** a security scanner — no exploit detection, no vulnerability data
 
 ## Use it
 
+From v0.8.1 the easiest way is to pull a pre-built image from **GHCR** — no local build needed:
+
+```bash
+mkdir lanscope && cd lanscope
+cat > docker-compose.yml <<'YAML'
+services:
+  lanscope:
+    image: ghcr.io/dannyruizb/lanscope:latest
+    container_name: lanscope
+    network_mode: host
+    cap_add:
+      - NET_RAW
+      - NET_ADMIN
+    restart: unless-stopped
+    environment:
+      PORT: 3030
+      DB_PATH: /var/lib/lanscope/lanscope.db
+    volumes:
+      - lanscope-data:/var/lib/lanscope
+volumes:
+  lanscope-data:
+YAML
+docker compose up -d
+# open http://localhost:3030
+```
+
+Pin a specific version in production (e.g. `ghcr.io/dannyruizb/lanscope:0.8.1`) so an upgrade is always intentional. Images are multi-arch — `linux/amd64` for desktops / NUCs and `linux/arm64` for Raspberry Pi 4 / 5 and Apple-silicon homelabs.
+
+Or build locally from source:
+
 ```bash
 git clone https://github.com/DannyRuizB/lanscope.git
 cd lanscope
-docker compose up -d
+docker compose up -d --build
 # open http://localhost:3030
 ```
 
@@ -113,7 +143,7 @@ LanScope's direction: cover as many `nmap` options as possible behind a visual U
 - [x] **v0.7.2** — **Re-scan from the UI**, frontend-only. A small toolbar at the top of every expanded sub-row (ports / OS / UDP) carries a *Re-scan {kind}* button plus the timestamp of the last scan; clicking it re-runs that scan with the current Advanced-options settings (timing, scan technique, ports, NSE scripts, host discovery) and atomically replaces the previous data via the existing per-host endpoints. The bulk buttons in the results header switch their label to *Re-scan all {kind} (N)* once everyone has been scanned, prompting a danger-styled confirmation modal that warns about data replacement (and adds the UDP time estimate for the UDP variant). Resolves the pre-existing UX limitation, dating back to v0.2, where the per-host buttons would only toggle the sub-row once their flag was set.
 - [x] **v0.7.3** — **Diff between two scans** of the same CIDR, frontend-only. A *Compare with…* button in the results header opens a dropdown listing every previous scan of the current CIDR; picking one loads it as the base and a persistent banner reports *N appeared · N disappeared · N changed*. In the table, appeared rows tint green, changed rows tint amber with an inline badge listing which fields differ (`mac` / `hostname` / `os`), and a *Disappeared since base* section at the bottom shows ghost rows in red with strike-through IPs. In the graph, appeared / changed nodes carry a coloured border and disappeared hosts re-enter as ghost nodes with a dashed red border and reduced opacity. Switching to a scan of a different CIDR clears the comparison automatically. Diff was scoped against MAC / hostname / OS family changes only — set-of-open-ports differences are intentionally excluded to avoid noise from partial re-scans.
 - [x] **v0.8.0** — **Declared inventory via baselines**. A new ★ *Set as baseline* button in the results header marks the current scan as the canonical state of its CIDR (`inventory_baselines(cidr UNIQUE, scan_id)` in the schema). When you later open any other scan of the same CIDR, LanScope automatically compares it against the baseline and shows the v0.7.3 diff (appeared / disappeared / changed) without you having to pick anything from the *Compare with…* dropdown. The diff banner switches to a yellow accent and reads *★ Compared against baseline* so you know whether the comparison is auto (against baseline) or manual (against another scan). Sidebar entries that are the baseline of their CIDR carry a ★ marker. Manual *Compare with…* picks override the baseline auto-compare for the current view; *Exit diff* turns it off until you switch to another scan; switching to another scan re-enables it.
-- [ ] **v0.8.1** — Pre-built Docker image published to GitHub Container Registry (`ghcr.io/dannyruizb/lanscope`) so a one-line `docker pull` skips the local build.
+- [x] **v0.8.1** — **Pre-built image on GHCR** (`ghcr.io/dannyruizb/lanscope`). A GitHub Action runs on every `v*` tag, builds the image for `linux/amd64` and `linux/arm64` via QEMU + buildx, and pushes both an exact-version tag (e.g. `:0.8.1`) and `:latest`. `docker-compose.yml` now defaults to the GHCR image so newcomers can `docker compose up -d` without cloning the repo; local development still uses `docker compose up -d --build` and that flag takes precedence over the pinned image.
 - [ ] **v0.8.2** — Expanded README with FAQ and troubleshooting section (Alpine `nmap-scripts`, `cap_add`, `network_mode: host`, restart-vs-rebuild gotcha).
 
 ## Stack
