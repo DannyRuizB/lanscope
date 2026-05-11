@@ -1,0 +1,21 @@
+# Render blueprint for the read-only public demo.
+# Pulls the multi-arch image from GHCR and runs it with DEMO_MODE=true so
+# the seed script populates SQLite with three demo scans on every boot.
+# Render's free tier has no persistent disk; the DB lives in /tmp and is
+# re-seeded on every cold start, which is exactly what we want for a demo.
+services:
+  - type: web
+    name: lanscope-demo
+    runtime: image
+    image:
+      url: ghcr.io/dannyruizb/lanscope:0.9.0
+    plan: free
+    region: frankfurt
+    healthCheckPath: /
+    envVars:
+      - key: PORT
+        value: "10000"
+      - key: DEMO_MODE
+        value: "true"
+      - key: DB_PATH
+        value: "/tmp/lanscope-demo.db"

@@ -15,10 +15,36 @@ const {
 } = require("./scanner");
 
 const PORT = parseInt(process.env.PORT, 10) || 3030;
+const DEMO_MODE = process.env.DEMO_MODE === "true";
+
+if (DEMO_MODE) {
+  try {
+    require("./seed").run();
+  } catch (e) {
+    console.error("[demo] seed failed:", e);
+  }
+}
 
 const app = express();
 app.use(express.json({ limit: "32kb" }));
 app.use(express.static(path.join(__dirname, "public")));
+
+// Demo mode (v0.9.0): the public demo deploy serves pre-seeded fixtures and
+// must not run nmap (would scan the data centre's network — illegal and
+// useless to the visitor). Block every state-changing request with 403.
+if (DEMO_MODE) {
+  app.use((req, res, next) => {
+    if (req.method === "GET" || req.method === "HEAD" || req.method === "OPTIONS") return next();
+    res.status(403).json({
+      error: "Demo mode: this LanScope instance is read-only. Install it locally to run real scans.",
+      demoMode: true,
+    });
+  });
+}
+
+app.get("/api/config", (req, res) => {
+  res.json({ demoMode: DEMO_MODE });
+});
 
 app.get("/api/scans", (req, res) => {
   const limit = Math.min(parseInt(req.query.limit, 10) || 50, 200);

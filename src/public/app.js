@@ -46,6 +46,7 @@ const els = {
   diffBannerText: $("#diff-banner-text"),
   diffExit: $("#diff-exit"),
   baselineBtn: $("#baseline-btn"),
+  demoBanner: $("#demo-banner"),
 };
 
 function currentPortsSpec() {
@@ -2028,3 +2029,18 @@ window.addEventListener("resize", () => {
 
 loadBaselines();
 loadHistory();
+
+// Demo mode (v0.9.0): the server tells us whether this is a read-only demo
+// deploy. If so, expose the warning banner and disable controls that would
+// otherwise produce 403s when the user tries them.
+(async () => {
+  try {
+    const cfg = await fetchJson("/api/config");
+    if (cfg.demoMode) {
+      if (els.demoBanner) els.demoBanner.hidden = false;
+      document.body.classList.add("demo-mode");
+    }
+  } catch (e) {
+    console.warn("config fetch failed:", e);
+  }
+})();

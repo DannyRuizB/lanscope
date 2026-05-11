@@ -4,9 +4,17 @@
 
 ![LanScope topology graph of a /24 scan, dark theme, gateway at the centre with concentric rings of hosts by relevance](screenshots/screenshot.png)
 
-🟢 Stable — v0.8.3 (feature-complete, maintenance-only).
+🟢 Stable — v0.9.0.
 
 ---
+
+## Try the demo
+
+A **read-only public demo** runs at **[lanscope-demo.onrender.com](https://lanscope-demo.onrender.com)** — three pre-seeded scans of a synthetic `192.168.1.0/24` so you can browse the table, the topology graph, the diff between scans and the baseline auto-compare without installing anything.
+
+Buttons that would run `nmap` (Scan now, port / OS / UDP scans, re-scan, set baseline) reply with *Demo mode: scans disabled* on the demo deploy. To run real scans against your own LAN, [install it locally](#use-it).
+
+> Hosted on Render's free tier, so the first hit after 15 min of inactivity wakes the container up and takes ~10–30 s to respond. Subsequent navigation is instant.
 
 ## Why
 
@@ -22,14 +30,24 @@ It is **not** a security scanner — no exploit detection, no vulnerability data
 
 ## Use it
 
-From v0.8.1 the easiest way is to pull a pre-built image from **GHCR** — no local build needed:
+### Requirements
+
+- **Linux host** with the LAN you want to scan attached directly (Wi-Fi or Ethernet). LanScope uses `network_mode: host`, which on Docker Desktop for macOS / Windows would only see the Docker VM's internal network, not your real LAN. See the [FAQ](#faq) for the macOS / Windows situation.
+- **Docker Engine + Docker Compose v2** installed. `docker --version` should print 24.x or newer.
+- **A few minutes**. No build is needed — the prebuilt multi-arch image lives on GHCR (`linux/amd64` + `linux/arm64`, so Raspberry Pi 4 / 5 work out of the box).
+
+### Quickstart (recommended)
+
+Three steps. The whole thing fits in a terminal session.
+
+**1. Create a directory and a `docker-compose.yml`** anywhere you like (e.g. `~/lanscope/`):
 
 ```bash
-mkdir lanscope && cd lanscope
+mkdir -p ~/lanscope && cd ~/lanscope
 cat > docker-compose.yml <<'YAML'
 services:
   lanscope:
-    image: ghcr.io/dannyruizb/lanscope:latest
+    image: ghcr.io/dannyruizb/lanscope:0.9.0
     container_name: lanscope
     network_mode: host
     cap_add:
@@ -44,13 +62,41 @@ services:
 volumes:
   lanscope-data:
 YAML
-docker compose up -d
-# open http://localhost:3030
 ```
 
-Pin a specific version in production (e.g. `ghcr.io/dannyruizb/lanscope:0.8.3`) so an upgrade is always intentional. Images are multi-arch — `linux/amd64` for desktops / NUCs and `linux/arm64` for Raspberry Pi 4 / 5 and Apple-silicon homelabs.
+Pin a specific version (`:0.9.0`) in production so upgrades are intentional. Use `:latest` if you actively want to track the newest release.
 
-Or build locally from source:
+**2. Start it**:
+
+```bash
+docker compose up -d
+```
+
+Expected output:
+
+```
+[+] Running 2/2
+ ✔ Volume "lanscope_lanscope-data"  Created
+ ✔ Container lanscope               Started
+```
+
+The container exposes the UI on port `3030` of the **host machine** directly (because of `network_mode: host`).
+
+**3. Open the UI**:
+
+```bash
+xdg-open http://localhost:3030    # or just point your browser at it
+```
+
+You should land on the empty LanScope dashboard. Type a CIDR in the **Target** input (e.g. `192.168.1.0/24`) and hit **Scan now**. Hosts that respond to the ping sweep appear in the table with their IP, MAC, vendor and reverse-DNS hostname. Every scan is saved in the **History** sidebar.
+
+### Something went wrong?
+
+If the container starts but refuses to scan, or if `docker compose up` fails outright, jump to [Troubleshooting](#troubleshooting) — the usual suspects (capabilities, Alpine `nmap-scripts`, port conflicts, MAC empty for hosts past the router) are all there with fixes.
+
+### Build from source
+
+If you want to modify the code or build your own image:
 
 ```bash
 git clone https://github.com/DannyRuizB/lanscope.git
@@ -59,7 +105,7 @@ docker compose up -d --build
 # open http://localhost:3030
 ```
 
-Type a CIDR in the **Target** input (for example `192.168.1.0/24`) and hit **Scan now**. Hosts that respond to the ping sweep appear in the table with their IP, MAC, vendor (looked up from the OUI prefix by `nmap`) and reverse-DNS hostname when available. Every scan is saved in the **History** sidebar — click any past scan to reload it.
+The `--build` flag overrides the `image:` pin and builds locally from the `Dockerfile`.
 
 ### Port scan (v0.2, refined in v0.3.1)
 
@@ -145,7 +191,8 @@ LanScope's direction: cover as many `nmap` options as possible behind a visual U
 - [x] **v0.8.0** — **Declared inventory via baselines**. A new ★ *Set as baseline* button in the results header marks the current scan as the canonical state of its CIDR (`inventory_baselines(cidr UNIQUE, scan_id)` in the schema). When you later open any other scan of the same CIDR, LanScope automatically compares it against the baseline and shows the v0.7.3 diff (appeared / disappeared / changed) without you having to pick anything from the *Compare with…* dropdown. The diff banner switches to a yellow accent and reads *★ Compared against baseline* so you know whether the comparison is auto (against baseline) or manual (against another scan). Sidebar entries that are the baseline of their CIDR carry a ★ marker. Manual *Compare with…* picks override the baseline auto-compare for the current view; *Exit diff* turns it off until you switch to another scan; switching to another scan re-enables it.
 - [x] **v0.8.1** — **Pre-built image on GHCR** (`ghcr.io/dannyruizb/lanscope`). A GitHub Action runs on every `v*` tag, builds the image for `linux/amd64` and `linux/arm64` via QEMU + buildx, and pushes both an exact-version tag (e.g. `:0.8.1`) and `:latest`. `docker-compose.yml` now defaults to the GHCR image so newcomers can `docker compose up -d` without cloning the repo; local development still uses `docker compose up -d --build` and that flag takes precedence over the pinned image.
 - [x] **v0.8.2** — **Expanded README**: FAQ and Troubleshooting sections covering the legal angle, the macOS / Windows situation, where the data lives, how to back up and upgrade, plus fixes for the gotchas the project has accumulated (Alpine `nmap-scripts`, `cap_add` capabilities, `network_mode: host`, the restart-vs-rebuild trap, port conflicts, empty MAC fields, the `-Pn` quirk, GHCR auth, SQLite WAL files).
-- [x] **v0.8.3** — **Closing polish** (no app changes): OCI image labels (`org.opencontainers.image.{title, description, source, url, documentation, licenses, authors}`) so the GHCR package page and `docker inspect` show project metadata directly; `.gitignore` covers `preview-*.html` scratch files; GitHub repo topics added for discovery. Marks the project as **feature-complete** — no more roadmap entries planned.
+- [x] **v0.8.3** — **Closing polish** (no app changes): OCI image labels (`org.opencontainers.image.{title, description, source, url, documentation, licenses, authors}`) so the GHCR package page and `docker inspect` show project metadata directly; `.gitignore` covers `preview-*.html` scratch files; GitHub repo topics added for discovery.
+- [x] **v0.9.0** — **Public read-only demo**. New `DEMO_MODE=true` env var: when set, an Express middleware turns the API read-only (every non-GET responds 403 with a friendly *Demo mode: scans disabled* JSON), `GET /api/config` exposes the flag to the frontend, and a `src/seed.js` script populates a fresh SQLite with three plausible scans of `192.168.1.0/24` (12 / 12 / 13 hosts across a week, baseline pinned to the oldest, diff visible from the newest). The UI surfaces a yellow *Demo · read-only* banner when the API reports demo mode. A `render.yaml` blueprint hosts the demo on Render's free tier (Frankfurt, no persistent disk — DB is re-seeded on each cold start, which is exactly what a fixture-only demo needs). The README quickstart is rewritten with explicit prerequisites and numbered steps with expected output.
 
 ## FAQ
 
