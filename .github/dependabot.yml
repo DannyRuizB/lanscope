@@ -1,0 +1,30 @@
+# Dependabot config — opens weekly PRs with security and minor / patch updates
+# for the npm dependencies and the GitHub Actions used in the release workflow.
+# Major bumps are kept in scope (the project pins ranges loosely with ^) so we
+# can review them, not surprise upgrades that break behaviour.
+version: 2
+updates:
+  - package-ecosystem: "npm"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+    open-pull-requests-limit: 5
+    labels:
+      - "dependencies"
+    commit-message:
+      prefix: "deps"
+      include: "scope"
+
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+    open-pull-requests-limit: 3
+    labels:
+      - "dependencies"
+      - "github-actions"
+    commit-message:
+      prefix: "ci"
+      include: "scope"
