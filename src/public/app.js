@@ -33,6 +33,12 @@ const els = {
   portFilterInput: $("#port-filter-input"),
   portFilterToggle: $("#port-filter-toggle"),
   portFilterList: $("#port-filter-list"),
+  viewToggle: $("#view-toggle"),
+  viewTable: $("#view-table"),
+  viewGraph: $("#view-graph"),
+  graphWrap: $("#results-graph"),
+  graphCanvas: $("#cy"),
+  graphLegend: $("#graph-legend"),
 };
 
 function currentPortsSpec() {
@@ -527,6 +533,8 @@ function renderScan(scan) {
 
   if (!scan.hosts.length) {
     els.table.hidden = true;
+    els.graphWrap.hidden = true;
+    clearGraphCanvas();
     els.empty.hidden = false;
     els.empty.textContent =
       scan.status === "error"
@@ -534,6 +542,24 @@ function renderScan(scan) {
         : "No hosts responded.";
     return;
   }
+
+  els.body.innerHTML = sortHosts(filtered).map(renderHostRow).join("");
+  attachPortscanHandlers();
+  attachOsscanHandlers();
+  attachUdpscanHandlers();
+  updateBulkButtons();
+
+  if (viewMode === "graph") {
+    els.table.hidden = true;
+    els.empty.hidden = true;
+    els.graphWrap.hidden = false;
+    renderGraph(scan);
+    if (cy) setTimeout(() => cy && cy.resize(), 0);
+    return;
+  }
+
+  els.graphWrap.hidden = true;
+  clearGraphCanvas();
 
   if (filterPort !== null && !filtered.length) {
     els.table.hidden = true;
@@ -543,11 +569,6 @@ function renderScan(scan) {
   }
 
   els.table.hidden = false;
-  els.body.innerHTML = sortHosts(filtered).map(renderHostRow).join("");
-  attachPortscanHandlers();
-  attachOsscanHandlers();
-  attachUdpscanHandlers();
-  updateBulkButtons();
 }
 
 // ----- Bulk scans (v0.6.x): one button per scan kind in the results header.
@@ -857,6 +878,325 @@ function attachSortHandlers() {
   });
 }
 
+/* ---------- topology graph (v0.7.0) ---------- */
+
+let viewMode = localStorage.getItem("lanscope-view") || "table";
+let cy = null;
+
+function osBucketKey(host) {
+  if (!host.osscanned_at) return "unknown";
+  const top = (host.os_matches || [])[0];
+  if (!top) return "unknown";
+  const f = (top.family || "").toLowerCase();
+  if (f.includes("windows")) return "windows";
+  if (f.includes("linux")) return "linux";
+  if (f.includes("mac") || f.includes("ios") || f.includes("apple")) return "apple";
+  return "other";
+}
+
+const OS_LABELS = {
+  windows: "Windows",
+  linux: "Linux",
+  apple: "Apple",
+  other: "Other",
+  unknown: "OS unknown",
+};
+
+function osBucketLabel(host) {
+  const top = (host.os_matches || [])[0];
+  if (top && top.family) return top.family;
+  if (top && top.name) return top.name;
+  return OS_LABELS[osBucketKey(host)];
+}
+
+function ipInCidr(ip, cidr) {
+  const [base] = cidr.split("/");
+  const baseParts = base.split(".").map((x) => parseInt(x, 10));
+  const ipParts = ip.split(".").map((x) => parseInt(x, 10));
+  return (
+    baseParts.length === 4 &&
+    ipParts.length === 4 &&
+    baseParts[0] === ipParts[0] &&
+    baseParts[1] === ipParts[1] &&
+    baseParts[2] === ipParts[2]
+  );
+}
+
+function findGateway(scan) {
+  const hosts = (scan.hosts || []).filter((h) => h.status === "up");
+  if (!hosts.length) return null;
+  const cidr = scan.cidr || "";
+  const candidates = [];
+  if (cidr) {
+    const baseParts = cidr.split("/")[0].split(".").map((x) => parseInt(x, 10));
+    if (baseParts.length === 4) {
+      candidates.push(`${baseParts[0]}.${baseParts[1]}.${baseParts[2]}.1`);
+      candidates.push(`${baseParts[0]}.${baseParts[1]}.${baseParts[2]}.254`);
+    }
+  }
+  for (const c of candidates) {
+    const found = hosts.find((h) => h.ip === c);
+    if (found) return found;
+  }
+  return null;
+}
+
+function openPortCount(host) {
+  if (!host.portscanned_at) return null;
+  return (host.ports || []).filter((p) => p.state === "open").length;
+}
+
+function nodeLabelFor(host, isGateway) {
+  const lines = [host.ip];
+  if (host.hostname) lines.push(host.hostname);
+  const ports = openPortCount(host);
+  const hasOs = !!host.osscanned_at && (host.os_matches || []).length > 0;
+  if (hasOs && ports !== null) {
+    lines.push(`${osBucketLabel(host)} · ${ports} port${ports === 1 ? "" : "s"}`);
+  } else if (hasOs) {
+    lines.push(osBucketLabel(host));
+  } else if (ports !== null) {
+    lines.push(`${ports} port${ports === 1 ? "" : "s"} open`);
+  }
+  if (isGateway) lines.push("gateway");
+  return lines.join("\n");
+}
+
+function hostRelevance(host, isGateway) {
+  if (isGateway) return 5;
+  const hasOs = !!host.osscanned_at && (host.os_matches || []).length > 0;
+  const ports = openPortCount(host);
+  const hasOpenPorts = ports !== null && ports > 0;
+  if (hasOs && hasOpenPorts) return 4;
+  if (hasOs || hasOpenPorts) return 3;
+  if (host.portscanned_at || host.osscanned_at || host.udp_portscanned_at) return 2;
+  if (host.hostname || host.vendor) return 2;
+  return 1;
+}
+
+function readThemePalette() {
+  const cs = getComputedStyle(document.documentElement);
+  const v = (name, fallback) => (cs.getPropertyValue(name) || fallback).trim();
+  return {
+    text: v("--text", "#ffffff"),
+    textMute: v("--text-mute", "#909090"),
+    accent: v("--accent", "#22c55e"),
+    accentStrong: v("--accent-strong", "#16a34a"),
+    surface: v("--surface", "#131313"),
+    surface2: v("--surface-2", "#1c1c1c"),
+    border: v("--border-strong", "#353535"),
+    accentFg: v("--accent-fg", "#ffffff"),
+    bucket: {
+      windows: "#2563eb",
+      linux:   "#d97706",
+      apple:   "#7c3aed",
+      other:   "#64748b",
+      unknown: "#475569",
+    },
+  };
+}
+
+function buildGraphElements(scan, gateway) {
+  const hosts = (scan.hosts || []).filter((h) => h.status === "up");
+  const elements = [];
+  const gatewayId = gateway ? `host-${gateway.id}` : null;
+  for (const h of hosts) {
+    const isGw = gateway && h.id === gateway.id;
+    elements.push({
+      group: "nodes",
+      data: {
+        id: `host-${h.id}`,
+        hostId: h.id,
+        label: nodeLabelFor(h, isGw),
+        bucket: osBucketKey(h),
+        isGateway: isGw ? 1 : 0,
+        relevance: hostRelevance(h, isGw),
+      },
+    });
+  }
+  if (gatewayId) {
+    for (const h of hosts) {
+      if (h.id === gateway.id) continue;
+      elements.push({
+        group: "edges",
+        data: {
+          id: `e-${h.id}`,
+          source: `host-${h.id}`,
+          target: gatewayId,
+          relevance: hostRelevance(h, false),
+        },
+      });
+    }
+  }
+  return elements;
+}
+
+function renderGraphLegend(scan, hadGateway, palette) {
+  const hosts = (scan.hosts || []).filter((h) => h.status === "up");
+  const present = new Set(hosts.map(osBucketKey));
+  const order = ["windows", "linux", "apple", "other", "unknown"];
+  const items = order
+    .filter((b) => present.has(b))
+    .map(
+      (b) =>
+        `<span class="graph-legend-item"><span class="graph-legend-swatch" style="background:${palette.bucket[b]}"></span>${OS_LABELS[b]}</span>`,
+    );
+  if (hadGateway) {
+    items.unshift(
+      `<span class="graph-legend-item"><span class="graph-legend-swatch" style="background:${palette.accent}"></span>Gateway</span>`,
+    );
+  }
+  els.graphLegend.innerHTML = items.join("");
+  els.graphLegend.hidden = items.length === 0;
+}
+
+function clearGraphCanvas() {
+  if (cy) {
+    cy.destroy();
+    cy = null;
+  }
+  els.graphCanvas.innerHTML = "";
+}
+
+function showGraphEmpty(message) {
+  clearGraphCanvas();
+  const div = document.createElement("div");
+  div.className = "graph-empty";
+  div.textContent = message;
+  els.graphCanvas.appendChild(div);
+  els.graphLegend.hidden = true;
+  els.graphLegend.innerHTML = "";
+}
+
+function renderGraph(scan) {
+  if (typeof cytoscape === "undefined") {
+    showGraphEmpty("Graph library failed to load. Check your network and refresh.");
+    return;
+  }
+  const hosts = (scan.hosts || []).filter((h) => h.status === "up");
+  if (!hosts.length) {
+    showGraphEmpty("No alive hosts in this scan to graph.");
+    return;
+  }
+  const gateway = findGateway(scan);
+  const elements = buildGraphElements(scan, gateway);
+  const palette = readThemePalette();
+
+  clearGraphCanvas();
+
+  cy = cytoscape({
+    container: els.graphCanvas,
+    elements,
+    wheelSensitivity: 0.25,
+    style: [
+      {
+        selector: "node",
+        style: {
+          shape: "round-rectangle",
+          "background-color": (ele) =>
+            ele.data("isGateway") ? palette.accent : palette.bucket[ele.data("bucket")],
+          "border-color": palette.border,
+          "border-width": 1,
+          width: 90,
+          height: 46,
+          label: "data(label)",
+          color: (ele) => (ele.data("isGateway") ? palette.accentFg : "#ffffff"),
+          "text-wrap": "wrap",
+          "text-max-width": 84,
+          "text-valign": "center",
+          "text-halign": "center",
+          "font-family": "JetBrains Mono, Fira Code, ui-monospace, monospace",
+          "font-size": 8.5,
+          "font-weight": 600,
+          "line-height": 1.2,
+        },
+      },
+      {
+        selector: "node[relevance < 3]",
+        style: {
+          width: 70,
+          height: 24,
+          "font-size": 8,
+          opacity: 0.85,
+        },
+      },
+      {
+        selector: "node[isGateway = 1]",
+        style: {
+          shape: "diamond",
+          width: 130,
+          height: 80,
+          "font-size": 10,
+        },
+      },
+      {
+        selector: "node:selected",
+        style: {
+          "border-color": palette.accent,
+          "border-width": 3,
+        },
+      },
+      {
+        selector: "edge",
+        style: {
+          width: 1,
+          "line-color": palette.border,
+          "curve-style": "straight",
+          opacity: 0.6,
+        },
+      },
+      {
+        selector: "edge[relevance < 3]",
+        style: {
+          opacity: 0.2,
+          width: 0.6,
+        },
+      },
+    ],
+    layout: gateway
+      ? {
+          name: "concentric",
+          concentric: (n) => n.data("relevance"),
+          levelWidth: () => 1,
+          minNodeSpacing: 8,
+          spacingFactor: 1.05,
+          avoidOverlap: true,
+          padding: 30,
+        }
+      : { name: "cose", padding: 30, animate: false, nodeRepulsion: 4500 },
+  });
+
+  cy.on("tap", "node", (evt) => {
+    const hostId = evt.target.data("hostId");
+    if (hostId !== undefined) selectHostFromGraph(hostId);
+  });
+
+  renderGraphLegend(scan, !!gateway, palette);
+}
+
+function selectHostFromGraph(hostId) {
+  setViewMode("table");
+  requestAnimationFrame(() => {
+    const row = els.body.querySelector(`tr.host-row[data-host-id="${hostId}"]`);
+    if (!row) return;
+    row.scrollIntoView({ behavior: "smooth", block: "center" });
+    row.classList.remove("row-flash");
+    void row.offsetWidth;
+    row.classList.add("row-flash");
+    setTimeout(() => row.classList.remove("row-flash"), 1600);
+  });
+}
+
+function setViewMode(mode) {
+  viewMode = mode === "graph" ? "graph" : "table";
+  localStorage.setItem("lanscope-view", viewMode);
+  els.viewTable.classList.toggle("active", viewMode === "table");
+  els.viewGraph.classList.toggle("active", viewMode === "graph");
+  els.viewTable.setAttribute("aria-selected", viewMode === "table" ? "true" : "false");
+  els.viewGraph.setAttribute("aria-selected", viewMode === "graph" ? "true" : "false");
+  if (lastScan) renderScan(lastScan);
+}
+
 function toggleHostDetail(hostId, kind = "ports") {
   const detail = els.body.querySelector(
     `tr.host-detail[data-host-id="${hostId}"][data-kind="${kind}"]`,
@@ -1051,6 +1391,9 @@ themeBtn?.addEventListener("click", () => {
     try { localStorage.setItem("lanscope-theme", "light"); } catch (_) {}
   }
   syncThemeBtn();
+  if (viewMode === "graph" && lastScan) {
+    setTimeout(() => renderGraph(lastScan), 260);
+  }
 });
 
 els.refresh.addEventListener("click", loadHistory);
@@ -1190,6 +1533,15 @@ document.addEventListener("click", (e) => {
   if (!els.portFilterWrap.contains(e.target)) {
     els.portFilterList.hidden = true;
   }
+});
+
+els.viewTable?.addEventListener("click", () => setViewMode("table"));
+els.viewGraph?.addEventListener("click", () => setViewMode("graph"));
+
+setViewMode(viewMode);
+
+window.addEventListener("resize", () => {
+  if (cy) cy.resize();
 });
 
 loadHistory();

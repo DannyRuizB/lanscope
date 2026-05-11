@@ -1012,6 +1012,106 @@ tr.host-detail td {
   margin-bottom: 0;
 }
 
+/* View toggle (Table / Graph) */
+.view-toggle {
+  display: inline-flex;
+  border: 1px solid var(--border-strong);
+  border-radius: 4px;
+  overflow: hidden;
+}
+.view-btn {
+  padding: 4px 12px;
+  background: transparent;
+  color: var(--text-mute);
+  border: 0;
+  border-radius: 0;
+  font-family: var(--mono);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.4px;
+  text-transform: uppercase;
+  cursor: pointer;
+}
+.view-btn + .view-btn {
+  border-left: 1px solid var(--border-strong);
+}
+.view-btn:hover {
+  color: var(--text);
+  background: var(--surface-2);
+}
+.view-btn.active {
+  background: var(--accent);
+  color: var(--accent-fg);
+}
+.view-btn.active:hover {
+  background: var(--accent-strong);
+  color: var(--accent-fg);
+}
+
+/* Topology graph */
+.hosts-graph {
+  position: relative;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface);
+  overflow: hidden;
+  min-height: 620px;
+  margin-top: 8px;
+}
+.cy-canvas {
+  width: 100%;
+  height: 620px;
+}
+.graph-legend {
+  position: absolute;
+  left: 12px;
+  bottom: 12px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  padding: 8px 10px;
+  background: var(--surface-2);
+  border: 1px solid var(--border-strong);
+  border-radius: 4px;
+  font-family: var(--mono);
+  font-size: 10.5px;
+  color: var(--text-mute);
+  letter-spacing: 0.3px;
+  pointer-events: none;
+}
+.graph-legend-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.graph-legend-swatch {
+  width: 10px;
+  height: 10px;
+  border-radius: 2px;
+  border: 1px solid var(--border-strong);
+}
+.graph-empty {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-mute);
+  font-family: var(--mono);
+  font-size: 13px;
+  text-align: center;
+  padding: 24px;
+}
+
+/* Row flash when arriving from the graph */
+@keyframes row-flash {
+  0%   { background: var(--accent-soft); }
+  100% { background: transparent; }
+}
+.hosts-table tr.row-flash > td {
+  animation: row-flash 1500ms ease-out;
+}
+
 /* Bottombar */
 .bottombar {
   display: flex;

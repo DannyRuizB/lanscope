@@ -174,6 +174,10 @@
               <span class="muted" id="results-meta"></span>
             </div>
             <div class="results-actions">
+              <div class="view-toggle" id="view-toggle" role="tablist" aria-label="Result view">
+                <button type="button" id="view-table" class="view-btn active" role="tab" aria-selected="true" title="Show the results as a table">Table</button>
+                <button type="button" id="view-graph" class="view-btn" role="tab" aria-selected="false" title="Show the results as a topology graph">Graph</button>
+              </div>
               <div class="port-filter" hidden id="port-filter-wrap">
                 <input id="port-filter-input" class="port-filter-input" type="number" min="1" max="65535" placeholder="Filter port" title="Type a port (1–65535) or pick from the dropdown" />
                 <button type="button" id="port-filter-toggle" class="port-filter-toggle" aria-label="Show top open ports" title="Top open ports in this scan">▾</button>
@@ -205,6 +209,11 @@
             </thead>
             <tbody id="results-body"></tbody>
           </table>
+
+          <div id="results-graph" class="hosts-graph" hidden>
+            <div id="cy" class="cy-canvas"></div>
+            <div id="graph-legend" class="graph-legend"></div>
+          </div>
         </div>
       </section>
     </main>
@@ -222,13 +231,14 @@
     </div>
 
     <footer class="bottombar">
-      <span>v0.6.2</span>
+      <span>v0.7.0</span>
       <span>·</span>
       <span>MIT</span>
       <span>·</span>
       <span>Built by <a href="https://github.com/DannyRuizB" target="_blank" rel="noopener">DannyRuizB</a></span>
     </footer>
 
+    <script src="https://cdn.jsdelivr.net/npm/cytoscape@3.30.4/dist/cytoscape.min.js"></script>
     <script src="app.js"></script>
   </body>
 </html>

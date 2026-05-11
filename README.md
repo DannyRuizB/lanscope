@@ -2,9 +2,9 @@
 
 > Visual LAN scanner for your home network or homelab — point it at a CIDR, see who's there.
 
-> 📸 *Screenshot refresh pending — a new image showcasing the v0.6.1 visual overhaul and v0.6.2 list filtering (light / dark theme toggle, bulk scans, port hints, refreshed palette, port filter, sortable columns) will land with the v0.7 topology graph release. To see the current UI, [run it locally](#use-it).*
+![LanScope topology graph of a /24 scan, dark theme, gateway at the centre with concentric rings of hosts by relevance](screenshots/screenshot.png)
 
-🚧 Work in progress — v0.6.2.
+🚧 Work in progress — v0.7.0.
 
 ---
 
@@ -109,7 +109,9 @@ LanScope's direction: cover as many `nmap` options as possible behind a visual U
 - [x] **v0.6** — Advanced host discovery for the CIDR sweep. *Skip discovery* (`-Pn`) reports every host as up; per-type pings *ICMP echo* (`-PE`), *TCP SYN* (`-PS`), *TCP ACK* (`-PA`) and *ARP* (`-PR`) are mutually combinable in *Advanced options*. Allowlist-validated; default behaviour unchanged.
 - [x] **v0.6.1** — UI / UX overhaul, no backend or schema changes. Light / dark theme toggle in the topbar (cream / sepia warm light, near-black neutral dark) with smooth fade between themes and persistence in `localStorage`. **Bulk scan** buttons in the results header — *Scan all ports / OS / UDP* run sequentially over every alive host that hasn't been scanned yet, with a live counter and cancellable mid-flight. **History entries deletable** with a per-entry × button and a *Clear all* action. Generic confirmation modal replaces the native `window.confirm` popup. **Port hints**: a short explanation of what client you'd need to connect appears under the port number for non-HTTP services (e.g. *SSH server — connect with an SSH client*, *RDP — Remote Desktop client*). Action-column buttons aligned to the same width via `table-layout: fixed` so the OS chip sticks to the left, label centred, dropdown arrow flush right. Sub-table headers (PORT / STATE / SERVICE …) use a distinct accent so they read separately from the main table headers.
 - [x] **v0.6.2** — Browse the host list, no backend or schema changes. **Filter the results by an open port**: a numeric input (1 – 65535) next to the bulk-scan buttons plus a dropdown of the five most-open ports in the current scan with a per-port host count. Filter only appears once at least one host has been port-scanned; hosts that haven't been port-scanned are excluded with an explicit empty-state message. **Sortable columns**: click *IP* / *Vendor* / *OS* / *Ports* to sort ascending (default) or descending; *Ports* defaults to descending (most-open first). IP sort is octet-aware, OS sort buckets Windows / Linux / Apple / other, hosts without that data fall to the bottom.
-- [ ] **v0.7** — Topology graph (Cytoscape), diff between scans (appeared / disappeared / changed), and re-scan from the UI without having to delete the scan first.
+- [x] **v0.7.0** — **Topology graph** ([Cytoscape.js](https://js.cytoscape.org/)). A new *Table / Graph* toggle in the results header switches between the existing table view and a topology graph that puts the detected gateway in the centre and arranges every alive host on concentric rings by relevance — closer to the centre means "more known about it" (OS fingerprint + open ports, then OS or ports, then known MAC / vendor, then plain alive). Gateway is detected heuristically as `.1` or `.254` of the CIDR; when neither responded, the graph falls back to a force-directed layout with no centre. Nodes are colour-coded by OS family (Windows / Linux / Apple / Other / Unknown) and shrink to a compact pill when there is no scan data on them. Clicking a node switches back to the table, scrolls to that host's row and flashes it. The view choice persists in `localStorage` and respects the dark / light theme toggle.
+- [ ] **v0.7.1** — Diff between two scans of the same CIDR: appeared / disappeared / changed hosts highlighted in both the table and the graph.
+- [ ] **v0.7.2** — Re-scan a host from the UI without deleting the scan first (resolves the pre-existing UX limitation where the per-host buttons only toggle the sub-row once data exists).
 - [ ] **v0.8** — Declared-host inventory with alerts on deviation. Pre-built Docker image published to GitHub Container Registry (`ghcr.io/dannyruizb/lanscope`) so a one-line `docker pull` skips the local build. Expanded README with FAQ and troubleshooting section.
 
 ## Stack
