@@ -45,6 +45,7 @@ const els = {
   diffBanner: $("#diff-banner"),
   diffBannerText: $("#diff-banner-text"),
   diffExit: $("#diff-exit"),
+  baselineBtn: $("#baseline-btn"),
 };
 
 function currentPortsSpec() {
@@ -158,18 +159,22 @@ function renderHistory(scans) {
     return;
   }
   els.list.innerHTML = scans
-    .map(
-      (s) => `
-      <li data-id="${s.id}" class="${s.id === activeScanId ? "active" : ""}">
+    .map((s) => {
+      const isBaseline = baselinesByCidr.get(s.cidr)?.scan_id === s.id;
+      const star = isBaseline
+        ? `<span class="scan-baseline-marker" title="Baseline for ${escapeHtml(s.cidr)}">★</span>`
+        : "";
+      return `
+      <li data-id="${s.id}" class="${s.id === activeScanId ? "active" : ""}${isBaseline ? " is-baseline" : ""}">
         <button class="scan-delete" data-id="${s.id}" title="Delete this scan" aria-label="Delete scan ${escapeHtml(s.cidr)}">×</button>
         <span class="scan-cidr">
-          <span class="scan-status-dot ${s.status}"></span>${escapeHtml(s.cidr)}
+          <span class="scan-status-dot ${s.status}"></span>${escapeHtml(s.cidr)}${star}
         </span>
         <span class="scan-meta">
           ${fmtTime(s.started_at)} · ${s.host_count} host${s.host_count === 1 ? "" : "s"}
         </span>
-      </li>`,
-    )
+      </li>`;
+    })
     .join("");
   els.list.querySelectorAll("li[data-id]").forEach((li) => {
     li.addEventListener("click", () => loadScan(parseInt(li.dataset.id, 10)));
@@ -221,6 +226,7 @@ async function loadScan(id) {
   try {
     const scan = await fetchJson(`/api/scans/${id}`);
     activeScanId = id;
+    compareSuppressed = false; // a fresh scan view re-enables baseline auto-compare
     renderScan(scan);
     document.querySelectorAll("#scan-list li").forEach((li) => {
       li.classList.toggle("active", parseInt(li.dataset.id, 10) === id);
@@ -594,10 +600,13 @@ function renderScan(scan) {
   if (compareBaseScan && compareBaseScan.cidr !== scan.cidr) {
     compareBaseScan = null;
     compareBaseScanId = null;
+    compareIsBaseline = false;
   }
+  maybeApplyBaselineAutoCompare();
   recomputeDiff();
   renderDiffBanner();
   refreshCompareDropdown();
+  refreshBaselineButton();
   els.empty.hidden = true;
   els.resultsHeader.hidden = false;
   els.deleteBtn.hidden = false;
@@ -1354,6 +1363,10 @@ function setViewMode(mode) {
 let compareBaseScan = null;     // full Scan object loaded for comparison
 let compareBaseScanId = null;   // id of the base scan (kept for cheap equality)
 let lastDiff = null;            // { appeared, disappeared, changed, byIp }
+let compareIsBaseline = false;  // true when compareBaseScan came from inventory baseline auto-compare
+let compareSuppressed = false;  // user exited diff for the current scan view; cleared on loadScan
+let baselinesByCidr = new Map();// cidr -> { cidr, scan_id, set_at, started_at, host_count }
+let baselineAutoFetching = null; // in-flight scan id for the baseline being loaded (race guard)
 
 function hostChangeReasons(b, n) {
   const reasons = [];
@@ -1413,10 +1426,114 @@ function recomputeDiff() {
 function exitDiff() {
   compareBaseScan = null;
   compareBaseScanId = null;
+  compareIsBaseline = false;
   lastDiff = null;
+  compareSuppressed = true;
   if (els.compareList) els.compareList.hidden = true;
   refreshCompareDropdown();
   if (lastScan) renderScan(lastScan);
+}
+
+/* ---------- inventory baselines (v0.8.0) ---------- */
+
+async function loadBaselines() {
+  try {
+    const { baselines } = await fetchJson("/api/inventory");
+    baselinesByCidr = new Map((baselines || []).map((b) => [b.cidr, b]));
+  } catch (e) {
+    console.error("loadBaselines failed:", e);
+    baselinesByCidr = new Map();
+  }
+  refreshBaselineButton();
+  if (historyScans.length) renderHistory(historyScans);
+}
+
+function refreshBaselineButton() {
+  if (!els.baselineBtn) return;
+  if (!lastScan) {
+    els.baselineBtn.hidden = true;
+    return;
+  }
+  els.baselineBtn.hidden = false;
+  const baseline = baselinesByCidr.get(lastScan.cidr);
+  const isThisOne = baseline && baseline.scan_id === lastScan.id;
+  if (isThisOne) {
+    els.baselineBtn.textContent = "★ Unset baseline";
+    els.baselineBtn.classList.add("active");
+    els.baselineBtn.title = `This scan is the baseline for ${lastScan.cidr}. Click to unset.`;
+  } else {
+    els.baselineBtn.textContent = baseline ? "★ Make this the baseline" : "★ Set as baseline";
+    els.baselineBtn.classList.remove("active");
+    els.baselineBtn.title = baseline
+      ? `Replace the existing baseline for ${lastScan.cidr} with this scan.`
+      : `Mark this scan as the baseline for ${lastScan.cidr}. Future scans of the same CIDR will be compared against it automatically.`;
+  }
+}
+
+async function toggleBaseline() {
+  if (!lastScan) return;
+  const baseline = baselinesByCidr.get(lastScan.cidr);
+  const isThisOne = baseline && baseline.scan_id === lastScan.id;
+  try {
+    if (isThisOne) {
+      await fetchJson(`/api/inventory/${encodeURIComponent(lastScan.cidr)}`, { method: "DELETE" });
+      setStatus(`Baseline cleared for ${lastScan.cidr}.`);
+      if (compareIsBaseline) {
+        compareBaseScan = null;
+        compareBaseScanId = null;
+        compareIsBaseline = false;
+        lastDiff = null;
+      }
+    } else {
+      await fetchJson("/api/inventory", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ scan_id: lastScan.id }),
+      });
+      setStatus(`This scan is now the baseline for ${lastScan.cidr}.`);
+      // If we were auto-comparing against an old baseline, drop it; the new
+      // baseline is this scan itself, so there's nothing to compare against here.
+      if (compareIsBaseline) {
+        compareBaseScan = null;
+        compareBaseScanId = null;
+        compareIsBaseline = false;
+        lastDiff = null;
+      }
+    }
+    await loadBaselines();
+    if (lastScan) renderScan(lastScan);
+  } catch (e) {
+    setStatus(`Baseline update failed: ${e.message}`, true);
+  }
+}
+
+function maybeApplyBaselineAutoCompare() {
+  if (!lastScan) return;
+  if (compareBaseScan) return;          // already comparing (manual or baseline-loaded)
+  if (compareSuppressed) return;        // user exited diff for this view
+  const baseline = baselinesByCidr.get(lastScan.cidr);
+  if (!baseline) return;
+  if (baseline.scan_id === lastScan.id) return; // viewing the baseline itself
+  if (baselineAutoFetching === baseline.scan_id) return; // already fetching
+  baselineAutoFetching = baseline.scan_id;
+  const targetCidr = lastScan.cidr;
+  fetchJson(`/api/scans/${baseline.scan_id}`)
+    .then((scan) => {
+      baselineAutoFetching = null;
+      // Race-guard: discard if the user moved on to another scan or already
+      // picked a manual base while the fetch was in flight.
+      if (!lastScan || lastScan.cidr !== targetCidr) return;
+      if (compareBaseScan) return;
+      if (compareSuppressed) return;
+      compareBaseScan = scan;
+      compareBaseScanId = scan.id;
+      compareIsBaseline = true;
+      renderScan(lastScan);
+    })
+    .catch((e) => {
+      baselineAutoFetching = null;
+      console.error("baseline auto-compare fetch failed:", e);
+    });
 }
 
 function comparableScans() {
@@ -1461,16 +1578,21 @@ function renderDiffBanner() {
   if (!diffActive() || !lastDiff) {
     els.diffBanner.hidden = true;
     els.diffBannerText.textContent = "";
+    els.diffBanner.classList.remove("baseline");
     return;
   }
   const baseTime = fmtTime(compareBaseScan.started_at);
+  const header = compareIsBaseline
+    ? `<strong>★ Compared against baseline</strong> (set from ${baseTime})`
+    : `Comparing with scan from ${baseTime}`;
   const parts = [
-    `Comparing with scan from ${baseTime}`,
+    header,
     `<strong class="diff-c-appeared">${lastDiff.appeared.length} appeared</strong>`,
     `<strong class="diff-c-disappeared">${lastDiff.disappeared.length} disappeared</strong>`,
     `<strong class="diff-c-changed">${lastDiff.changed.length} changed</strong>`,
   ];
   els.diffBanner.hidden = false;
+  els.diffBanner.classList.toggle("baseline", compareIsBaseline);
   els.diffBannerText.innerHTML = parts.join(" · ");
 }
 
@@ -1483,6 +1605,8 @@ async function setCompareBase(scanId) {
     }
     compareBaseScan = scan;
     compareBaseScanId = scan.id;
+    compareIsBaseline = false; // manual selection overrides any baseline auto-compare
+    compareSuppressed = false;
     if (els.compareList) els.compareList.hidden = true;
     refreshCompareDropdown();
     renderScan(lastScan);
@@ -1866,6 +1990,8 @@ els.compareList?.addEventListener("click", (e) => {
 
 els.diffExit?.addEventListener("click", exitDiff);
 
+els.baselineBtn?.addEventListener("click", toggleBaseline);
+
 document.addEventListener("click", (e) => {
   if (!els.compareWrap || els.compareWrap.hidden) return;
   if (els.compareList?.hidden) return;
@@ -1900,4 +2026,5 @@ window.addEventListener("resize", () => {
   if (cy) cy.resize();
 });
 
+loadBaselines();
 loadHistory();

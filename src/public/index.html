@@ -190,6 +190,7 @@
               <button id="bulk-portscan" class="ghost small" title="Run TCP port scan on every host that hasn't been scanned yet">Scan all ports</button>
               <button id="bulk-osscan" class="ghost small" title="Run OS fingerprint on every host that hasn't been scanned yet">Scan all OS</button>
               <button id="bulk-udpscan" class="ghost small" title="Run UDP scan on every host that hasn't been scanned yet — slow!">Scan all UDP</button>
+              <button id="baseline-btn" class="ghost small" hidden title="Mark this scan as the baseline for its CIDR — future scans of the same CIDR will be compared against it automatically">★ Set as baseline</button>
               <button id="delete-scan" class="ghost danger small" hidden title="Delete this scan">Delete</button>
             </div>
           </div>
@@ -240,7 +241,7 @@
     </div>
 
     <footer class="bottombar">
-      <span>v0.7.3</span>
+      <span>v0.8.0</span>
       <span>·</span>
       <span>MIT</span>
       <span>·</span>

@@ -1080,6 +1080,23 @@ tr.host-detail td {
   color: var(--text);
   letter-spacing: 0.3px;
 }
+.diff-banner.baseline {
+  border-left-color: #facc15;
+  background: rgba(250, 204, 21, 0.05);
+}
+#baseline-btn.active {
+  background: rgba(250, 204, 21, 0.18);
+  color: #facc15;
+  border-color: #facc15;
+}
+.scan-baseline-marker {
+  margin-left: 6px;
+  color: #facc15;
+  font-size: 11px;
+}
+li.is-baseline .scan-cidr {
+  color: var(--text-strong);
+}
 .diff-banner-text {
   flex: 1;
 }

@@ -65,12 +65,20 @@ db.exec(`
     output       TEXT
   );
 
+  CREATE TABLE IF NOT EXISTS inventory_baselines (
+    id        INTEGER PRIMARY KEY AUTOINCREMENT,
+    cidr      TEXT    NOT NULL UNIQUE,
+    scan_id   INTEGER NOT NULL REFERENCES scans(id) ON DELETE CASCADE,
+    set_at    INTEGER NOT NULL
+  );
+
   CREATE INDEX IF NOT EXISTS idx_hosts_scan ON hosts(scan_id);
   CREATE INDEX IF NOT EXISTS idx_scans_started ON scans(started_at DESC);
   CREATE INDEX IF NOT EXISTS idx_ports_host ON host_ports(host_id);
   CREATE INDEX IF NOT EXISTS idx_os_matches_host ON host_os_matches(host_id);
   CREATE INDEX IF NOT EXISTS idx_scripts_host ON host_scripts(host_id);
   CREATE INDEX IF NOT EXISTS idx_scripts_port ON host_scripts(host_port_id);
+  CREATE INDEX IF NOT EXISTS idx_baselines_scan ON inventory_baselines(scan_id);
 `);
 
 // Migration for v0.1 DBs that don't have the new columns/tables yet.
@@ -190,6 +198,25 @@ const stmts = {
        WHERE host_id IN (SELECT id FROM hosts WHERE scan_id = ?)
        ORDER BY host_id, host_port_id, script_id`,
   ),
+  // v0.8.0 — inventory baselines: at most one baseline scan per CIDR.
+  listBaselinesStmt: db.prepare(
+    `SELECT b.id, b.cidr, b.scan_id, b.set_at, s.started_at, s.host_count
+       FROM inventory_baselines b
+       JOIN scans s ON s.id = b.scan_id
+       ORDER BY b.set_at DESC`,
+  ),
+  getBaselineByCidrStmt: db.prepare(
+    `SELECT b.id, b.cidr, b.scan_id, b.set_at, s.started_at, s.host_count
+       FROM inventory_baselines b
+       JOIN scans s ON s.id = b.scan_id
+       WHERE b.cidr = ?`,
+  ),
+  upsertBaselineStmt: db.prepare(
+    `INSERT INTO inventory_baselines (cidr, scan_id, set_at)
+     VALUES (?, ?, ?)
+     ON CONFLICT(cidr) DO UPDATE SET scan_id = excluded.scan_id, set_at = excluded.set_at`,
+  ),
+  deleteBaselineByCidrStmt: db.prepare(`DELETE FROM inventory_baselines WHERE cidr = ?`),
 };
 
 const insertHostsTx = db.transaction((scanId, hosts) => {
@@ -390,6 +417,25 @@ function saveHostOsMatches(hostId, matches) {
   return stmts.getOsMatchesByHost.all(hostId);
 }
 
+function listBaselines() {
+  return stmts.listBaselinesStmt.all();
+}
+
+function getBaselineByCidr(cidr) {
+  return stmts.getBaselineByCidrStmt.get(cidr) || null;
+}
+
+function setBaseline(scanId) {
+  const scan = stmts.getScan.get(scanId);
+  if (!scan) return null;
+  stmts.upsertBaselineStmt.run(scan.cidr, scanId, Date.now());
+  return stmts.getBaselineByCidrStmt.get(scan.cidr);
+}
+
+function clearBaselineByCidr(cidr) {
+  return stmts.deleteBaselineByCidrStmt.run(cidr).changes > 0;
+}
+
 module.exports = {
   startScan,
   finishScan,
@@ -401,4 +447,8 @@ module.exports = {
   saveHostPorts,
   saveHostUdpPorts,
   saveHostOsMatches,
+  listBaselines,
+  getBaselineByCidr,
+  setBaseline,
+  clearBaselineByCidr,
 };

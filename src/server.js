@@ -153,6 +153,34 @@ app.post("/api/hosts/:id/osscan", async (req, res) => {
   }
 });
 
+// v0.8.0 — inventory baselines: at most one per CIDR.
+app.get("/api/inventory", (req, res) => {
+  res.json({ baselines: db.listBaselines() });
+});
+
+app.post("/api/inventory", (req, res) => {
+  const scanId = parseInt(req.body?.scan_id, 10);
+  if (!Number.isInteger(scanId) || scanId <= 0) {
+    return res.status(400).json({ error: "scan_id is required" });
+  }
+  const scan = db.getScan(scanId);
+  if (!scan) return res.status(404).json({ error: "scan not found" });
+  if (scan.status !== "done") {
+    return res.status(400).json({ error: "scan must be completed to become a baseline" });
+  }
+  const baseline = db.setBaseline(scanId);
+  res.json({ baseline });
+});
+
+app.delete("/api/inventory/:cidr", (req, res) => {
+  const cidr = req.params.cidr;
+  const errorMsg = validateCidr(cidr);
+  if (errorMsg) return res.status(400).json({ error: errorMsg });
+  const ok = db.clearBaselineByCidr(cidr);
+  if (!ok) return res.status(404).json({ error: "no baseline for this CIDR" });
+  res.status(204).end();
+});
+
 app.listen(PORT, () => {
   console.log(`LanScope listening on http://0.0.0.0:${PORT}`);
 });
