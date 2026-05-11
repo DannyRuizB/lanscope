@@ -1012,6 +1012,120 @@ tr.host-detail td {
   margin-bottom: 0;
 }
 
+/* Compare dropdown (v0.7.1) */
+.compare-wrap {
+  position: relative;
+  display: inline-flex;
+}
+.compare-btn.active,
+#compare-btn.active {
+  background: var(--accent-soft);
+  color: var(--text-strong);
+  border-color: var(--accent);
+}
+.compare-list {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  min-width: 240px;
+  margin: 0;
+  padding: 4px;
+  list-style: none;
+  background: var(--surface);
+  border: 1px solid var(--border-strong);
+  border-radius: 4px;
+  z-index: 20;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
+}
+.compare-item {
+  padding: 6px 10px;
+  border-radius: 3px;
+  font-family: var(--mono);
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text);
+  cursor: pointer;
+  white-space: nowrap;
+}
+.compare-item:hover {
+  background: var(--surface-2);
+  color: var(--text-strong);
+}
+.compare-item.active {
+  background: var(--accent);
+  color: var(--accent-fg);
+}
+.compare-empty {
+  padding: 6px 10px;
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--text-mute);
+  font-style: italic;
+}
+
+/* Diff banner (v0.7.1) */
+.diff-banner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 8px 14px;
+  margin: 8px 0;
+  background: var(--surface-2);
+  border: 1px solid var(--border-strong);
+  border-left: 3px solid var(--accent);
+  border-radius: 4px;
+  font-family: var(--mono);
+  font-size: 11.5px;
+  color: var(--text);
+  letter-spacing: 0.3px;
+}
+.diff-banner-text {
+  flex: 1;
+}
+.diff-c-appeared  { color: #22c55e; }
+.diff-c-changed   { color: #facc15; }
+.diff-c-disappeared { color: #ef4444; }
+
+/* Diff row + node states */
+.hosts-table tr.host-row.diff-appeared > td {
+  background: rgba(34, 197, 94, 0.10);
+}
+.hosts-table tr.host-row.diff-changed > td {
+  background: rgba(250, 204, 21, 0.10);
+}
+.hosts-table tr.host-row.diff-disappeared > td {
+  background: rgba(239, 68, 68, 0.08);
+  opacity: 0.7;
+}
+.hosts-table tr.host-row.diff-disappeared .ip,
+.hosts-table tr.host-row.diff-disappeared .muted {
+  text-decoration: line-through;
+  text-decoration-color: rgba(239, 68, 68, 0.7);
+}
+.diff-section-header td {
+  padding: 10px 14px 4px;
+  font-family: var(--mono);
+  font-size: 10.5px;
+  letter-spacing: 0.4px;
+  text-transform: uppercase;
+  color: var(--text-mute);
+  border-bottom: 0;
+  background: transparent;
+}
+.diff-reason-badge {
+  display: inline-block;
+  margin-left: 6px;
+  padding: 1px 6px;
+  border-radius: 3px;
+  font-size: 9.5px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+  background: rgba(250, 204, 21, 0.18);
+  color: #facc15;
+}
+
 /* Re-scan toolbar (v0.7.2) — top of each sub-row (kind=ports/os/udp) */
 .rescan-toolbar {
   display: flex;

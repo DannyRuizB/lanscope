@@ -39,6 +39,12 @@ const els = {
   graphWrap: $("#results-graph"),
   graphCanvas: $("#cy"),
   graphLegend: $("#graph-legend"),
+  compareWrap: $("#compare-wrap"),
+  compareBtn: $("#compare-btn"),
+  compareList: $("#compare-list"),
+  diffBanner: $("#diff-banner"),
+  diffBannerText: $("#diff-banner-text"),
+  diffExit: $("#diff-exit"),
 };
 
 function currentPortsSpec() {
@@ -133,10 +139,14 @@ async function fetchJson(url, opts) {
   return body;
 }
 
+let historyScans = [];
+
 async function loadHistory() {
   try {
     const { scans } = await fetchJson("/api/scans");
-    renderHistory(scans);
+    historyScans = scans || [];
+    renderHistory(historyScans);
+    refreshCompareDropdown();
   } catch (e) {
     console.error("loadHistory failed:", e);
   }
@@ -294,10 +304,51 @@ function renderOsButton(host) {
   return `<button class="ghost small osscan-btn" data-host-id="${host.id}">${osButtonLabel(host)}</button>`;
 }
 
-function renderHostRow(h) {
+function diffStateFor(host) {
+  if (!lastDiff || !host) return null;
+  return lastDiff.byIp.get(host.ip) || null;
+}
+
+function diffReasonBadge(reasons) {
+  if (!reasons || !reasons.length) return "";
+  return ` <span class="diff-reason-badge" title="Fields that changed since the base scan">${reasons.join(", ")}</span>`;
+}
+
+function renderDisappearedRow(h) {
   return `
-    <tr class="host-row" data-host-id="${h.id}">
+    <tr class="host-row diff-disappeared" data-disappeared-ip="${escapeHtml(h.ip)}">
       <td class="ip">${escapeHtml(h.ip)}</td>
+      <td class="${h.mac ? "" : "muted"}">${escapeHtml(h.mac) || "—"}</td>
+      <td class="${h.vendor ? "" : "muted"}">${escapeHtml(h.vendor) || "—"}</td>
+      <td class="${h.hostname ? "" : "muted"}">${escapeHtml(h.hostname) || "—"}</td>
+      <td class="muted">${escapeHtml(h.reason) || "—"}</td>
+      <td class="muted">—</td>
+      <td class="muted">—</td>
+      <td class="muted">—</td>
+    </tr>`;
+}
+
+function renderDisappearedSection() {
+  if (!lastDiff || !lastDiff.disappeared.length) return "";
+  const header = `
+    <tr class="diff-section-header">
+      <td colspan="8">Disappeared since base scan (${lastDiff.disappeared.length})</td>
+    </tr>`;
+  const rows = lastDiff.disappeared
+    .slice()
+    .sort((a, b) => compareIp(a.ip, b.ip))
+    .map(renderDisappearedRow)
+    .join("");
+  return header + rows;
+}
+
+function renderHostRow(h) {
+  const ds = diffStateFor(h);
+  const rowClass = ds ? ` diff-${ds.state}` : "";
+  const reasonBadge = ds && ds.state === "changed" ? diffReasonBadge(ds.reasons) : "";
+  return `
+    <tr class="host-row${rowClass}" data-host-id="${h.id}">
+      <td class="ip">${escapeHtml(h.ip)}${reasonBadge}</td>
       <td class="${h.mac ? "" : "muted"}">${escapeHtml(h.mac) || "—"}</td>
       <td class="${h.vendor ? "" : "muted"}">${escapeHtml(h.vendor) || "—"}</td>
       <td class="${h.hostname ? "" : "muted"}">${escapeHtml(h.hostname) || "—"}</td>
@@ -540,6 +591,13 @@ function renderPortsTable(host) {
 
 function renderScan(scan) {
   lastScan = scan;
+  if (compareBaseScan && compareBaseScan.cidr !== scan.cidr) {
+    compareBaseScan = null;
+    compareBaseScanId = null;
+  }
+  recomputeDiff();
+  renderDiffBanner();
+  refreshCompareDropdown();
   els.empty.hidden = true;
   els.resultsHeader.hidden = false;
   els.deleteBtn.hidden = false;
@@ -571,7 +629,9 @@ function renderScan(scan) {
     return;
   }
 
-  els.body.innerHTML = sortHosts(filtered).map(renderHostRow).join("");
+  els.body.innerHTML =
+    sortHosts(filtered).map(renderHostRow).join("") +
+    renderDisappearedSection();
   attachPortscanHandlers();
   attachOsscanHandlers();
   attachUdpscanHandlers();
@@ -1047,6 +1107,7 @@ function buildGraphElements(scan, gateway) {
   const gatewayId = gateway ? `host-${gateway.id}` : null;
   for (const h of hosts) {
     const isGw = gateway && h.id === gateway.id;
+    const ds = diffStateFor(h);
     elements.push({
       group: "nodes",
       data: {
@@ -1056,8 +1117,24 @@ function buildGraphElements(scan, gateway) {
         bucket: osBucketKey(h),
         isGateway: isGw ? 1 : 0,
         relevance: hostRelevance(h, isGw),
+        diff: ds ? ds.state : "",
       },
     });
+  }
+  if (lastDiff && lastDiff.disappeared.length) {
+    for (const h of lastDiff.disappeared) {
+      elements.push({
+        group: "nodes",
+        data: {
+          id: `disappeared-${h.ip.replace(/\./g, "-")}`,
+          label: `${h.ip}${h.hostname ? `\n${h.hostname}` : ""}\ndisappeared`,
+          bucket: osBucketKey(h),
+          isGateway: 0,
+          relevance: 1,
+          diff: "disappeared",
+        },
+      });
+    }
   }
   if (gatewayId) {
     for (const h of hosts) {
@@ -1090,6 +1167,17 @@ function renderGraphLegend(scan, hadGateway, palette) {
     items.unshift(
       `<span class="graph-legend-item"><span class="graph-legend-swatch" style="background:${palette.accent}"></span>Gateway</span>`,
     );
+  }
+  if (diffActive() && lastDiff) {
+    if (lastDiff.appeared.length) {
+      items.push(`<span class="graph-legend-item"><span class="graph-legend-swatch" style="background:transparent;border-color:#22c55e;border-width:2px"></span>Appeared</span>`);
+    }
+    if (lastDiff.changed.length) {
+      items.push(`<span class="graph-legend-item"><span class="graph-legend-swatch" style="background:transparent;border-color:#facc15;border-width:2px"></span>Changed</span>`);
+    }
+    if (lastDiff.disappeared.length) {
+      items.push(`<span class="graph-legend-item"><span class="graph-legend-swatch" style="background:transparent;border-color:#ef4444;border-width:2px;border-style:dashed"></span>Disappeared</span>`);
+    }
   }
   els.graphLegend.innerHTML = items.join("");
   els.graphLegend.hidden = items.length === 0;
@@ -1182,6 +1270,25 @@ function renderGraph(scan) {
         },
       },
       {
+        selector: 'node[diff = "appeared"]',
+        style: { "border-color": "#22c55e", "border-width": 3 },
+      },
+      {
+        selector: 'node[diff = "changed"]',
+        style: { "border-color": "#facc15", "border-width": 3 },
+      },
+      {
+        selector: 'node[diff = "disappeared"]',
+        style: {
+          "background-color": palette.surface2,
+          "border-color": "#ef4444",
+          "border-width": 2,
+          "border-style": "dashed",
+          opacity: 0.45,
+          color: palette.textMute,
+        },
+      },
+      {
         selector: "edge",
         style: {
           width: 1,
@@ -1240,6 +1347,148 @@ function setViewMode(mode) {
   els.viewTable.setAttribute("aria-selected", viewMode === "table" ? "true" : "false");
   els.viewGraph.setAttribute("aria-selected", viewMode === "graph" ? "true" : "false");
   if (lastScan) renderScan(lastScan);
+}
+
+/* ---------- diff between scans (v0.7.1) ---------- */
+
+let compareBaseScan = null;     // full Scan object loaded for comparison
+let compareBaseScanId = null;   // id of the base scan (kept for cheap equality)
+let lastDiff = null;            // { appeared, disappeared, changed, byIp }
+
+function hostChangeReasons(b, n) {
+  const reasons = [];
+  if ((b.mac || "") !== (n.mac || "")) reasons.push("mac");
+  if ((b.hostname || "") !== (n.hostname || "")) reasons.push("hostname");
+  if (b.osscanned_at && n.osscanned_at) {
+    const bk = osBucketKey(b);
+    const nk = osBucketKey(n);
+    if (bk !== nk && bk !== "unknown" && nk !== "unknown") reasons.push("os");
+  }
+  return reasons;
+}
+
+function diffScans(baseScan, newScan) {
+  const baseUp = (baseScan?.hosts || []).filter((h) => h.status === "up");
+  const newUp  = (newScan?.hosts  || []).filter((h) => h.status === "up");
+  const baseByIp = new Map(baseUp.map((h) => [h.ip, h]));
+  const newByIp  = new Map(newUp.map((h) => [h.ip, h]));
+  const appeared = [];
+  const disappeared = [];
+  const changed = [];
+  const unchanged = [];
+  const byIp = new Map(); // ip -> { state, reasons? }
+  for (const n of newUp) {
+    const b = baseByIp.get(n.ip);
+    if (!b) {
+      appeared.push(n);
+      byIp.set(n.ip, { state: "appeared" });
+    } else {
+      const reasons = hostChangeReasons(b, n);
+      if (reasons.length) {
+        changed.push({ host: n, base: b, reasons });
+        byIp.set(n.ip, { state: "changed", reasons });
+      } else {
+        unchanged.push(n);
+        byIp.set(n.ip, { state: "unchanged" });
+      }
+    }
+  }
+  for (const b of baseUp) {
+    if (!newByIp.has(b.ip)) {
+      disappeared.push(b);
+      byIp.set(b.ip, { state: "disappeared" });
+    }
+  }
+  return { appeared, disappeared, changed, unchanged, byIp };
+}
+
+function diffActive() {
+  return !!(compareBaseScan && lastScan && compareBaseScan.cidr === lastScan.cidr && compareBaseScan.id !== lastScan.id);
+}
+
+function recomputeDiff() {
+  lastDiff = diffActive() ? diffScans(compareBaseScan, lastScan) : null;
+}
+
+function exitDiff() {
+  compareBaseScan = null;
+  compareBaseScanId = null;
+  lastDiff = null;
+  if (els.compareList) els.compareList.hidden = true;
+  refreshCompareDropdown();
+  if (lastScan) renderScan(lastScan);
+}
+
+function comparableScans() {
+  if (!lastScan) return [];
+  return historyScans.filter(
+    (s) => s.cidr === lastScan.cidr && s.id !== lastScan.id && s.status === "done",
+  );
+}
+
+function refreshCompareDropdown() {
+  if (!els.compareWrap) return;
+  const options = comparableScans();
+  els.compareWrap.hidden = options.length === 0 && !diffActive();
+  if (els.compareBtn) {
+    if (diffActive()) {
+      els.compareBtn.textContent = "Change base…";
+      els.compareBtn.classList.add("active");
+    } else {
+      els.compareBtn.textContent = options.length
+        ? `Compare with… (${options.length})`
+        : "Compare with…";
+      els.compareBtn.classList.remove("active");
+    }
+    els.compareBtn.disabled = options.length === 0;
+  }
+  if (els.compareList) {
+    if (!options.length) {
+      els.compareList.innerHTML = `<li class="compare-empty">No earlier scans for ${escapeHtml(lastScan?.cidr || "")}</li>`;
+      return;
+    }
+    const items = options.map((s) => {
+      const active = s.id === compareBaseScanId ? " active" : "";
+      const meta = `${fmtTime(s.started_at)}${s.host_count != null ? ` · ${s.host_count} alive` : ""}`;
+      return `<li class="compare-item${active}" data-scan-id="${s.id}">${escapeHtml(meta)}</li>`;
+    });
+    els.compareList.innerHTML = items.join("");
+  }
+}
+
+function renderDiffBanner() {
+  if (!els.diffBanner) return;
+  if (!diffActive() || !lastDiff) {
+    els.diffBanner.hidden = true;
+    els.diffBannerText.textContent = "";
+    return;
+  }
+  const baseTime = fmtTime(compareBaseScan.started_at);
+  const parts = [
+    `Comparing with scan from ${baseTime}`,
+    `<strong class="diff-c-appeared">${lastDiff.appeared.length} appeared</strong>`,
+    `<strong class="diff-c-disappeared">${lastDiff.disappeared.length} disappeared</strong>`,
+    `<strong class="diff-c-changed">${lastDiff.changed.length} changed</strong>`,
+  ];
+  els.diffBanner.hidden = false;
+  els.diffBannerText.innerHTML = parts.join(" · ");
+}
+
+async function setCompareBase(scanId) {
+  try {
+    const scan = await fetchJson(`/api/scans/${scanId}`);
+    if (!lastScan || scan.cidr !== lastScan.cidr) {
+      setStatus("Cannot compare: scans are for different CIDRs.", true);
+      return;
+    }
+    compareBaseScan = scan;
+    compareBaseScanId = scan.id;
+    if (els.compareList) els.compareList.hidden = true;
+    refreshCompareDropdown();
+    renderScan(lastScan);
+  } catch (e) {
+    setStatus(`Failed to load comparison scan: ${e.message}`, true);
+  }
 }
 
 function toggleHostDetail(hostId, kind = "ports") {
@@ -1600,6 +1849,30 @@ document.addEventListener("click", (e) => {
 
 els.viewTable?.addEventListener("click", () => setViewMode("table"));
 els.viewGraph?.addEventListener("click", () => setViewMode("graph"));
+
+els.compareBtn?.addEventListener("click", (e) => {
+  e.stopPropagation();
+  if (!els.compareList) return;
+  refreshCompareDropdown();
+  els.compareList.hidden = !els.compareList.hidden;
+});
+
+els.compareList?.addEventListener("click", (e) => {
+  const item = e.target.closest(".compare-item");
+  if (!item) return;
+  const scanId = parseInt(item.dataset.scanId, 10);
+  if (!Number.isNaN(scanId)) setCompareBase(scanId);
+});
+
+els.diffExit?.addEventListener("click", exitDiff);
+
+document.addEventListener("click", (e) => {
+  if (!els.compareWrap || els.compareWrap.hidden) return;
+  if (els.compareList?.hidden) return;
+  if (!els.compareWrap.contains(e.target)) {
+    els.compareList.hidden = true;
+  }
+});
 
 els.body.addEventListener("click", async (e) => {
   const btn = e.target.closest(".rescan-btn");

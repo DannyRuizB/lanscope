@@ -178,6 +178,10 @@
                 <button type="button" id="view-table" class="view-btn active" role="tab" aria-selected="true" title="Show the results as a table">Table</button>
                 <button type="button" id="view-graph" class="view-btn" role="tab" aria-selected="false" title="Show the results as a topology graph">Graph</button>
               </div>
+              <div class="compare-wrap" id="compare-wrap" hidden>
+                <button type="button" id="compare-btn" class="ghost small" title="Compare this scan with a previous one of the same CIDR">Compare with…</button>
+                <ul id="compare-list" class="compare-list" hidden></ul>
+              </div>
               <div class="port-filter" hidden id="port-filter-wrap">
                 <input id="port-filter-input" class="port-filter-input" type="number" min="1" max="65535" placeholder="Filter port" title="Type a port (1–65535) or pick from the dropdown" />
                 <button type="button" id="port-filter-toggle" class="port-filter-toggle" aria-label="Show top open ports" title="Top open ports in this scan">▾</button>
@@ -188,6 +192,11 @@
               <button id="bulk-udpscan" class="ghost small" title="Run UDP scan on every host that hasn't been scanned yet — slow!">Scan all UDP</button>
               <button id="delete-scan" class="ghost danger small" hidden title="Delete this scan">Delete</button>
             </div>
+          </div>
+
+          <div id="diff-banner" class="diff-banner" hidden>
+            <div class="diff-banner-text" id="diff-banner-text"></div>
+            <button type="button" id="diff-exit" class="ghost small" title="Stop comparing and return to the normal view">Exit diff</button>
           </div>
 
           <div id="results-empty" class="empty">
@@ -231,7 +240,7 @@
     </div>
 
     <footer class="bottombar">
-      <span>v0.7.2</span>
+      <span>v0.7.3</span>
       <span>·</span>
       <span>MIT</span>
       <span>·</span>
