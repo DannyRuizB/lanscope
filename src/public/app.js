@@ -149,6 +149,9 @@ async function loadHistory() {
     historyScans = scans || [];
     renderHistory(historyScans);
     refreshCompareDropdown();
+    // Schedule rows reuse host_count from the matching scan in history, so
+    // re-render them whenever history changes.
+    if (schedules.length) renderSchedules();
   } catch (e) {
     console.error("loadHistory failed:", e);
   }
@@ -165,11 +168,12 @@ function renderHistory(scans) {
       const star = isBaseline
         ? `<span class="scan-baseline-marker" title="Baseline for ${escapeHtml(s.cidr)}">★</span>`
         : "";
+      const schedChip = scheduledScanChip(s);
       return `
       <li data-id="${s.id}" class="${s.id === activeScanId ? "active" : ""}${isBaseline ? " is-baseline" : ""}">
         <button class="scan-delete" data-id="${s.id}" title="Delete this scan" aria-label="Delete scan ${escapeHtml(s.cidr)}">×</button>
         <span class="scan-cidr">
-          <span class="scan-status-dot ${s.status}"></span>${escapeHtml(s.cidr)}${star}
+          <span class="scan-status-dot ${s.status}"></span>${escapeHtml(s.cidr)}${star}${schedChip}
         </span>
         <span class="scan-meta">
           ${fmtTime(s.started_at)} · ${s.host_count} host${s.host_count === 1 ? "" : "s"}
@@ -2027,8 +2031,258 @@ window.addEventListener("resize", () => {
   if (cy) cy.resize();
 });
 
+// v0.10.0 — scheduled scans UI
+
+const schedEls = {
+  list: document.getElementById("schedule-list"),
+  newBtn: document.getElementById("new-schedule-btn"),
+  refreshBtn: document.getElementById("refresh-schedules"),
+  modal: document.getElementById("modal-schedule"),
+  modalForm: document.getElementById("sched-modal-form"),
+  modalError: document.getElementById("sched-modal-error"),
+  modalCreate: document.getElementById("sched-modal-create"),
+  inputName: document.getElementById("sched-name"),
+  inputCidr: document.getElementById("sched-cidr"),
+  inputCron: document.getElementById("sched-cron"),
+  cronPresets: Array.from(document.querySelectorAll(".cron-preset")),
+  cronHint: document.getElementById("sched-cron-hint"),
+};
+
+let schedules = [];
+let schedulesById = new Map();
+
+const CRON_PRESET_LABELS = {
+  "*/15 * * * *": "Every 15 minutes",
+  "0 * * * *": "Every hour",
+  "0 */3 * * *": "Every 3 hours",
+  "0 3 * * *": "Daily at 3:00 AM",
+};
+
+function cronHumanLabel(expr) {
+  return CRON_PRESET_LABELS[expr] || `Custom — ${expr}`;
+}
+
+function scheduledScanChip(scan) {
+  if (!scan.schedule_id) return "";
+  const sched = schedulesById.get(scan.schedule_id);
+  const tip = sched ? `Scheduled by: ${sched.name}` : "Scheduled scan";
+  return ` <span class="scan-scheduled-chip" title="${escapeHtml(tip)}">⏱</span>`;
+}
+
+function fmtClock(ms) {
+  if (!ms) return "—";
+  return new Date(ms).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+}
+
+function lastRunSummary(s) {
+  if (!s.last_run_at) {
+    return `<span class="schedule-lastrun muted">Never run yet</span>`;
+  }
+  const ts = fmtClock(s.last_run_at);
+  if (s.last_status === "done") {
+    const scan = historyScans.find((x) => x.id === s.last_scan_id);
+    const hostStr = scan ? ` · ${scan.host_count} host${scan.host_count === 1 ? "" : "s"}` : "";
+    return `<span class="schedule-lastrun done" title="Last successful run">✓ ${ts}${hostStr}</span>`;
+  }
+  if (s.last_status === "error") {
+    const tip = s.last_error ? `Error: ${s.last_error}` : "Error";
+    return `<span class="schedule-lastrun error" title="${escapeHtml(tip)}">✗ ${ts} · error</span>`;
+  }
+  if (s.last_status === "skipped") {
+    const tip = s.last_error || "Another scan was running at the time";
+    return `<span class="schedule-lastrun skipped" title="${escapeHtml(tip)}">⊘ ${ts} · skipped</span>`;
+  }
+  return `<span class="schedule-lastrun">${ts}</span>`;
+}
+
+async function loadSchedules() {
+  try {
+    const { schedules: rows } = await fetchJson("/api/schedules");
+    schedules = rows || [];
+    schedulesById = new Map(schedules.map((s) => [s.id, s]));
+    renderSchedules();
+    // History rows show the ⏱ chip + tooltip with schedule name; refresh
+    // them so the tooltip text matches the latest schedule data.
+    if (historyScans.length) renderHistory(historyScans);
+  } catch (e) {
+    console.error("loadSchedules failed:", e);
+  }
+}
+
+function renderScheduleRow(s) {
+  const checkedAttr = s.enabled ? "checked" : "";
+  return `
+    <li class="${s.enabled ? "" : "disabled"}" data-id="${s.id}">
+      <span class="schedule-name">${escapeHtml(s.name)}</span>
+      <span class="schedule-meta"><code>${escapeHtml(s.cidr)}</code> · ${escapeHtml(cronHumanLabel(s.cron_expr))}</span>
+      ${lastRunSummary(s)}
+      <div class="schedule-controls">
+        <button class="ghost small sched-run" data-act="run" data-id="${s.id}" title="Run this scan now">▶ Run now</button>
+        <label class="sched-toggle" title="Enable or disable this schedule">
+          <input type="checkbox" data-act="toggle" data-id="${s.id}" ${checkedAttr} />
+          <span>${s.enabled ? "On" : "Off"}</span>
+        </label>
+        <button class="sched-delete" data-act="delete" data-id="${s.id}" title="Delete schedule" aria-label="Delete schedule">×</button>
+      </div>
+    </li>`;
+}
+
+function renderSchedules() {
+  if (!schedules.length) {
+    schedEls.list.innerHTML = `<li class="muted">No schedules yet.</li>`;
+    return;
+  }
+  schedEls.list.innerHTML = schedules.map(renderScheduleRow).join("");
+  schedEls.list.querySelectorAll('[data-act="run"]').forEach((btn) => {
+    btn.addEventListener("click", () => runScheduleNow(parseInt(btn.dataset.id, 10)));
+  });
+  schedEls.list.querySelectorAll('[data-act="toggle"]').forEach((cb) => {
+    cb.addEventListener("change", () =>
+      toggleScheduleEnabled(parseInt(cb.dataset.id, 10), cb.checked),
+    );
+  });
+  schedEls.list.querySelectorAll('[data-act="delete"]').forEach((btn) => {
+    btn.addEventListener("click", () => deleteScheduleAction(parseInt(btn.dataset.id, 10)));
+  });
+}
+
+async function runScheduleNow(id) {
+  const sched = schedules.find((s) => s.id === id);
+  const name = sched?.name || `schedule ${id}`;
+  try {
+    setStatus(`Running ${name}…`);
+    await fetchJson(`/api/schedules/${id}/run-now`, { method: "POST" });
+    setStatus(`Schedule "${name}" finished.`);
+    await Promise.all([loadSchedules(), loadHistory()]);
+  } catch (e) {
+    setStatus(e.message, true);
+    await loadSchedules();
+  }
+}
+
+async function toggleScheduleEnabled(id, enabled) {
+  try {
+    await fetchJson(`/api/schedules/${id}`, {
+      method: "PATCH",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ enabled }),
+    });
+    await loadSchedules();
+  } catch (e) {
+    setStatus(e.message, true);
+    await loadSchedules();
+  }
+}
+
+async function deleteScheduleAction(id) {
+  const sched = schedules.find((s) => s.id === id);
+  const name = sched?.name || `schedule ${id}`;
+  const ok = await confirmModal({
+    title: "Delete schedule",
+    message: `"${name}" will stop running. Existing scans it produced are kept in History.`,
+    confirmText: "Delete",
+    danger: true,
+  });
+  if (!ok) return;
+  try {
+    await fetchJson(`/api/schedules/${id}`, { method: "DELETE" });
+    await loadSchedules();
+  } catch (e) {
+    setStatus(e.message, true);
+  }
+}
+
+function openScheduleModal() {
+  schedEls.inputName.value = "";
+  schedEls.inputCidr.value = els.cidr?.value?.trim() || "";
+  schedEls.inputCron.value = "";
+  schedEls.inputCron.hidden = true;
+  schedEls.cronPresets.forEach((b, i) => b.classList.toggle("active", i === 0));
+  schedEls.cronHint.innerHTML = "Runs every 15 minutes (<code>*/15 * * * *</code>).";
+  schedEls.modalError.hidden = true;
+  schedEls.modalError.textContent = "";
+  schedEls.modal.hidden = false;
+  setTimeout(() => schedEls.inputName.focus(), 0);
+}
+
+function closeScheduleModal() {
+  schedEls.modal.hidden = true;
+}
+
+function selectedCronExpr() {
+  const active = document.querySelector(".cron-preset.active");
+  if (!active) return "*/15 * * * *";
+  const c = active.dataset.cron;
+  return c === "custom" ? schedEls.inputCron.value.trim() : c;
+}
+
+function showSchedError(msg) {
+  schedEls.modalError.textContent = msg;
+  schedEls.modalError.hidden = false;
+}
+
+async function submitScheduleModal() {
+  const name = schedEls.inputName.value.trim();
+  const cidr = schedEls.inputCidr.value.trim();
+  const cronExpr = selectedCronExpr();
+  if (!name) return showSchedError("Name is required.");
+  if (!cidr) return showSchedError("CIDR is required.");
+  if (!cronExpr) return showSchedError("Cron expression is required.");
+  try {
+    schedEls.modalCreate.disabled = true;
+    await fetchJson("/api/schedules", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ name, cidr, cron_expr: cronExpr, enabled: true }),
+    });
+    closeScheduleModal();
+    await loadSchedules();
+  } catch (e) {
+    showSchedError(e.message);
+  } finally {
+    schedEls.modalCreate.disabled = false;
+  }
+}
+
+schedEls.newBtn?.addEventListener("click", openScheduleModal);
+schedEls.refreshBtn?.addEventListener("click", loadSchedules);
+schedEls.modalCreate?.addEventListener("click", submitScheduleModal);
+
+schedEls.modalForm?.addEventListener("submit", (e) => {
+  e.preventDefault();
+  submitScheduleModal();
+});
+
+schedEls.modal?.querySelectorAll("[data-modal-close]").forEach((el) => {
+  el.addEventListener("click", closeScheduleModal);
+});
+
+schedEls.cronPresets.forEach((btn) => {
+  btn.addEventListener("click", () => {
+    schedEls.cronPresets.forEach((b) => b.classList.remove("active"));
+    btn.classList.add("active");
+    const c = btn.dataset.cron;
+    if (c === "custom") {
+      schedEls.inputCron.hidden = false;
+      schedEls.cronHint.textContent = "Cron format: m h dom mon dow (e.g. 30 9 * * 1-5).";
+      setTimeout(() => schedEls.inputCron.focus(), 0);
+    } else {
+      schedEls.inputCron.hidden = true;
+      schedEls.cronHint.innerHTML = `${escapeHtml(cronHumanLabel(c))} (<code>${escapeHtml(c)}</code>).`;
+    }
+  });
+});
+
+document.addEventListener("keydown", (e) => {
+  if (e.key === "Escape" && schedEls.modal && !schedEls.modal.hidden) {
+    e.preventDefault();
+    closeScheduleModal();
+  }
+});
+
 loadBaselines();
 loadHistory();
+loadSchedules();
 
 // Demo mode (v0.9.0): the server tells us whether this is a read-only demo
 // deploy. If so, expose the warning banner and disable controls that would

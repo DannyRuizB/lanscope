@@ -72,6 +72,20 @@ db.exec(`
     set_at    INTEGER NOT NULL
   );
 
+  CREATE TABLE IF NOT EXISTS scheduled_scans (
+    id            INTEGER PRIMARY KEY AUTOINCREMENT,
+    name          TEXT    NOT NULL,
+    cidr          TEXT    NOT NULL,
+    cron_expr     TEXT    NOT NULL,
+    enabled       INTEGER NOT NULL DEFAULT 1 CHECK (enabled IN (0,1)),
+    scan_options  TEXT,
+    last_run_at   INTEGER,
+    last_scan_id  INTEGER REFERENCES scans(id) ON DELETE SET NULL,
+    last_status   TEXT CHECK (last_status IS NULL OR last_status IN ('done','error','skipped')),
+    last_error    TEXT,
+    created_at    INTEGER NOT NULL
+  );
+
   CREATE INDEX IF NOT EXISTS idx_hosts_scan ON hosts(scan_id);
   CREATE INDEX IF NOT EXISTS idx_scans_started ON scans(started_at DESC);
   CREATE INDEX IF NOT EXISTS idx_ports_host ON host_ports(host_id);
@@ -79,6 +93,7 @@ db.exec(`
   CREATE INDEX IF NOT EXISTS idx_scripts_host ON host_scripts(host_id);
   CREATE INDEX IF NOT EXISTS idx_scripts_port ON host_scripts(host_port_id);
   CREATE INDEX IF NOT EXISTS idx_baselines_scan ON inventory_baselines(scan_id);
+  CREATE INDEX IF NOT EXISTS idx_schedules_enabled ON scheduled_scans(enabled);
 `);
 
 // Migration for v0.1 DBs that don't have the new columns/tables yet.
@@ -100,10 +115,16 @@ if (!columnExists("host_ports", "state_reason")) {
 if (!columnExists("hosts", "udp_portscanned_at")) {
   db.exec(`ALTER TABLE hosts ADD COLUMN udp_portscanned_at INTEGER`);
 }
+// v0.10.0 — origin tracking. NULL means "manual" (POST /api/scan or seed).
+if (!columnExists("scans", "schedule_id")) {
+  db.exec(
+    `ALTER TABLE scans ADD COLUMN schedule_id INTEGER REFERENCES scheduled_scans(id) ON DELETE SET NULL`,
+  );
+}
 
 const stmts = {
   insertScan: db.prepare(
-    `INSERT INTO scans (cidr, started_at, status) VALUES (?, ?, 'running') RETURNING id`,
+    `INSERT INTO scans (cidr, started_at, status, schedule_id) VALUES (?, ?, 'running', ?) RETURNING id`,
   ),
   finishScan: db.prepare(
     `UPDATE scans SET status = 'done', finished_at = ?, host_count = ? WHERE id = ?`,
@@ -116,11 +137,11 @@ const stmts = {
      VALUES (?, ?, ?, ?, ?, ?, ?)`,
   ),
   listScans: db.prepare(
-    `SELECT id, cidr, started_at, finished_at, status, error_message, host_count
+    `SELECT id, cidr, started_at, finished_at, status, error_message, host_count, schedule_id
        FROM scans ORDER BY started_at DESC LIMIT ?`,
   ),
   getScan: db.prepare(
-    `SELECT id, cidr, started_at, finished_at, status, error_message, host_count
+    `SELECT id, cidr, started_at, finished_at, status, error_message, host_count, schedule_id
        FROM scans WHERE id = ?`,
   ),
   getHostsByScan: db.prepare(
@@ -217,6 +238,32 @@ const stmts = {
      ON CONFLICT(cidr) DO UPDATE SET scan_id = excluded.scan_id, set_at = excluded.set_at`,
   ),
   deleteBaselineByCidrStmt: db.prepare(`DELETE FROM inventory_baselines WHERE cidr = ?`),
+  // v0.10.0 — scheduled scans. scan_options stored as JSON text; parsed on read.
+  listSchedulesStmt: db.prepare(
+    `SELECT id, name, cidr, cron_expr, enabled, scan_options,
+            last_run_at, last_scan_id, last_status, last_error, created_at
+       FROM scheduled_scans ORDER BY created_at DESC`,
+  ),
+  listEnabledSchedulesStmt: db.prepare(
+    `SELECT id, name, cidr, cron_expr, enabled, scan_options,
+            last_run_at, last_scan_id, last_status, last_error, created_at
+       FROM scheduled_scans WHERE enabled = 1 ORDER BY id`,
+  ),
+  getScheduleStmt: db.prepare(
+    `SELECT id, name, cidr, cron_expr, enabled, scan_options,
+            last_run_at, last_scan_id, last_status, last_error, created_at
+       FROM scheduled_scans WHERE id = ?`,
+  ),
+  insertScheduleStmt: db.prepare(
+    `INSERT INTO scheduled_scans (name, cidr, cron_expr, enabled, scan_options, created_at)
+     VALUES (?, ?, ?, ?, ?, ?) RETURNING id`,
+  ),
+  deleteScheduleStmt: db.prepare(`DELETE FROM scheduled_scans WHERE id = ?`),
+  recordScheduleRunStmt: db.prepare(
+    `UPDATE scheduled_scans
+        SET last_run_at = ?, last_scan_id = ?, last_status = ?, last_error = ?
+      WHERE id = ?`,
+  ),
 };
 
 const insertHostsTx = db.transaction((scanId, hosts) => {
@@ -299,8 +346,8 @@ const replaceHostOsMatchesTx = db.transaction((hostId, matches) => {
   stmts.markHostOsScanned.run(Date.now(), hostId);
 });
 
-function startScan(cidr) {
-  const row = stmts.insertScan.get(cidr, Date.now());
+function startScan(cidr, scheduleId = null) {
+  const row = stmts.insertScan.get(cidr, Date.now(), scheduleId);
   return row.id;
 }
 
@@ -436,6 +483,98 @@ function clearBaselineByCidr(cidr) {
   return stmts.deleteBaselineByCidrStmt.run(cidr).changes > 0;
 }
 
+function parseScheduleRow(row) {
+  if (!row) return null;
+  let opts = null;
+  if (row.scan_options) {
+    try {
+      opts = JSON.parse(row.scan_options);
+    } catch {
+      opts = null;
+    }
+  }
+  return {
+    id: row.id,
+    name: row.name,
+    cidr: row.cidr,
+    cron_expr: row.cron_expr,
+    enabled: row.enabled === 1,
+    scan_options: opts,
+    last_run_at: row.last_run_at,
+    last_scan_id: row.last_scan_id,
+    last_status: row.last_status,
+    last_error: row.last_error,
+    created_at: row.created_at,
+  };
+}
+
+function listSchedules() {
+  return stmts.listSchedulesStmt.all().map(parseScheduleRow);
+}
+
+function listEnabledSchedules() {
+  return stmts.listEnabledSchedulesStmt.all().map(parseScheduleRow);
+}
+
+function getSchedule(id) {
+  return parseScheduleRow(stmts.getScheduleStmt.get(id));
+}
+
+function createSchedule({ name, cidr, cron_expr, enabled = true, scan_options = null }) {
+  const optsJson = scan_options ? JSON.stringify(scan_options) : null;
+  const row = stmts.insertScheduleStmt.get(
+    name,
+    cidr,
+    cron_expr,
+    enabled ? 1 : 0,
+    optsJson,
+    Date.now(),
+  );
+  return getSchedule(row.id);
+}
+
+// Partial update: only the fields present in `patch` are touched. Unknown keys
+// are ignored. Returns the updated row (or null if id doesn't exist).
+function updateSchedule(id, patch) {
+  const current = stmts.getScheduleStmt.get(id);
+  if (!current) return null;
+  const sets = [];
+  const args = [];
+  if (Object.prototype.hasOwnProperty.call(patch, "name")) {
+    sets.push("name = ?");
+    args.push(patch.name);
+  }
+  if (Object.prototype.hasOwnProperty.call(patch, "cidr")) {
+    sets.push("cidr = ?");
+    args.push(patch.cidr);
+  }
+  if (Object.prototype.hasOwnProperty.call(patch, "cron_expr")) {
+    sets.push("cron_expr = ?");
+    args.push(patch.cron_expr);
+  }
+  if (Object.prototype.hasOwnProperty.call(patch, "enabled")) {
+    sets.push("enabled = ?");
+    args.push(patch.enabled ? 1 : 0);
+  }
+  if (Object.prototype.hasOwnProperty.call(patch, "scan_options")) {
+    sets.push("scan_options = ?");
+    args.push(patch.scan_options ? JSON.stringify(patch.scan_options) : null);
+  }
+  if (sets.length === 0) return parseScheduleRow(current);
+  args.push(id);
+  db.prepare(`UPDATE scheduled_scans SET ${sets.join(", ")} WHERE id = ?`).run(...args);
+  return getSchedule(id);
+}
+
+function deleteSchedule(id) {
+  return stmts.deleteScheduleStmt.run(id).changes > 0;
+}
+
+function recordScheduleRun(id, { scan_id = null, status, error = null }) {
+  stmts.recordScheduleRunStmt.run(Date.now(), scan_id, status, error, id);
+  return getSchedule(id);
+}
+
 module.exports = {
   startScan,
   finishScan,
@@ -451,4 +590,11 @@ module.exports = {
   getBaselineByCidr,
   setBaseline,
   clearBaselineByCidr,
+  listSchedules,
+  listEnabledSchedules,
+  getSchedule,
+  createSchedule,
+  updateSchedule,
+  deleteSchedule,
+  recordScheduleRun,
 };

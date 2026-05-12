@@ -51,6 +51,17 @@
         <ul id="scan-list" class="scan-list">
           <li class="muted">No scans yet.</li>
         </ul>
+
+        <div class="panel-header">
+          <h2>Schedules</h2>
+          <div class="panel-actions">
+            <button id="new-schedule-btn" class="ghost small" title="Create a scheduled scan">+ New</button>
+            <button id="refresh-schedules" class="ghost" title="Refresh schedules">↻</button>
+          </div>
+        </div>
+        <ul id="schedule-list" class="schedule-list">
+          <li class="muted">No schedules yet.</li>
+        </ul>
       </aside>
 
       <section class="content">
@@ -246,8 +257,42 @@
       </div>
     </div>
 
+    <div id="modal-schedule" class="modal-root" hidden role="dialog" aria-modal="true" aria-labelledby="sched-modal-title">
+      <div class="modal-backdrop" data-modal-close></div>
+      <div class="modal-box modal-form-box">
+        <h3 id="sched-modal-title" class="modal-title">New schedule</h3>
+        <div id="sched-modal-error" class="modal-form-error" hidden></div>
+        <form id="sched-modal-form" autocomplete="off">
+          <label class="form-field">
+            <span class="form-label">Name</span>
+            <input id="sched-name" type="text" placeholder="nightly home LAN" maxlength="80" required />
+          </label>
+          <label class="form-field">
+            <span class="form-label">Target CIDR</span>
+            <input id="sched-cidr" type="text" placeholder="192.168.1.0/24" spellcheck="false" autocomplete="off" required />
+          </label>
+          <div class="form-field">
+            <span class="form-label">Frequency</span>
+            <div class="cron-presets" role="radiogroup" aria-label="Frequency preset">
+              <button type="button" class="cron-preset active" data-cron="*/15 * * * *">Every 15 min</button>
+              <button type="button" class="cron-preset" data-cron="0 * * * *">Every hour</button>
+              <button type="button" class="cron-preset" data-cron="0 */3 * * *">Every 3 h</button>
+              <button type="button" class="cron-preset" data-cron="0 3 * * *">Daily 3 AM</button>
+              <button type="button" class="cron-preset" data-cron="custom">Custom…</button>
+            </div>
+            <input id="sched-cron" type="text" placeholder="m h dom mon dow (e.g. 30 9 * * 1-5)" spellcheck="false" autocomplete="off" hidden />
+            <span id="sched-cron-hint" class="form-hint">Runs every 15 minutes (<code>*/15 * * * *</code>).</span>
+          </div>
+        </form>
+        <div class="modal-actions">
+          <button type="button" class="ghost" data-modal-close>Cancel</button>
+          <button id="sched-modal-create" type="button">Create</button>
+        </div>
+      </div>
+    </div>
+
     <footer class="bottombar">
-      <span>v0.9.0</span>
+      <span>v0.10.0</span>
       <span>·</span>
       <span>MIT</span>
       <span>·</span>
