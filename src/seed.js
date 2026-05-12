@@ -358,6 +358,36 @@ function seedSchedules(rawDb, { scan2Id, scan2EndedAt, scan3Id, scan3EndedAt }) 
   return { hourly: hourly.id, nightly: nightly.id, debug: debug.id };
 }
 
+// v0.11.0 — seed two notification channels (both disabled) so the demo shows
+// the section populated without ever attempting an outbound call.
+function seedChannels(rawDb, { createdAtBase }) {
+  const discord = db.createChannel({
+    name: "Discord home alerts",
+    type: "webhook",
+    config: {
+      url: "https://discord.com/api/webhooks/XXXXXX/your-token-here",
+      format: "discord",
+    },
+    events: ["scan_done", "scan_error"],
+    enabled: false,
+  });
+  const ntfy = db.createChannel({
+    name: "ntfy mobile push",
+    type: "ntfy",
+    config: { topic: "lanscope-demo", server: "https://ntfy.sh" },
+    events: ["scan_error"],
+    enabled: false,
+  });
+
+  // Backdate created_at so the rows feel like seeded fixtures.
+  rawDb.prepare(`UPDATE notification_channels SET created_at = ? WHERE id = ?`)
+    .run(createdAtBase, discord.id);
+  rawDb.prepare(`UPDATE notification_channels SET created_at = ? WHERE id = ?`)
+    .run(createdAtBase, ntfy.id);
+
+  return { discord: discord.id, ntfy: ntfy.id };
+}
+
 function run() {
   const DB_PATH = process.env.DB_PATH || path.join(__dirname, "..", "data", "lanscope.db");
   const rawDb = new Database(DB_PATH);
@@ -384,8 +414,13 @@ function run() {
     scan3EndedAt: T_HOURS_AGO_4 + 5100,
   });
 
+  const chanIds = seedChannels(rawDb, {
+    createdAtBase: T_DAYS_AGO_3 + 4700,
+  });
+
   console.log(`[seed] Seeded scans: ${scan1} (baseline), ${scan2}, ${scan3}.`);
   console.log(`[seed] Seeded schedules: hourly=${schedIds.hourly}, nightly=${schedIds.nightly}, debug=${schedIds.debug}.`);
+  console.log(`[seed] Seeded channels: discord=${chanIds.discord}, ntfy=${chanIds.ntfy}.`);
   rawDb.close();
 }
 

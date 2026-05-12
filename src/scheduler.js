@@ -11,6 +11,7 @@ const cron = require("node-cron");
 const db = require("./db");
 const { validateDiscovery } = require("./scanner");
 const { executeCidrScan } = require("./runner");
+const notifier = require("./notifier");
 
 const tasks = new Map(); // schedule.id -> cron task
 
@@ -53,6 +54,9 @@ async function runScheduled(schedule) {
       status: "skipped",
       error: "another scan in progress",
     });
+    notifier
+      .dispatch("scan_skipped", { schedule, error: "another scan in progress" })
+      .catch((e) => console.error(`[scheduler] notify scan_skipped failed: ${e.message}`));
     return { status: "skipped", error: "another scan in progress" };
   }
   if (result.error) {
@@ -61,12 +65,18 @@ async function runScheduled(schedule) {
       status: "error",
       error: result.error,
     });
+    notifier
+      .dispatch("scan_error", { schedule, error: result.error, scan: { id: result.scanId } })
+      .catch((e) => console.error(`[scheduler] notify scan_error failed: ${e.message}`));
     return { status: "error", scanId: result.scanId, error: result.error };
   }
   db.recordScheduleRun(schedule.id, {
     scan_id: result.scanId,
     status: "done",
   });
+  notifier
+    .dispatch("scan_done", { schedule, scan: result.scan })
+    .catch((e) => console.error(`[scheduler] notify scan_done failed: ${e.message}`));
   return { status: "done", scanId: result.scanId, scan: result.scan };
 }
 

@@ -2280,9 +2280,277 @@ document.addEventListener("keydown", (e) => {
   }
 });
 
+// v0.11.0 — notification channels UI
+
+const chanEls = {
+  list: document.getElementById("channel-list"),
+  newBtn: document.getElementById("new-channel-btn"),
+  refreshBtn: document.getElementById("refresh-channels"),
+  modal: document.getElementById("modal-channel"),
+  modalForm: document.getElementById("chan-modal-form"),
+  modalError: document.getElementById("chan-modal-error"),
+  modalCreate: document.getElementById("chan-modal-create"),
+  inputName: document.getElementById("chan-name"),
+  typePresets: Array.from(document.querySelectorAll("[data-chan-type]")),
+  webhookFields: document.getElementById("chan-webhook-fields"),
+  ntfyFields: document.getElementById("chan-ntfy-fields"),
+  inputUrl: document.getElementById("chan-url"),
+  formatPresets: Array.from(document.querySelectorAll("[data-chan-format]")),
+  inputTopic: document.getElementById("chan-topic"),
+  inputServer: document.getElementById("chan-server"),
+  evtDone: document.getElementById("chan-evt-done"),
+  evtError: document.getElementById("chan-evt-error"),
+  evtSkipped: document.getElementById("chan-evt-skipped"),
+};
+
+let channels = [];
+
+async function loadChannels() {
+  try {
+    const { channels: rows } = await fetchJson("/api/notifications");
+    channels = rows || [];
+    renderChannels();
+  } catch (e) {
+    console.error("loadChannels failed:", e);
+  }
+}
+
+function channelLastSentSummary(c) {
+  if (!c.last_sent_at) return `<span class="channel-lastsent muted">Never sent</span>`;
+  const ts = fmtClock(c.last_sent_at);
+  if (c.last_status === "done") {
+    return `<span class="channel-lastsent done" title="Last successful dispatch">✓ ${ts}</span>`;
+  }
+  if (c.last_status === "error") {
+    const tip = c.last_error || "Error";
+    return `<span class="channel-lastsent error" title="${escapeHtml(tip)}">✗ ${ts} · error</span>`;
+  }
+  return `<span class="channel-lastsent">${ts}</span>`;
+}
+
+function channelMetaLine(c) {
+  if (c.type === "webhook") {
+    const fmt = c.config?.format || "generic";
+    return `<span class="channel-type-chip">webhook</span><code>${escapeHtml(fmt)}</code>`;
+  }
+  if (c.type === "ntfy") {
+    const topic = c.config?.topic || "?";
+    return `<span class="channel-type-chip">ntfy</span><code>${escapeHtml(topic)}</code>`;
+  }
+  return `<span class="channel-type-chip">${escapeHtml(c.type)}</span>`;
+}
+
+function renderChannelRow(c) {
+  const checkedAttr = c.enabled ? "checked" : "";
+  const events = (c.events || []).map((e) => e.replace("scan_", "")).join(", ");
+  return `
+    <li class="${c.enabled ? "" : "disabled"}" data-id="${c.id}">
+      <span class="channel-name">${escapeHtml(c.name)}</span>
+      <span class="channel-meta">${channelMetaLine(c)} · ${escapeHtml(events)}</span>
+      ${channelLastSentSummary(c)}
+      <div class="channel-controls">
+        <button class="ghost small chan-test" data-act="test" data-id="${c.id}" title="Send a test payload now">▶ Test</button>
+        <label class="chan-toggle" title="Enable or disable this channel">
+          <input type="checkbox" data-act="toggle" data-id="${c.id}" ${checkedAttr} />
+          <span>${c.enabled ? "On" : "Off"}</span>
+        </label>
+        <button class="chan-delete" data-act="delete" data-id="${c.id}" title="Delete channel" aria-label="Delete channel">×</button>
+      </div>
+    </li>`;
+}
+
+function renderChannels() {
+  if (!channels.length) {
+    chanEls.list.innerHTML = `<li class="muted">No channels yet.</li>`;
+    return;
+  }
+  chanEls.list.innerHTML = channels.map(renderChannelRow).join("");
+  chanEls.list.querySelectorAll('[data-act="test"]').forEach((btn) => {
+    btn.addEventListener("click", () => testChannelNow(parseInt(btn.dataset.id, 10)));
+  });
+  chanEls.list.querySelectorAll('[data-act="toggle"]').forEach((cb) => {
+    cb.addEventListener("change", () =>
+      toggleChannelEnabled(parseInt(cb.dataset.id, 10), cb.checked),
+    );
+  });
+  chanEls.list.querySelectorAll('[data-act="delete"]').forEach((btn) => {
+    btn.addEventListener("click", () => deleteChannelAction(parseInt(btn.dataset.id, 10)));
+  });
+}
+
+async function testChannelNow(id) {
+  const ch = channels.find((c) => c.id === id);
+  const name = ch?.name || `channel ${id}`;
+  try {
+    setStatus(`Testing ${name}…`);
+    await fetchJson(`/api/notifications/${id}/test`, { method: "POST" });
+    setStatus(`Test sent to ${name}.`);
+    await loadChannels();
+  } catch (e) {
+    setStatus(`Test to ${name} failed: ${e.message}`, true);
+    await loadChannels();
+  }
+}
+
+async function toggleChannelEnabled(id, enabled) {
+  try {
+    await fetchJson(`/api/notifications/${id}`, {
+      method: "PATCH",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ enabled }),
+    });
+    await loadChannels();
+  } catch (e) {
+    setStatus(e.message, true);
+    await loadChannels();
+  }
+}
+
+async function deleteChannelAction(id) {
+  const ch = channels.find((c) => c.id === id);
+  const name = ch?.name || `channel ${id}`;
+  const ok = await confirmModal({
+    title: "Delete channel",
+    message: `"${name}" will stop receiving notifications. Past delivery history is also removed.`,
+    confirmText: "Delete",
+    danger: true,
+  });
+  if (!ok) return;
+  try {
+    await fetchJson(`/api/notifications/${id}`, { method: "DELETE" });
+    await loadChannels();
+  } catch (e) {
+    setStatus(e.message, true);
+  }
+}
+
+function selectedChannelType() {
+  const active = document.querySelector(".cron-preset.active[data-chan-type]");
+  return active?.dataset.chanType || "webhook";
+}
+
+function selectedWebhookFormat() {
+  const active = document.querySelector(".cron-preset.active[data-chan-format]");
+  return active?.dataset.chanFormat || "generic";
+}
+
+function selectedChannelEvents() {
+  const out = [];
+  if (chanEls.evtDone?.checked) out.push("scan_done");
+  if (chanEls.evtError?.checked) out.push("scan_error");
+  if (chanEls.evtSkipped?.checked) out.push("scan_skipped");
+  return out;
+}
+
+function syncChannelTypeUI() {
+  const type = selectedChannelType();
+  chanEls.webhookFields.hidden = type !== "webhook";
+  chanEls.ntfyFields.hidden = type !== "ntfy";
+}
+
+function openChannelModal() {
+  chanEls.inputName.value = "";
+  chanEls.inputUrl.value = "";
+  chanEls.inputTopic.value = "";
+  chanEls.inputServer.value = "";
+  chanEls.evtDone.checked = true;
+  chanEls.evtError.checked = true;
+  chanEls.evtSkipped.checked = false;
+  chanEls.typePresets.forEach((b, i) => b.classList.toggle("active", i === 0));
+  chanEls.formatPresets.forEach((b, i) => b.classList.toggle("active", i === 0));
+  syncChannelTypeUI();
+  chanEls.modalError.hidden = true;
+  chanEls.modalError.textContent = "";
+  chanEls.modal.hidden = false;
+  setTimeout(() => chanEls.inputName.focus(), 0);
+}
+
+function closeChannelModal() {
+  chanEls.modal.hidden = true;
+}
+
+function showChanError(msg) {
+  chanEls.modalError.textContent = msg;
+  chanEls.modalError.hidden = false;
+}
+
+async function submitChannelModal() {
+  const name = chanEls.inputName.value.trim();
+  const type = selectedChannelType();
+  const events = selectedChannelEvents();
+  if (!name) return showChanError("Name is required.");
+  if (events.length === 0) return showChanError("Select at least one event.");
+
+  let config;
+  if (type === "webhook") {
+    const url = chanEls.inputUrl.value.trim();
+    if (!url) return showChanError("Webhook URL is required.");
+    config = { url, format: selectedWebhookFormat() };
+  } else if (type === "ntfy") {
+    const topic = chanEls.inputTopic.value.trim();
+    if (!topic) return showChanError("Topic is required.");
+    config = { topic };
+    const server = chanEls.inputServer.value.trim();
+    if (server) config.server = server;
+  } else {
+    return showChanError("Unknown channel type.");
+  }
+
+  try {
+    chanEls.modalCreate.disabled = true;
+    await fetchJson("/api/notifications", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ name, type, config, events, enabled: true }),
+    });
+    closeChannelModal();
+    await loadChannels();
+  } catch (e) {
+    showChanError(e.message);
+  } finally {
+    chanEls.modalCreate.disabled = false;
+  }
+}
+
+chanEls.newBtn?.addEventListener("click", openChannelModal);
+chanEls.refreshBtn?.addEventListener("click", loadChannels);
+chanEls.modalCreate?.addEventListener("click", submitChannelModal);
+
+chanEls.modalForm?.addEventListener("submit", (e) => {
+  e.preventDefault();
+  submitChannelModal();
+});
+
+chanEls.modal?.querySelectorAll("[data-modal-close]").forEach((el) => {
+  el.addEventListener("click", closeChannelModal);
+});
+
+chanEls.typePresets.forEach((btn) => {
+  btn.addEventListener("click", () => {
+    chanEls.typePresets.forEach((b) => b.classList.remove("active"));
+    btn.classList.add("active");
+    syncChannelTypeUI();
+  });
+});
+
+chanEls.formatPresets.forEach((btn) => {
+  btn.addEventListener("click", () => {
+    chanEls.formatPresets.forEach((b) => b.classList.remove("active"));
+    btn.classList.add("active");
+  });
+});
+
+document.addEventListener("keydown", (e) => {
+  if (e.key === "Escape" && chanEls.modal && !chanEls.modal.hidden) {
+    e.preventDefault();
+    closeChannelModal();
+  }
+});
+
 loadBaselines();
 loadHistory();
 loadSchedules();
+loadChannels();
 
 // Demo mode (v0.9.0): the server tells us whether this is a read-only demo
 // deploy. If so, expose the warning banner and disable controls that would

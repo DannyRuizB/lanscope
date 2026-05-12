@@ -86,6 +86,19 @@ db.exec(`
     created_at    INTEGER NOT NULL
   );
 
+  CREATE TABLE IF NOT EXISTS notification_channels (
+    id            INTEGER PRIMARY KEY AUTOINCREMENT,
+    name          TEXT    NOT NULL,
+    type          TEXT    NOT NULL CHECK (type IN ('webhook','ntfy')),
+    config        TEXT    NOT NULL,
+    events        TEXT    NOT NULL,
+    enabled       INTEGER NOT NULL DEFAULT 1 CHECK (enabled IN (0,1)),
+    last_sent_at  INTEGER,
+    last_status   TEXT CHECK (last_status IS NULL OR last_status IN ('done','error')),
+    last_error    TEXT,
+    created_at    INTEGER NOT NULL
+  );
+
   CREATE INDEX IF NOT EXISTS idx_hosts_scan ON hosts(scan_id);
   CREATE INDEX IF NOT EXISTS idx_scans_started ON scans(started_at DESC);
   CREATE INDEX IF NOT EXISTS idx_ports_host ON host_ports(host_id);
@@ -94,6 +107,7 @@ db.exec(`
   CREATE INDEX IF NOT EXISTS idx_scripts_port ON host_scripts(host_port_id);
   CREATE INDEX IF NOT EXISTS idx_baselines_scan ON inventory_baselines(scan_id);
   CREATE INDEX IF NOT EXISTS idx_schedules_enabled ON scheduled_scans(enabled);
+  CREATE INDEX IF NOT EXISTS idx_channels_enabled ON notification_channels(enabled);
 `);
 
 // Migration for v0.1 DBs that don't have the new columns/tables yet.
@@ -262,6 +276,32 @@ const stmts = {
   recordScheduleRunStmt: db.prepare(
     `UPDATE scheduled_scans
         SET last_run_at = ?, last_scan_id = ?, last_status = ?, last_error = ?
+      WHERE id = ?`,
+  ),
+  // v0.11.0 — notification channels. config and events stored as JSON.
+  listChannelsStmt: db.prepare(
+    `SELECT id, name, type, config, events, enabled,
+            last_sent_at, last_status, last_error, created_at
+       FROM notification_channels ORDER BY created_at DESC`,
+  ),
+  listEnabledChannelsStmt: db.prepare(
+    `SELECT id, name, type, config, events, enabled,
+            last_sent_at, last_status, last_error, created_at
+       FROM notification_channels WHERE enabled = 1 ORDER BY id`,
+  ),
+  getChannelStmt: db.prepare(
+    `SELECT id, name, type, config, events, enabled,
+            last_sent_at, last_status, last_error, created_at
+       FROM notification_channels WHERE id = ?`,
+  ),
+  insertChannelStmt: db.prepare(
+    `INSERT INTO notification_channels (name, type, config, events, enabled, created_at)
+     VALUES (?, ?, ?, ?, ?, ?) RETURNING id`,
+  ),
+  deleteChannelStmt: db.prepare(`DELETE FROM notification_channels WHERE id = ?`),
+  recordChannelDispatchStmt: db.prepare(
+    `UPDATE notification_channels
+        SET last_sent_at = ?, last_status = ?, last_error = ?
       WHERE id = ?`,
   ),
 };
@@ -575,6 +615,105 @@ function recordScheduleRun(id, { scan_id = null, status, error = null }) {
   return getSchedule(id);
 }
 
+function parseChannelRow(row) {
+  if (!row) return null;
+  let config = null;
+  let events = [];
+  try {
+    config = row.config ? JSON.parse(row.config) : null;
+  } catch {
+    config = null;
+  }
+  try {
+    events = row.events ? JSON.parse(row.events) : [];
+  } catch {
+    events = [];
+  }
+  if (!Array.isArray(events)) events = [];
+  return {
+    id: row.id,
+    name: row.name,
+    type: row.type,
+    config,
+    events,
+    enabled: row.enabled === 1,
+    last_sent_at: row.last_sent_at,
+    last_status: row.last_status,
+    last_error: row.last_error,
+    created_at: row.created_at,
+  };
+}
+
+function listChannels() {
+  return stmts.listChannelsStmt.all().map(parseChannelRow);
+}
+
+function getChannel(id) {
+  return parseChannelRow(stmts.getChannelStmt.get(id));
+}
+
+// Lookup helper for the notifier dispatcher: enabled channels whose `events`
+// array contains the given event name. The filter runs in JS because we deal
+// with dozens of channels at most.
+function listEnabledChannelsForEvent(event) {
+  return stmts.listEnabledChannelsStmt
+    .all()
+    .map(parseChannelRow)
+    .filter((c) => c && c.events.includes(event));
+}
+
+function createChannel({ name, type, config, events, enabled = true }) {
+  const row = stmts.insertChannelStmt.get(
+    name,
+    type,
+    JSON.stringify(config ?? {}),
+    JSON.stringify(events ?? []),
+    enabled ? 1 : 0,
+    Date.now(),
+  );
+  return getChannel(row.id);
+}
+
+function updateChannel(id, patch) {
+  const current = stmts.getChannelStmt.get(id);
+  if (!current) return null;
+  const sets = [];
+  const args = [];
+  if (Object.prototype.hasOwnProperty.call(patch, "name")) {
+    sets.push("name = ?");
+    args.push(patch.name);
+  }
+  if (Object.prototype.hasOwnProperty.call(patch, "type")) {
+    sets.push("type = ?");
+    args.push(patch.type);
+  }
+  if (Object.prototype.hasOwnProperty.call(patch, "config")) {
+    sets.push("config = ?");
+    args.push(JSON.stringify(patch.config ?? {}));
+  }
+  if (Object.prototype.hasOwnProperty.call(patch, "events")) {
+    sets.push("events = ?");
+    args.push(JSON.stringify(patch.events ?? []));
+  }
+  if (Object.prototype.hasOwnProperty.call(patch, "enabled")) {
+    sets.push("enabled = ?");
+    args.push(patch.enabled ? 1 : 0);
+  }
+  if (sets.length === 0) return parseChannelRow(current);
+  args.push(id);
+  db.prepare(`UPDATE notification_channels SET ${sets.join(", ")} WHERE id = ?`).run(...args);
+  return getChannel(id);
+}
+
+function deleteChannel(id) {
+  return stmts.deleteChannelStmt.run(id).changes > 0;
+}
+
+function recordChannelDispatch(id, { status, error = null }) {
+  stmts.recordChannelDispatchStmt.run(Date.now(), status, error, id);
+  return getChannel(id);
+}
+
 module.exports = {
   startScan,
   finishScan,
@@ -597,4 +736,11 @@ module.exports = {
   updateSchedule,
   deleteSchedule,
   recordScheduleRun,
+  listChannels,
+  getChannel,
+  listEnabledChannelsForEvent,
+  createChannel,
+  updateChannel,
+  deleteChannel,
+  recordChannelDispatch,
 };

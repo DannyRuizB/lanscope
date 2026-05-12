@@ -15,6 +15,7 @@ const {
 } = require("./scanner");
 const { executeCidrScan } = require("./runner");
 const scheduler = require("./scheduler");
+const notifier = require("./notifier");
 
 const PORT = parseInt(process.env.PORT, 10) || 3030;
 const DEMO_MODE = process.env.DEMO_MODE === "true";
@@ -62,6 +63,86 @@ function validateCronExpr(s) {
   const expr = s.trim();
   if (!cron.validate(expr)) return { error: "invalid cron expression" };
   return { value: expr };
+}
+
+// v0.11.0 — notification channel validators.
+
+const ALLOWED_EVENTS = new Set(["scan_done", "scan_error", "scan_skipped"]);
+const ALLOWED_CHANNEL_TYPES = new Set(["webhook", "ntfy"]);
+const ALLOWED_WEBHOOK_FORMATS = new Set(["generic", "discord", "slack"]);
+
+function validateChannelName(s) {
+  if (typeof s !== "string") return { error: "name is required" };
+  const v = s.trim();
+  if (v.length === 0) return { error: "name cannot be empty" };
+  if (v.length > 80) return { error: "name too long (max 80 chars)" };
+  return { value: v };
+}
+
+function validateChannelType(s) {
+  if (!ALLOWED_CHANNEL_TYPES.has(s)) {
+    return { error: `type must be one of: ${Array.from(ALLOWED_CHANNEL_TYPES).join(", ")}` };
+  }
+  return { value: s };
+}
+
+function validateHttpUrl(s) {
+  if (typeof s !== "string") return null;
+  try {
+    const u = new URL(s);
+    if (u.protocol !== "http:" && u.protocol !== "https:") return null;
+    return s;
+  } catch {
+    return null;
+  }
+}
+
+function validateChannelConfig(type, config) {
+  if (!config || typeof config !== "object" || Array.isArray(config)) {
+    return { error: "config is required" };
+  }
+  if (type === "webhook") {
+    if (!validateHttpUrl(config.url)) {
+      return { error: "config.url must be a valid http(s) URL" };
+    }
+    const format = config.format == null ? "generic" : config.format;
+    if (!ALLOWED_WEBHOOK_FORMATS.has(format)) {
+      return {
+        error: `config.format must be one of: ${Array.from(ALLOWED_WEBHOOK_FORMATS).join(", ")}`,
+      };
+    }
+    return { value: { url: config.url, format } };
+  }
+  if (type === "ntfy") {
+    if (typeof config.topic !== "string" || !/^[A-Za-z0-9_-]{1,64}$/.test(config.topic)) {
+      return { error: "config.topic must be 1..64 chars (letters, digits, _ or -)" };
+    }
+    const server = config.server == null ? "https://ntfy.sh" : validateHttpUrl(config.server);
+    if (!server) return { error: "config.server must be a valid http(s) URL" };
+    return { value: { topic: config.topic, server } };
+  }
+  return { error: "unknown type" };
+}
+
+function validateChannelEvents(events) {
+  if (!Array.isArray(events)) return { error: "events must be an array" };
+  if (events.length === 0) return { error: "events cannot be empty" };
+  const bad = events.find((e) => typeof e !== "string" || !ALLOWED_EVENTS.has(e));
+  if (bad) {
+    return {
+      error: `event not allowed: ${bad}. Use one of: ${Array.from(ALLOWED_EVENTS).join(", ")}`,
+    };
+  }
+  // dedupe preserving order
+  const seen = new Set();
+  const out = [];
+  for (const e of events) {
+    if (!seen.has(e)) {
+      seen.add(e);
+      out.push(e);
+    }
+  }
+  return { value: out };
 }
 
 app.get("/api/config", (req, res) => {
@@ -329,6 +410,112 @@ app.post("/api/schedules/:id/run-now", async (req, res) => {
       .json({ error: result.error, scan_id: result.scanId || null, schedule: updated });
   }
   res.json({ scan_id: result.scanId, scan: result.scan, schedule: updated });
+});
+
+// v0.11.0 — notification channels. The /test endpoint lives in the next
+// step (needs the notifier module to actually dispatch).
+
+app.get("/api/notifications", (req, res) => {
+  res.json({ channels: db.listChannels() });
+});
+
+app.post("/api/notifications", (req, res) => {
+  const body = req.body || {};
+
+  const nameV = validateChannelName(body.name);
+  if (nameV.error) return res.status(400).json({ error: nameV.error });
+
+  const typeV = validateChannelType(body.type);
+  if (typeV.error) return res.status(400).json({ error: typeV.error });
+
+  const cfgV = validateChannelConfig(typeV.value, body.config);
+  if (cfgV.error) return res.status(400).json({ error: cfgV.error });
+
+  const evtV = validateChannelEvents(body.events);
+  if (evtV.error) return res.status(400).json({ error: evtV.error });
+
+  const channel = db.createChannel({
+    name: nameV.value,
+    type: typeV.value,
+    config: cfgV.value,
+    events: evtV.value,
+    enabled: body.enabled !== false,
+  });
+  res.status(201).json({ channel });
+});
+
+app.patch("/api/notifications/:id", (req, res) => {
+  const id = parseInt(req.params.id, 10);
+  if (!Number.isInteger(id) || id <= 0) return res.status(400).json({ error: "invalid id" });
+  const current = db.getChannel(id);
+  if (!current) return res.status(404).json({ error: "channel not found" });
+
+  const body = req.body || {};
+  const patch = {};
+
+  // Channel type is immutable — recreate the channel if you need to switch
+  // between webhook and ntfy (config shape is incompatible).
+  if (Object.prototype.hasOwnProperty.call(body, "type") && body.type !== current.type) {
+    return res
+      .status(400)
+      .json({ error: "channel type is immutable. Delete and recreate the channel." });
+  }
+
+  if (Object.prototype.hasOwnProperty.call(body, "name")) {
+    const v = validateChannelName(body.name);
+    if (v.error) return res.status(400).json({ error: v.error });
+    patch.name = v.value;
+  }
+  if (Object.prototype.hasOwnProperty.call(body, "config")) {
+    const v = validateChannelConfig(current.type, body.config);
+    if (v.error) return res.status(400).json({ error: v.error });
+    patch.config = v.value;
+  }
+  if (Object.prototype.hasOwnProperty.call(body, "events")) {
+    const v = validateChannelEvents(body.events);
+    if (v.error) return res.status(400).json({ error: v.error });
+    patch.events = v.value;
+  }
+  if (Object.prototype.hasOwnProperty.call(body, "enabled")) {
+    if (typeof body.enabled !== "boolean") {
+      return res.status(400).json({ error: "enabled must be boolean" });
+    }
+    patch.enabled = body.enabled;
+  }
+
+  const channel = db.updateChannel(id, patch);
+  res.json({ channel });
+});
+
+app.delete("/api/notifications/:id", (req, res) => {
+  const id = parseInt(req.params.id, 10);
+  if (!Number.isInteger(id) || id <= 0) return res.status(400).json({ error: "invalid id" });
+  if (!db.deleteChannel(id)) return res.status(404).json({ error: "channel not found" });
+  res.status(204).end();
+});
+
+// Fires a synthetic scan_done payload against the channel and awaits the
+// response so the UI can show the downstream success/failure inline.
+app.post("/api/notifications/:id/test", async (req, res) => {
+  const id = parseInt(req.params.id, 10);
+  if (!Number.isInteger(id) || id <= 0) return res.status(400).json({ error: "invalid id" });
+  const channel = db.getChannel(id);
+  if (!channel) return res.status(404).json({ error: "channel not found" });
+
+  const testContext = {
+    schedule: { id: 0, name: `${channel.name} (test)`, cidr: "192.168.1.0/24" },
+    scan: { id: 0, host_count: 12, started_at: Date.now() },
+    error: null,
+  };
+
+  try {
+    await notifier.sendToChannel(channel, "scan_done", testContext);
+    db.recordChannelDispatch(id, { status: "done" });
+    res.json({ ok: true, channel: db.getChannel(id) });
+  } catch (e) {
+    db.recordChannelDispatch(id, { status: "error", error: e.message });
+    res.status(502).json({ error: e.message, channel: db.getChannel(id) });
+  }
 });
 
 app.listen(PORT, () => {

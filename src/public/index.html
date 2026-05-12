@@ -62,6 +62,17 @@
         <ul id="schedule-list" class="schedule-list">
           <li class="muted">No schedules yet.</li>
         </ul>
+
+        <div class="panel-header">
+          <h2>Notifications</h2>
+          <div class="panel-actions">
+            <button id="new-channel-btn" class="ghost small" title="Create a notification channel">+ New</button>
+            <button id="refresh-channels" class="ghost" title="Refresh channels">↻</button>
+          </div>
+        </div>
+        <ul id="channel-list" class="channel-list">
+          <li class="muted">No channels yet.</li>
+        </ul>
       </aside>
 
       <section class="content">
@@ -257,6 +268,79 @@
       </div>
     </div>
 
+    <div id="modal-channel" class="modal-root" hidden role="dialog" aria-modal="true" aria-labelledby="chan-modal-title">
+      <div class="modal-backdrop" data-modal-close></div>
+      <div class="modal-box modal-form-box">
+        <h3 id="chan-modal-title" class="modal-title">New notification channel</h3>
+        <div id="chan-modal-error" class="modal-form-error" hidden></div>
+        <form id="chan-modal-form" autocomplete="off">
+          <label class="form-field">
+            <span class="form-label">Name</span>
+            <input id="chan-name" type="text" placeholder="Discord home" maxlength="80" required />
+          </label>
+          <div class="form-field">
+            <span class="form-label">Type</span>
+            <div class="cron-presets" role="radiogroup" aria-label="Channel type">
+              <button type="button" class="cron-preset active" data-chan-type="webhook">Webhook</button>
+              <button type="button" class="cron-preset" data-chan-type="ntfy">ntfy.sh</button>
+            </div>
+          </div>
+
+          <div id="chan-webhook-fields">
+            <label class="form-field">
+              <span class="form-label">Webhook URL</span>
+              <input id="chan-url" type="text" placeholder="https://discord.com/api/webhooks/…" spellcheck="false" />
+            </label>
+            <div class="form-field">
+              <span class="form-label">Payload format</span>
+              <div class="cron-presets" role="radiogroup" aria-label="Webhook format">
+                <button type="button" class="cron-preset active" data-chan-format="generic">Generic JSON</button>
+                <button type="button" class="cron-preset" data-chan-format="discord">Discord</button>
+                <button type="button" class="cron-preset" data-chan-format="slack">Slack</button>
+              </div>
+              <span class="form-hint" id="chan-format-hint">Generic = a flat <code>{event, summary, schedule, scan, error}</code> JSON. Discord and Slack target their respective Incoming Webhook formats directly.</span>
+            </div>
+          </div>
+
+          <div id="chan-ntfy-fields" hidden>
+            <label class="form-field">
+              <span class="form-label">Topic</span>
+              <input id="chan-topic" type="text" placeholder="lanscope-danny" spellcheck="false" maxlength="64" />
+              <span class="form-hint">1–64 characters, letters / digits / <code>_</code> / <code>-</code>. Subscribe with <code>ntfy sub &lt;topic&gt;</code> or the ntfy mobile app.</span>
+            </label>
+            <label class="form-field">
+              <span class="form-label">Server</span>
+              <input id="chan-server" type="text" placeholder="https://ntfy.sh" spellcheck="false" />
+              <span class="form-hint">Leave empty to use the public <code>https://ntfy.sh</code>.</span>
+            </label>
+          </div>
+
+          <div class="form-field">
+            <span class="form-label">Events</span>
+            <div class="adv-checks-row">
+              <label class="adv-check">
+                <input type="checkbox" id="chan-evt-done" checked />
+                <span>scan_done</span>
+              </label>
+              <label class="adv-check">
+                <input type="checkbox" id="chan-evt-error" checked />
+                <span>scan_error</span>
+              </label>
+              <label class="adv-check">
+                <input type="checkbox" id="chan-evt-skipped" />
+                <span>scan_skipped</span>
+              </label>
+            </div>
+            <span class="form-hint">Fires whenever a scheduled scan (or a manual Run now on a schedule) reaches one of these states.</span>
+          </div>
+        </form>
+        <div class="modal-actions">
+          <button type="button" class="ghost" data-modal-close>Cancel</button>
+          <button id="chan-modal-create" type="button">Create</button>
+        </div>
+      </div>
+    </div>
+
     <div id="modal-schedule" class="modal-root" hidden role="dialog" aria-modal="true" aria-labelledby="sched-modal-title">
       <div class="modal-backdrop" data-modal-close></div>
       <div class="modal-box modal-form-box">
@@ -292,7 +376,7 @@
     </div>
 
     <footer class="bottombar">
-      <span>v0.10.1</span>
+      <span>v0.11.0</span>
       <span>·</span>
       <span>MIT</span>
       <span>·</span>

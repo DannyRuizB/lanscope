@@ -1508,3 +1508,114 @@ li.is-baseline .scan-cidr {
   color: var(--warn);
   cursor: help;
 }
+
+/* v0.11.0 — Notifications sidebar section */
+.channel-list {
+  list-style: none;
+  margin: 0;
+  padding: 4px 0 12px;
+}
+.channel-list li {
+  padding: 10px 18px;
+  border-left: 3px solid transparent;
+  position: relative;
+}
+.channel-list li.muted {
+  color: var(--text-mute);
+  cursor: default;
+  font-style: italic;
+}
+.channel-list li.disabled {
+  opacity: 0.65;
+}
+.channel-list li.disabled .channel-name {
+  color: var(--text-mute);
+}
+.channel-name {
+  display: block;
+  color: var(--text-strong);
+  font-weight: 500;
+  margin-bottom: 3px;
+  font-size: 13px;
+}
+.channel-meta {
+  display: block;
+  color: var(--text-mute);
+  font-size: 11px;
+  line-height: 1.5;
+}
+.channel-meta code {
+  font-family: inherit;
+  background: var(--surface-2);
+  padding: 1px 5px;
+  border-radius: 3px;
+  font-size: 10.5px;
+  color: var(--text);
+}
+.channel-type-chip {
+  display: inline-block;
+  padding: 1px 6px;
+  margin-right: 4px;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  color: var(--text);
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  font-weight: 600;
+}
+.channel-lastsent {
+  display: block;
+  font-size: 11px;
+  margin-top: 4px;
+  color: var(--text-mute);
+  letter-spacing: 0.2px;
+}
+.channel-lastsent.done {
+  color: var(--accent);
+}
+.channel-lastsent.error {
+  color: var(--danger);
+  cursor: help;
+}
+.channel-controls {
+  display: flex;
+  gap: 6px;
+  margin-top: 8px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+.chan-test {
+  font-size: 11px;
+}
+.chan-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 11px;
+  color: var(--text-mute);
+  cursor: pointer;
+  user-select: none;
+}
+.chan-toggle input[type="checkbox"] {
+  cursor: pointer;
+}
+.channel-controls .chan-delete {
+  margin-left: auto;
+  width: 22px;
+  height: 22px;
+  border-radius: 4px;
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--text-mute);
+  font-size: 14px;
+  line-height: 1;
+  cursor: pointer;
+  padding: 0;
+  transition: color 0.12s ease, border-color 0.12s ease;
+}
+.channel-controls .chan-delete:hover {
+  color: var(--danger);
+  border-color: var(--danger);
+}
