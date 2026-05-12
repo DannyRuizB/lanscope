@@ -105,6 +105,14 @@ function reload() {
 }
 
 function init() {
+  // DEMO_MODE: the HTTP middleware blocks user-facing scan triggers, but the
+  // cron timer would happily run nmap against whatever network the demo
+  // container is sitting on. Don't register any tasks — the seeded schedules
+  // are visual fixtures, not live jobs.
+  if (process.env.DEMO_MODE === "true") {
+    console.log("[scheduler] DEMO_MODE — schedules loaded as fixtures, no ticks scheduled.");
+    return;
+  }
   reload();
 }
 

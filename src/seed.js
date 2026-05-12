@@ -295,6 +295,69 @@ function seedScan(rawDb, startedAt, hosts, durationMs = 4500) {
   return scanId;
 }
 
+// v0.10.1 — seed a few schedules so the demo shows the v0.10.0 feature in
+// context (the cron timer is disabled in DEMO_MODE; these are visual fixtures).
+function seedSchedules(rawDb, { scan2Id, scan2EndedAt, scan3Id, scan3EndedAt }) {
+  const hourly = db.createSchedule({
+    name: "Hourly home LAN sweep",
+    cidr: CIDR,
+    cron_expr: "0 * * * *",
+    enabled: true,
+    scan_options: null,
+  });
+  const nightly = db.createSchedule({
+    name: "Nightly inventory check",
+    cidr: CIDR,
+    cron_expr: "0 3 * * *",
+    enabled: true,
+    scan_options: null,
+  });
+  const debug = db.createSchedule({
+    name: "Aggressive watch (debug)",
+    cidr: CIDR,
+    cron_expr: "*/15 * * * *",
+    enabled: false,
+    scan_options: null,
+  });
+
+  // Backdate created_at so the rows feel like part of the seeded history,
+  // not freshly created at first boot.
+  rawDb.prepare(`UPDATE scheduled_scans SET created_at = ? WHERE id = ?`)
+    .run(scan2EndedAt - 60 * 1000, hourly.id);
+  rawDb.prepare(`UPDATE scheduled_scans SET created_at = ? WHERE id = ?`)
+    .run(scan2EndedAt - 60 * 1000, nightly.id);
+  rawDb.prepare(`UPDATE scheduled_scans SET created_at = ? WHERE id = ?`)
+    .run(scan2EndedAt - 60 * 1000, debug.id);
+
+  // Hourly: last successful run produced scan 3 (most recent).
+  rawDb.prepare(
+    `UPDATE scheduled_scans
+        SET last_run_at = ?, last_scan_id = ?, last_status = 'done'
+      WHERE id = ?`,
+  ).run(scan3EndedAt, scan3Id, hourly.id);
+
+  // Nightly: last successful run produced scan 2 (3 days ago).
+  rawDb.prepare(
+    `UPDATE scheduled_scans
+        SET last_run_at = ?, last_scan_id = ?, last_status = 'done'
+      WHERE id = ?`,
+  ).run(scan2EndedAt, scan2Id, nightly.id);
+
+  // Debug: last tick was skipped because the hourly job held the lock.
+  rawDb.prepare(
+    `UPDATE scheduled_scans
+        SET last_run_at = ?, last_status = 'skipped', last_error = ?
+      WHERE id = ?`,
+  ).run(scan3EndedAt - 30 * 1000, "another scan in progress", debug.id);
+
+  // Attribute the matching scans to their scheduler so History rows render
+  // the ⏱ chip with the right "Scheduled by: …" tooltip.
+  rawDb.prepare(`UPDATE scans SET schedule_id = ? WHERE id = ?`).run(hourly.id, scan3Id);
+  rawDb.prepare(`UPDATE scans SET schedule_id = ? WHERE id = ?`).run(nightly.id, scan2Id);
+
+  return { hourly: hourly.id, nightly: nightly.id, debug: debug.id };
+}
+
 function run() {
   const DB_PATH = process.env.DB_PATH || path.join(__dirname, "..", "data", "lanscope.db");
   const rawDb = new Database(DB_PATH);
@@ -314,7 +377,15 @@ function run() {
   // baseline auto-compare immediately.
   db.setBaseline(scan1);
 
+  const schedIds = seedSchedules(rawDb, {
+    scan2Id: scan2,
+    scan2EndedAt: T_DAYS_AGO_3 + 4700,
+    scan3Id: scan3,
+    scan3EndedAt: T_HOURS_AGO_4 + 5100,
+  });
+
   console.log(`[seed] Seeded scans: ${scan1} (baseline), ${scan2}, ${scan3}.`);
+  console.log(`[seed] Seeded schedules: hourly=${schedIds.hourly}, nightly=${schedIds.nightly}, debug=${schedIds.debug}.`);
   rawDb.close();
 }
 
