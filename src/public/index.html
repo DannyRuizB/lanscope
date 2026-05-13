@@ -218,6 +218,7 @@
               <button id="bulk-portscan" class="ghost small" title="Run TCP port scan on every host that hasn't been scanned yet">Scan all ports</button>
               <button id="bulk-osscan" class="ghost small" title="Run OS fingerprint on every host that hasn't been scanned yet">Scan all OS</button>
               <button id="bulk-udpscan" class="ghost small" title="Run UDP scan on every host that hasn't been scanned yet — slow!">Scan all UDP</button>
+              <button id="timeline-btn" class="ghost small" hidden title="Open a per-CIDR timeline aggregating all scans of this network">📈 Timeline</button>
               <button id="baseline-btn" class="ghost small" hidden title="Mark this scan as the baseline for its CIDR — future scans of the same CIDR will be compared against it automatically">★ Set as baseline</button>
               <button id="delete-scan" class="ghost danger small" hidden title="Delete this scan">Delete</button>
             </div>
@@ -251,6 +252,44 @@
           <div id="results-graph" class="hosts-graph" hidden>
             <div id="cy" class="cy-canvas"></div>
             <div id="graph-legend" class="graph-legend"></div>
+          </div>
+
+          <div id="results-timeline" class="results-timeline" hidden>
+            <div class="timeline-header">
+              <div>
+                <strong id="timeline-title">Timeline</strong>
+                <span class="muted" id="timeline-meta"></span>
+              </div>
+              <div class="timeline-actions">
+                <div class="range-toggle" id="timeline-range" role="tablist" aria-label="Time range">
+                  <button type="button" class="range-btn" data-range="24h" role="tab">24h</button>
+                  <button type="button" class="range-btn" data-range="7d" role="tab">7d</button>
+                  <button type="button" class="range-btn" data-range="30d" role="tab">30d</button>
+                  <button type="button" class="range-btn active" data-range="all" role="tab" aria-selected="true">All</button>
+                </div>
+                <button type="button" id="timeline-close" class="ghost small" title="Close timeline and return to the scan view">Close</button>
+              </div>
+            </div>
+            <div class="timeline-empty muted" id="timeline-empty" hidden></div>
+            <div class="timeline-grid" id="timeline-grid">
+              <div class="timeline-card">
+                <h3>Hosts alive</h3>
+                <canvas id="chart-hosts"></canvas>
+              </div>
+              <div class="timeline-card">
+                <h3>Open ports</h3>
+                <canvas id="chart-ports"></canvas>
+              </div>
+              <div class="timeline-card">
+                <h3>Scan duration (s)</h3>
+                <canvas id="chart-duration"></canvas>
+              </div>
+              <div class="timeline-card">
+                <h3>Baseline diff</h3>
+                <canvas id="chart-diff"></canvas>
+                <div class="muted timeline-no-baseline" id="timeline-no-baseline" hidden>No baseline declared for this CIDR — set one from a scan view to enable diff tracking.</div>
+              </div>
+            </div>
           </div>
         </div>
       </section>
@@ -376,7 +415,7 @@
     </div>
 
     <footer class="bottombar">
-      <span>v0.11.0</span>
+      <span>v0.12.0</span>
       <span>·</span>
       <span>MIT</span>
       <span>·</span>
@@ -384,6 +423,7 @@
     </footer>
 
     <script src="https://cdn.jsdelivr.net/npm/cytoscape@3.30.4/dist/cytoscape.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js"></script>
     <script src="app.js"></script>
   </body>
 </html>

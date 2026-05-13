@@ -295,6 +295,30 @@ function seedScan(rawDb, startedAt, hosts, durationMs = 4500) {
   return scanId;
 }
 
+// v0.12.0 — seed intermediate scans between the baseline (a week ago) and
+// the latest fixtures (T-4h), so the new /api/timeline view has enough points
+// to draw a meaningful chart in the public demo. Each variant tweaks the
+// reference host lists deterministically (subset slicing) so host_count,
+// port_count and duration all vary across the timeline.
+function seedTimelineFiller(rawDb, baselineEndedAt, latestStartedAt) {
+  const variants = [SCAN_1_HOSTS, SCAN_2_HOSTS, SCAN_3_HOSTS];
+  const STEPS = 8;
+  const span = latestStartedAt - baselineEndedAt;
+  if (span <= 0) return [];
+  const stepMs = span / (STEPS + 1);
+  const ids = [];
+  for (let i = 1; i <= STEPS; i++) {
+    const t = Math.floor(baselineEndedAt + i * stepMs);
+    const variant = variants[i % variants.length];
+    const trim = i % 3; // 0, 1 or 2 hosts removed deterministically
+    const hosts = trim === 0 ? variant : variant.slice(0, variant.length - trim);
+    const duration = 3500 + ((i * 911) % 4500); // ~3.5–8s, deterministic spread
+    const scanId = seedScan(rawDb, t, hosts, duration);
+    ids.push(scanId);
+  }
+  return ids;
+}
+
 // v0.10.1 — seed a few schedules so the demo shows the v0.10.0 feature in
 // context (the cron timer is disabled in DEMO_MODE; these are visual fixtures).
 function seedSchedules(rawDb, { scan2Id, scan2EndedAt, scan3Id, scan3EndedAt }) {
@@ -400,12 +424,17 @@ function run() {
 
   console.log(`[seed] Seeding three demo scans of ${CIDR}...`);
   const scan1 = seedScan(rawDb, T_WEEK_AGO, SCAN_1_HOSTS, 4200);
+  const fillerIds = seedTimelineFiller(rawDb, T_WEEK_AGO + 4200, T_HOURS_AGO_4);
   const scan2 = seedScan(rawDb, T_DAYS_AGO_3, SCAN_2_HOSTS, 4700);
   const scan3 = seedScan(rawDb, T_HOURS_AGO_4, SCAN_3_HOSTS, 5100);
 
   // Mark scan 1 as the baseline so visitors landing on scan 3 see the
   // baseline auto-compare immediately.
   db.setBaseline(scan1);
+
+  if (fillerIds.length) {
+    console.log(`[seed] Seeded ${fillerIds.length} timeline-filler scans: [${fillerIds.join(", ")}].`);
+  }
 
   const schedIds = seedSchedules(rawDb, {
     scan2Id: scan2,

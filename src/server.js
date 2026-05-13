@@ -170,6 +170,27 @@ app.delete("/api/scans/:id", (req, res) => {
   res.status(204).end();
 });
 
+// v0.12.0 — per-CIDR timeline: aggregated metrics across scans in a time window.
+const TIMELINE_RANGES = {
+  "24h": 24 * 60 * 60 * 1000,
+  "7d": 7 * 24 * 60 * 60 * 1000,
+  "30d": 30 * 24 * 60 * 60 * 1000,
+};
+
+app.get("/api/timeline", (req, res) => {
+  const { cidr, range } = req.query || {};
+  const cidrErr = validateCidr(cidr);
+  if (cidrErr) return res.status(400).json({ error: cidrErr });
+
+  let fromTs = 0;
+  if (range && range !== "all") {
+    const span = TIMELINE_RANGES[range];
+    if (!span) return res.status(400).json({ error: "invalid range, use 24h|7d|30d|all" });
+    fromTs = Date.now() - span;
+  }
+  res.json(db.getTimeline(cidr, fromTs));
+});
+
 app.post("/api/scan", async (req, res) => {
   const { cidr } = req.body || {};
   const error = validateCidr(cidr);

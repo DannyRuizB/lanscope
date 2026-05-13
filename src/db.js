@@ -304,6 +304,22 @@ const stmts = {
         SET last_sent_at = ?, last_status = ?, last_error = ?
       WHERE id = ?`,
   ),
+  // v0.12.0 — timeline queries.
+  listScansByCidrSince: db.prepare(
+    `SELECT id, started_at, finished_at, status, host_count
+       FROM scans
+      WHERE cidr = ? AND started_at >= ?
+      ORDER BY started_at ASC`,
+  ),
+  countOpenPortsByScan: db.prepare(
+    `SELECT COUNT(*) AS n
+       FROM host_ports p
+       JOIN hosts h ON h.id = p.host_id
+      WHERE h.scan_id = ? AND p.state = 'open'`,
+  ),
+  getAliveIpsByScan: db.prepare(
+    `SELECT ip FROM hosts WHERE scan_id = ? AND status = 'up'`,
+  ),
 };
 
 const insertHostsTx = db.transaction((scanId, hosts) => {
@@ -709,6 +725,52 @@ function deleteChannel(id) {
   return stmts.deleteChannelStmt.run(id).changes > 0;
 }
 
+// v0.12.0 — timeline data for a CIDR. Aggregates per-scan metrics and
+// (if a baseline exists for the CIDR) the appeared/disappeared diff against it.
+// fromTs is an epoch-ms cutoff; pass 0 to mean "all".
+function getTimeline(cidr, fromTs = 0) {
+  const scans = stmts.listScansByCidrSince.all(cidr, fromTs);
+  if (scans.length === 0) return { cidr, baseline: null, points: [] };
+
+  const baseline = stmts.getBaselineByCidrStmt.get(cidr) || null;
+  const baselineIps = baseline
+    ? new Set(stmts.getAliveIpsByScan.all(baseline.scan_id).map((r) => r.ip))
+    : null;
+
+  const points = scans.map((s) => {
+    const port_count = stmts.countOpenPortsByScan.get(s.id)?.n || 0;
+    const duration_ms =
+      s.finished_at && s.started_at ? Math.max(0, s.finished_at - s.started_at) : null;
+
+    let diff = null;
+    if (baselineIps && s.status === "done") {
+      const scanIps = new Set(stmts.getAliveIpsByScan.all(s.id).map((r) => r.ip));
+      let appeared = 0;
+      let disappeared = 0;
+      for (const ip of scanIps) if (!baselineIps.has(ip)) appeared++;
+      for (const ip of baselineIps) if (!scanIps.has(ip)) disappeared++;
+      diff = { appeared, disappeared, is_baseline: s.id === baseline.scan_id };
+    }
+
+    return {
+      id: s.id,
+      started_at: s.started_at,
+      finished_at: s.finished_at,
+      status: s.status,
+      host_count: s.host_count || 0,
+      port_count,
+      duration_ms,
+      diff,
+    };
+  });
+
+  return {
+    cidr,
+    baseline: baseline ? { scan_id: baseline.scan_id, set_at: baseline.set_at } : null,
+    points,
+  };
+}
+
 function recordChannelDispatch(id, { status, error = null }) {
   stmts.recordChannelDispatchStmt.run(Date.now(), status, error, id);
   return getChannel(id);
@@ -743,4 +805,5 @@ module.exports = {
   updateChannel,
   deleteChannel,
   recordChannelDispatch,
+  getTimeline,
 };

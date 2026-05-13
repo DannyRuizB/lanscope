@@ -46,6 +46,7 @@ const els = {
   diffBannerText: $("#diff-banner-text"),
   diffExit: $("#diff-exit"),
   baselineBtn: $("#baseline-btn"),
+  timelineBtn: $("#timeline-btn"),
   demoBanner: $("#demo-banner"),
 };
 
@@ -229,6 +230,7 @@ function escapeHtml(s) {
 
 async function loadScan(id) {
   try {
+    if (typeof tlState !== "undefined" && tlState.active) closeTimeline({ silent: true });
     const scan = await fetchJson(`/api/scans/${id}`);
     activeScanId = id;
     compareSuppressed = false; // a fresh scan view re-enables baseline auto-compare
@@ -1454,6 +1456,7 @@ async function loadBaselines() {
 }
 
 function refreshBaselineButton() {
+  if (els.timelineBtn) els.timelineBtn.hidden = !lastScan;
   if (!els.baselineBtn) return;
   if (!lastScan) {
     els.baselineBtn.hidden = true;
@@ -2566,3 +2569,246 @@ loadChannels();
     console.warn("config fetch failed:", e);
   }
 })();
+
+// ===== Timeline (v0.12.0) =====
+// Per-CIDR view aggregating all scans into 4 charts:
+// hosts alive, open ports, scan duration and baseline diff.
+const tlEls = {
+  wrap: $("#results-timeline"),
+  title: $("#timeline-title"),
+  meta: $("#timeline-meta"),
+  empty: $("#timeline-empty"),
+  grid: $("#timeline-grid"),
+  rangeWrap: $("#timeline-range"),
+  closeBtn: $("#timeline-close"),
+  noBaseline: $("#timeline-no-baseline"),
+  canvas: {
+    hosts: $("#chart-hosts"),
+    ports: $("#chart-ports"),
+    duration: $("#chart-duration"),
+    diff: $("#chart-diff"),
+  },
+};
+
+const tlState = { active: false, cidr: null, range: "all", charts: {} };
+
+function setupTimeline() {
+  if (!els.timelineBtn || !tlEls.wrap) return;
+  els.timelineBtn.addEventListener("click", () => {
+    if (lastScan) openTimeline(lastScan.cidr);
+  });
+  tlEls.closeBtn?.addEventListener("click", closeTimeline);
+  tlEls.rangeWrap?.addEventListener("click", (e) => {
+    const btn = e.target.closest(".range-btn");
+    if (!btn) return;
+    const range = btn.dataset.range;
+    if (range === tlState.range) return;
+    tlState.range = range;
+    tlEls.rangeWrap.querySelectorAll(".range-btn").forEach((b) => {
+      const on = b.dataset.range === range;
+      b.classList.toggle("active", on);
+      b.setAttribute("aria-selected", on ? "true" : "false");
+    });
+    refreshTimeline();
+  });
+  document.addEventListener("keydown", (e) => {
+    if (tlState.active && e.key === "Escape") closeTimeline();
+  });
+}
+
+async function openTimeline(cidr) {
+  tlState.active = true;
+  tlState.cidr = cidr;
+  els.table.hidden = true;
+  els.graphWrap.hidden = true;
+  els.empty.hidden = true;
+  const diffBanner = $("#diff-banner");
+  if (diffBanner) diffBanner.hidden = true;
+  tlEls.wrap.hidden = false;
+  tlEls.title.textContent = `Timeline · ${cidr}`;
+  tlEls.meta.textContent = "Loading…";
+  await refreshTimeline();
+}
+
+function closeTimeline({ silent = false } = {}) {
+  tlState.active = false;
+  tlEls.wrap.hidden = true;
+  destroyTimelineCharts();
+  if (!silent && lastScan) renderScan(lastScan);
+}
+
+async function refreshTimeline() {
+  if (!tlState.active || !tlState.cidr) return;
+  try {
+    const params = new URLSearchParams({ cidr: tlState.cidr, range: tlState.range });
+    const data = await fetchJson(`/api/timeline?${params}`);
+    renderTimelineCharts(data);
+  } catch (e) {
+    tlEls.meta.textContent = `Error: ${e.message}`;
+    tlEls.empty.hidden = false;
+    tlEls.empty.textContent = `Could not load timeline: ${e.message}`;
+    tlEls.grid.hidden = true;
+  }
+}
+
+function destroyTimelineCharts() {
+  Object.values(tlState.charts).forEach((c) => c?.destroy?.());
+  tlState.charts = {};
+}
+
+function readPaletteForCharts() {
+  const cs = getComputedStyle(document.documentElement);
+  return {
+    accent: cs.getPropertyValue("--accent").trim() || "#22c55e",
+    text: cs.getPropertyValue("--text").trim() || "#cbd5e1",
+    muted: cs.getPropertyValue("--text-mute").trim() || "#94a3b8",
+    border: cs.getPropertyValue("--border").trim() || "#222",
+  };
+}
+
+function tlClickHandler(scanIds) {
+  return (_evt, elements) => {
+    if (!elements.length) return;
+    const idx = elements[0].index;
+    const id = scanIds[idx];
+    if (!id) return;
+    closeTimeline({ silent: true });
+    loadScan(id);
+  };
+}
+
+function renderTimelineCharts(data) {
+  destroyTimelineCharts();
+  const points = data.points || [];
+  const hasBaseline = !!data.baseline;
+  tlEls.meta.textContent =
+    `${points.length} scan${points.length === 1 ? "" : "s"} · ` +
+    (hasBaseline ? "baseline declared" : "no baseline");
+
+  if (!points.length) {
+    tlEls.grid.hidden = true;
+    tlEls.empty.hidden = false;
+    tlEls.empty.textContent = "No scans for this CIDR in the selected range.";
+    return;
+  }
+  tlEls.empty.hidden = true;
+  tlEls.grid.hidden = false;
+
+  const labels = points.map((p) => {
+    const d = new Date(p.started_at);
+    const pad = (n) => String(n).padStart(2, "0");
+    return `${pad(d.getMonth() + 1)}/${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
+  });
+  const scanIds = points.map((p) => p.id);
+  const palette = readPaletteForCharts();
+  const onClick = tlClickHandler(scanIds);
+
+  const baseOpts = (yLabel) => ({
+    responsive: true,
+    maintainAspectRatio: false,
+    interaction: { mode: "index", intersect: false },
+    onClick,
+    scales: {
+      x: { ticks: { color: palette.muted, maxRotation: 0, autoSkip: true }, grid: { color: palette.border } },
+      y: { beginAtZero: true, ticks: { color: palette.muted }, grid: { color: palette.border }, title: { display: !!yLabel, text: yLabel, color: palette.muted } },
+    },
+    plugins: {
+      legend: { display: false },
+      tooltip: { callbacks: { title: (items) => items[0]?.label } },
+    },
+  });
+
+  // Hosts alive
+  tlState.charts.hosts = new Chart(tlEls.canvas.hosts, {
+    type: "line",
+    data: {
+      labels,
+      datasets: [{
+        label: "Hosts alive",
+        data: points.map((p) => p.host_count),
+        borderColor: palette.accent,
+        backgroundColor: palette.accent + "33",
+        tension: 0.2,
+        pointRadius: 4,
+        pointHoverRadius: 6,
+        fill: true,
+      }],
+    },
+    options: baseOpts("hosts"),
+  });
+
+  // Open ports
+  tlState.charts.ports = new Chart(tlEls.canvas.ports, {
+    type: "line",
+    data: {
+      labels,
+      datasets: [{
+        label: "Open ports",
+        data: points.map((p) => p.port_count),
+        borderColor: "#3b82f6",
+        backgroundColor: "#3b82f633",
+        tension: 0.2,
+        pointRadius: 4,
+        pointHoverRadius: 6,
+        fill: true,
+      }],
+    },
+    options: baseOpts("ports"),
+  });
+
+  // Duration (seconds)
+  tlState.charts.duration = new Chart(tlEls.canvas.duration, {
+    type: "bar",
+    data: {
+      labels,
+      datasets: [{
+        label: "Duration (s)",
+        data: points.map((p) => (p.duration_ms != null ? Math.round(p.duration_ms / 1000) : 0)),
+        backgroundColor: "#a78bfa",
+        borderColor: "#7c3aed",
+        borderWidth: 1,
+      }],
+    },
+    options: baseOpts("seconds"),
+  });
+
+  // Baseline diff (appeared / disappeared)
+  if (hasBaseline) {
+    tlEls.noBaseline.hidden = true;
+    tlState.charts.diff = new Chart(tlEls.canvas.diff, {
+      type: "line",
+      data: {
+        labels,
+        datasets: [
+          {
+            label: "Appeared",
+            data: points.map((p) => p.diff?.appeared ?? null),
+            borderColor: "#22c55e",
+            backgroundColor: "#22c55e22",
+            tension: 0.2,
+            pointRadius: 4,
+          },
+          {
+            label: "Disappeared",
+            data: points.map((p) => p.diff?.disappeared ?? null),
+            borderColor: "#ef4444",
+            backgroundColor: "#ef444422",
+            tension: 0.2,
+            pointRadius: 4,
+          },
+        ],
+      },
+      options: {
+        ...baseOpts("vs baseline"),
+        plugins: { legend: { display: true, labels: { color: palette.text } } },
+      },
+    });
+  } else {
+    tlEls.noBaseline.hidden = false;
+    tlEls.canvas.diff.style.display = "none";
+  }
+  // Reset display in case it was hidden before
+  if (hasBaseline) tlEls.canvas.diff.style.display = "";
+}
+
+setupTimeline();
