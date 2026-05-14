@@ -295,6 +295,14 @@ button:disabled {
   color: var(--text-mute);
   cursor: not-allowed;
 }
+/* Keyboard-only focus ring. Several specific inputs further down strip
+   their native outline to keep the look clean; this rule restores a
+   coherent indicator for buttons across the app so tab navigation stays
+   trackable. */
+button:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
 button.ghost {
   background: transparent;
   color: var(--text-mute);
@@ -1823,13 +1831,17 @@ li.is-baseline .scan-cidr {
   white-space: nowrap;
   margin-top: 2px;
 }
-.alert-type-chip.appeared { background: #16a34a; }
-.alert-type-chip.disappeared { background: var(--danger); }
+/* Darker shades (Tailwind 700-range) so each chip clears WCAG AA 4.5:1
+   against #fff text at 10.5px — the brighter Tailwind 600 originally used
+   only met AA "large text" (3:1), which 10.5px-bold-uppercase doesn't
+   qualify as. */
+.alert-type-chip.appeared { background: #15803d; }
+.alert-type-chip.disappeared { background: #b91c1c; }
 .alert-type-chip.changed_mac,
 .alert-type-chip.changed_hostname,
 .alert-type-chip.changed_os,
 .alert-type-chip.changed_ports {
-  background: #d97706;
+  background: #b45309;
 }
 .alert-detail {
   grid-area: detail;

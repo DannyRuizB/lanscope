@@ -45,7 +45,7 @@
           <h2>History</h2>
           <div class="panel-actions">
             <button id="clear-history" class="ghost small" title="Delete all scans">Clear all</button>
-            <button id="refresh-history" class="ghost" title="Refresh">↻</button>
+            <button id="refresh-history" class="ghost" title="Refresh" aria-label="Refresh history">↻</button>
           </div>
         </div>
         <ul id="scan-list" class="scan-list">
@@ -56,7 +56,7 @@
           <h2>Schedules</h2>
           <div class="panel-actions">
             <button id="new-schedule-btn" class="ghost small" title="Create a scheduled scan">+ New</button>
-            <button id="refresh-schedules" class="ghost" title="Refresh schedules">↻</button>
+            <button id="refresh-schedules" class="ghost" title="Refresh schedules" aria-label="Refresh schedules">↻</button>
           </div>
         </div>
         <ul id="schedule-list" class="schedule-list">
@@ -67,7 +67,7 @@
           <h2>Notifications</h2>
           <div class="panel-actions">
             <button id="new-channel-btn" class="ghost small" title="Create a notification channel">+ New</button>
-            <button id="refresh-channels" class="ghost" title="Refresh channels">↻</button>
+            <button id="refresh-channels" class="ghost" title="Refresh channels" aria-label="Refresh channels">↻</button>
           </div>
         </div>
         <ul id="channel-list" class="channel-list">
@@ -79,7 +79,7 @@
         </div>
         <ul class="alerts-cta-list">
           <li>
-            <button id="open-alerts-btn" class="alerts-cta-btn" type="button">
+            <button id="open-alerts-btn" class="alerts-cta-btn" type="button" title="View baseline-divergence alerts (appeared / disappeared / changed hosts)">
               <span class="alerts-cta-icon" aria-hidden="true">⚠</span>
               <span class="alerts-cta-label">View alerts</span>
               <span id="alerts-badge" class="alerts-badge" hidden>0</span>
@@ -101,7 +101,7 @@
             required
           />
           <button id="scan-btn" type="submit">Scan now</button>
-          <div id="scan-status" class="status" hidden></div>
+          <div id="scan-status" class="status" role="status" aria-live="polite" hidden></div>
         </form>
 
         <details class="advanced">
@@ -275,10 +275,10 @@
               </div>
               <div class="timeline-actions">
                 <div class="range-toggle" id="timeline-range" role="tablist" aria-label="Time range">
-                  <button type="button" class="range-btn" data-range="24h" role="tab">24h</button>
-                  <button type="button" class="range-btn" data-range="7d" role="tab">7d</button>
-                  <button type="button" class="range-btn" data-range="30d" role="tab">30d</button>
-                  <button type="button" class="range-btn active" data-range="all" role="tab" aria-selected="true">All</button>
+                  <button type="button" class="range-btn" data-range="24h" role="tab" title="Last 24 hours">24h</button>
+                  <button type="button" class="range-btn" data-range="7d" role="tab" title="Last 7 days">7d</button>
+                  <button type="button" class="range-btn" data-range="30d" role="tab" title="Last 30 days">30d</button>
+                  <button type="button" class="range-btn active" data-range="all" role="tab" aria-selected="true" title="All scans of this CIDR">All</button>
                 </div>
                 <button type="button" id="timeline-close" class="ghost small" title="Close timeline and return to the scan view">Close</button>
               </div>

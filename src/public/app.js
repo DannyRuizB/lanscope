@@ -403,7 +403,7 @@ function rescanToolbar(host, kind) {
   const meta = ts ? `<span class="rescan-meta">last scan ${fmtTime(ts)}</span>` : "";
   return `
     <div class="rescan-toolbar">
-      <button type="button" class="ghost small rescan-btn" data-host-id="${host.id}" data-kind="${kind}">${RESCAN_LABEL_FOR_KIND[kind]}</button>
+      <button type="button" class="ghost small rescan-btn" data-host-id="${host.id}" data-kind="${kind}" title="Re-run this scan with the current Advanced options (replaces previous results)">${RESCAN_LABEL_FOR_KIND[kind]}</button>
       ${meta}
     </div>`;
 }
@@ -2919,15 +2919,21 @@ async function loadAlerts() {
     const res = await fetchJson(`/api/alerts?${params.toString()}`);
     renderAlerts(res.alerts || []);
   } catch (e) {
-    alertsEls.list.innerHTML = `<li class="muted">Error: ${escapeHtml(e.message)}</li>`;
+    alertsEls.list.innerHTML = `<li class="muted">Could not load alerts: ${escapeHtml(e.message)}</li>`;
   }
 }
 
 function renderAlerts(alerts) {
   if (!alerts.length) {
-    const scopeMsg = alertsState.scope === "unacked"
-      ? "No unacknowledged alerts."
-      : "No alerts match the current filter.";
+    let scopeMsg;
+    if (alertsState.scope === "unacked") {
+      scopeMsg = "No unacknowledged alerts.";
+    } else if (alertsState.types.size > 0) {
+      scopeMsg = "No alerts match the current filter.";
+    } else {
+      scopeMsg =
+        "No alerts yet. Set a scan as baseline (★) and run another for the same CIDR to populate this list.";
+    }
     alertsEls.list.innerHTML = `<li class="muted">${scopeMsg}</li>`;
     return;
   }
@@ -2963,7 +2969,7 @@ function renderAlertRow(a) {
       </span>
       <span class="alert-actions">
         ${acked ? "" : `<button class="ghost small" data-act="ack" data-id="${a.id}" title="Acknowledge">✓ Ack</button>`}
-        <button class="alert-delete" data-act="delete" data-id="${a.id}" title="Delete alert">×</button>
+        <button class="alert-delete" data-act="delete" data-id="${a.id}" title="Delete alert" aria-label="Delete alert">×</button>
       </span>
     </li>
   `;
