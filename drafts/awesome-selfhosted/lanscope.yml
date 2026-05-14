@@ -1,0 +1,15 @@
+# File ready to upload to:
+# https://github.com/awesome-selfhosted/awesome-selfhosted-data/tree/master/software/lanscope.yml
+# (See README.md in this directory for when and how.)
+name: "LanScope"
+website_url: "https://github.com/DannyRuizB/lanscope"
+source_code_url: "https://github.com/DannyRuizB/lanscope"
+description: "Web UI on top of nmap to discover and inventory hosts on a LAN. Shows alive hosts in a table or topology graph, per-host TCP/UDP and OS scans, baseline divergence alerts and a per-CIDR timeline."
+licenses:
+  - MIT
+platforms:
+  - Nodejs
+  - Docker
+tags:
+  - Network Utilities
+demo_url: "https://lanscope-demo.onrender.com"
