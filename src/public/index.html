@@ -73,6 +73,19 @@
         <ul id="channel-list" class="channel-list">
           <li class="muted">No channels yet.</li>
         </ul>
+
+        <div class="panel-header">
+          <h2>Alerts</h2>
+        </div>
+        <ul class="alerts-cta-list">
+          <li>
+            <button id="open-alerts-btn" class="alerts-cta-btn" type="button">
+              <span class="alerts-cta-icon" aria-hidden="true">⚠</span>
+              <span class="alerts-cta-label">View alerts</span>
+              <span id="alerts-badge" class="alerts-badge" hidden>0</span>
+            </button>
+          </li>
+        </ul>
       </aside>
 
       <section class="content">
@@ -369,13 +382,44 @@
                 <input type="checkbox" id="chan-evt-skipped" />
                 <span>scan_skipped</span>
               </label>
+              <label class="adv-check">
+                <input type="checkbox" id="chan-evt-baseline" />
+                <span>baseline_diff</span>
+              </label>
             </div>
-            <span class="form-hint">Fires whenever a scheduled scan (or a manual Run now on a schedule) reaches one of these states.</span>
+            <span class="form-hint"><code>scan_*</code> fire on scheduled runs (or a manual Run now). <code>baseline_diff</code> fires after any successful scan whose diff vs the declared baseline produced at least one alert.</span>
           </div>
         </form>
         <div class="modal-actions">
           <button type="button" class="ghost" data-modal-close>Cancel</button>
           <button id="chan-modal-create" type="button">Create</button>
+        </div>
+      </div>
+    </div>
+
+    <div id="modal-alerts" class="modal-root" hidden role="dialog" aria-modal="true" aria-labelledby="alerts-modal-title">
+      <div class="modal-backdrop" data-modal-close></div>
+      <div class="modal-box modal-form-box modal-alerts-box">
+        <h3 id="alerts-modal-title" class="modal-title">⚠ Alerts</h3>
+        <div class="alerts-modal-filters">
+          <div class="cron-presets" role="radiogroup" aria-label="Scope">
+            <button type="button" class="cron-preset active" data-alert-scope="unacked">Unacknowledged</button>
+            <button type="button" class="cron-preset" data-alert-scope="all">All</button>
+          </div>
+          <div class="alerts-type-filters" role="group" aria-label="Filter by type">
+            <label class="adv-check"><input type="checkbox" value="appeared" /><span>appeared</span></label>
+            <label class="adv-check"><input type="checkbox" value="disappeared" /><span>disappeared</span></label>
+            <label class="adv-check"><input type="checkbox" value="changed_mac" /><span>changed_mac</span></label>
+            <label class="adv-check"><input type="checkbox" value="changed_hostname" /><span>changed_hostname</span></label>
+            <label class="adv-check"><input type="checkbox" value="changed_os" /><span>changed_os</span></label>
+            <label class="adv-check"><input type="checkbox" value="changed_ports" /><span>changed_ports</span></label>
+          </div>
+        </div>
+        <ul id="alerts-list" class="alerts-list">
+          <li class="muted">Loading…</li>
+        </ul>
+        <div class="modal-actions">
+          <button type="button" class="ghost" data-modal-close>Close</button>
         </div>
       </div>
     </div>

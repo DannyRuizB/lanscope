@@ -99,6 +99,20 @@ db.exec(`
     created_at    INTEGER NOT NULL
   );
 
+  CREATE TABLE IF NOT EXISTS alerts (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    scan_id         INTEGER NOT NULL REFERENCES scans(id) ON DELETE CASCADE,
+    host_id         INTEGER          REFERENCES hosts(id) ON DELETE SET NULL,
+    cidr            TEXT    NOT NULL,
+    type            TEXT    NOT NULL CHECK (type IN (
+                      'appeared','disappeared',
+                      'changed_mac','changed_hostname',
+                      'changed_os','changed_ports')),
+    payload         TEXT    NOT NULL,
+    created_at      INTEGER NOT NULL,
+    acknowledged_at INTEGER
+  );
+
   CREATE INDEX IF NOT EXISTS idx_hosts_scan ON hosts(scan_id);
   CREATE INDEX IF NOT EXISTS idx_scans_started ON scans(started_at DESC);
   CREATE INDEX IF NOT EXISTS idx_ports_host ON host_ports(host_id);
@@ -108,6 +122,9 @@ db.exec(`
   CREATE INDEX IF NOT EXISTS idx_baselines_scan ON inventory_baselines(scan_id);
   CREATE INDEX IF NOT EXISTS idx_schedules_enabled ON scheduled_scans(enabled);
   CREATE INDEX IF NOT EXISTS idx_channels_enabled ON notification_channels(enabled);
+  CREATE INDEX IF NOT EXISTS idx_alerts_created ON alerts(created_at DESC);
+  CREATE INDEX IF NOT EXISTS idx_alerts_cidr_ack ON alerts(cidr, acknowledged_at);
+  CREATE INDEX IF NOT EXISTS idx_alerts_scan ON alerts(scan_id);
 `);
 
 // Migration for v0.1 DBs that don't have the new columns/tables yet.
@@ -320,6 +337,24 @@ const stmts = {
   getAliveIpsByScan: db.prepare(
     `SELECT ip FROM hosts WHERE scan_id = ? AND status = 'up'`,
   ),
+  // v0.13.0 — alerts. List queries with optional filters are built dynamically
+  // in listAlerts() / countUnackedAlerts() since the WHERE shape varies.
+  insertAlertStmt: db.prepare(
+    `INSERT INTO alerts (scan_id, host_id, cidr, type, payload, created_at)
+     VALUES (?, ?, ?, ?, ?, ?) RETURNING id`,
+  ),
+  getAlertStmt: db.prepare(
+    `SELECT id, scan_id, host_id, cidr, type, payload, created_at, acknowledged_at
+       FROM alerts WHERE id = ?`,
+  ),
+  listAlertsByScanStmt: db.prepare(
+    `SELECT id, scan_id, host_id, cidr, type, payload, created_at, acknowledged_at
+       FROM alerts WHERE scan_id = ? ORDER BY created_at DESC`,
+  ),
+  ackAlertStmt: db.prepare(
+    `UPDATE alerts SET acknowledged_at = ? WHERE id = ? AND acknowledged_at IS NULL`,
+  ),
+  deleteAlertStmt: db.prepare(`DELETE FROM alerts WHERE id = ?`),
 };
 
 const insertHostsTx = db.transaction((scanId, hosts) => {
@@ -776,6 +811,105 @@ function recordChannelDispatch(id, { status, error = null }) {
   return getChannel(id);
 }
 
+// v0.13.0 — alerts: changes detected against the declared baseline of a CIDR.
+const ALERT_TYPES = Object.freeze([
+  "appeared",
+  "disappeared",
+  "changed_mac",
+  "changed_hostname",
+  "changed_os",
+  "changed_ports",
+]);
+
+function parseAlertRow(row) {
+  if (!row) return null;
+  let payload = null;
+  try {
+    payload = row.payload ? JSON.parse(row.payload) : null;
+  } catch {
+    payload = null;
+  }
+  return {
+    id: row.id,
+    scan_id: row.scan_id,
+    host_id: row.host_id,
+    cidr: row.cidr,
+    type: row.type,
+    payload,
+    created_at: row.created_at,
+    acknowledged_at: row.acknowledged_at,
+  };
+}
+
+function createAlert({ scan_id, host_id = null, cidr, type, payload }) {
+  if (!ALERT_TYPES.includes(type)) throw new Error(`invalid alert type: ${type}`);
+  const row = stmts.insertAlertStmt.get(
+    scan_id,
+    host_id,
+    cidr,
+    type,
+    JSON.stringify(payload ?? {}),
+    Date.now(),
+  );
+  return getAlert(row.id);
+}
+
+function getAlert(id) {
+  return parseAlertRow(stmts.getAlertStmt.get(id));
+}
+
+// Dynamic SQL because the WHERE shape varies by filters. better-sqlite3 caches
+// prepared statements internally; for the handful of combos we'll see this is
+// fine. Limit is required to keep payloads bounded.
+function listAlerts({ cidr = null, unackOnly = false, types = null, limit = 200 } = {}) {
+  const where = [];
+  const args = [];
+  if (cidr) {
+    where.push("cidr = ?");
+    args.push(cidr);
+  }
+  if (unackOnly) where.push("acknowledged_at IS NULL");
+  if (Array.isArray(types) && types.length > 0) {
+    const valid = types.filter((t) => ALERT_TYPES.includes(t));
+    if (valid.length === 0) return [];
+    where.push(`type IN (${valid.map(() => "?").join(",")})`);
+    args.push(...valid);
+  }
+  const sql = `SELECT id, scan_id, host_id, cidr, type, payload, created_at, acknowledged_at
+                 FROM alerts ${where.length ? "WHERE " + where.join(" AND ") : ""}
+                ORDER BY created_at DESC LIMIT ?`;
+  args.push(limit);
+  return db.prepare(sql).all(...args).map(parseAlertRow);
+}
+
+function listAlertsByScan(scanId) {
+  return stmts.listAlertsByScanStmt.all(scanId).map(parseAlertRow);
+}
+
+function countUnackedAlerts({ cidr = null } = {}) {
+  if (cidr) {
+    const row = db
+      .prepare(`SELECT COUNT(*) AS n FROM alerts WHERE cidr = ? AND acknowledged_at IS NULL`)
+      .get(cidr);
+    return row?.n || 0;
+  }
+  const row = db
+    .prepare(`SELECT COUNT(*) AS n FROM alerts WHERE acknowledged_at IS NULL`)
+    .get();
+  return row?.n || 0;
+}
+
+// Returns the alert in its current state. The caller distinguishes 404 (null)
+// from "already ack'd" (acknowledged_at !== null on first call) if it cares.
+function ackAlert(id) {
+  stmts.ackAlertStmt.run(Date.now(), id);
+  return getAlert(id);
+}
+
+function deleteAlert(id) {
+  return stmts.deleteAlertStmt.run(id).changes > 0;
+}
+
 module.exports = {
   startScan,
   finishScan,
@@ -806,4 +940,12 @@ module.exports = {
   deleteChannel,
   recordChannelDispatch,
   getTimeline,
+  ALERT_TYPES,
+  createAlert,
+  getAlert,
+  listAlerts,
+  listAlertsByScan,
+  countUnackedAlerts,
+  ackAlert,
+  deleteAlert,
 };

@@ -1,8 +1,12 @@
 // v0.11.0 — dispatcher for notification channels.
 //
-// Three event types: scan_done / scan_error / scan_skipped. Two channel
-// types: webhook (with generic / Discord / Slack payload formats) and
-// ntfy.sh.
+// Event types:
+//   scan_done / scan_error / scan_skipped — emitted by the scheduler.
+//   baseline_diff (v0.13.0) — emitted by the runner after a successful scan
+//     when the diff against the declared baseline produced at least one alert.
+//
+// Channel types: webhook (with generic / Discord / Slack payload formats)
+// and ntfy.sh.
 //
 // dispatch() is fire-and-forget for callers: the scheduler must not block
 // (or fail) because a downstream webhook is slow or broken. Each channel's
@@ -17,10 +21,21 @@ const db = require("./db");
 const FETCH_TIMEOUT_MS = 5000;
 const DEMO_MODE = process.env.DEMO_MODE === "true";
 
+// Stable order for rendering baseline_diff count breakdowns.
+const ALERT_COUNT_ORDER = [
+  "appeared",
+  "disappeared",
+  "changed_mac",
+  "changed_hostname",
+  "changed_os",
+  "changed_ports",
+];
+
 function titleFor(event) {
   if (event === "scan_done") return "Scheduled scan completed";
   if (event === "scan_error") return "Scheduled scan failed";
   if (event === "scan_skipped") return "Scheduled scan skipped";
+  if (event === "baseline_diff") return "Baseline divergence detected";
   return `LanScope event: ${event}`;
 }
 
@@ -37,6 +52,17 @@ function summaryFor(event, context) {
   if (event === "scan_skipped") {
     return `Scheduled scan "${name}" was skipped (${context.error || "another scan in progress"})`;
   }
+  if (event === "baseline_diff") {
+    const total = context.total ?? 0;
+    const counts = context.counts || {};
+    const parts = [];
+    for (const k of ALERT_COUNT_ORDER) {
+      const v = counts[k] || 0;
+      if (v > 0) parts.push(`${v} ${k.replace(/_/g, " ")}`);
+    }
+    const detail = parts.length ? ` — ${parts.join(", ")}` : "";
+    return `Baseline divergence on ${cidr}: ${total} change${total === 1 ? "" : "s"}${detail}`;
+  }
   return `LanScope event: ${event}`;
 }
 
@@ -44,20 +70,23 @@ function colorFor(event) {
   if (event === "scan_done") return 0x2ecc71;
   if (event === "scan_error") return 0xe74c3c;
   if (event === "scan_skipped") return 0xf1c40f;
+  if (event === "baseline_diff") return 0xe67e22;
   return 0x95a5a6;
 }
 
 function unicodeIconFor(event) {
-  if (event === "scan_done") return "✓"; // ✓
-  if (event === "scan_error") return "✗"; // ✗
-  if (event === "scan_skipped") return "⊘"; // ⊘
-  return "•"; // •
+  if (event === "scan_done") return "✓";
+  if (event === "scan_error") return "✗";
+  if (event === "scan_skipped") return "⊘";
+  if (event === "baseline_diff") return "⚠";
+  return "•";
 }
 
 function slackEmojiFor(event) {
   if (event === "scan_done") return ":white_check_mark:";
   if (event === "scan_error") return ":x:";
   if (event === "scan_skipped") return ":warning:";
+  if (event === "baseline_diff") return ":warning:";
   return ":bell:";
 }
 
@@ -65,12 +94,14 @@ function ntfyTagsFor(event) {
   if (event === "scan_done") return "white_check_mark";
   if (event === "scan_error") return "x";
   if (event === "scan_skipped") return "warning";
+  if (event === "baseline_diff") return "warning";
   return "bell";
 }
 
 function ntfyPriorityFor(event) {
   if (event === "scan_error") return "high";
   if (event === "scan_skipped") return "default";
+  if (event === "baseline_diff") return "high";
   return "low";
 }
 
@@ -84,9 +115,20 @@ function buildWebhookGeneric(event, context) {
         ? { id: context.schedule.id, name: context.schedule.name, cidr: context.schedule.cidr }
         : null,
       scan: context.scan
-        ? { id: context.scan.id, host_count: context.scan.host_count, started_at: context.scan.started_at }
+        ? {
+            id: context.scan.id,
+            cidr: context.scan.cidr ?? null,
+            host_count: context.scan.host_count,
+            started_at: context.scan.started_at,
+          }
         : null,
       error: context.error || null,
+      // v0.13.0 — baseline_diff aggregate fields. Always present (null when
+      // the event doesn't carry them) so downstream consumers have a stable
+      // shape.
+      total: context.total ?? null,
+      counts: context.counts ?? null,
+      baseline: context.baseline ?? null,
     }),
     headers: { "content-type": "application/json" },
   };

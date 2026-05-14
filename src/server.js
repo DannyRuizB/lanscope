@@ -67,7 +67,12 @@ function validateCronExpr(s) {
 
 // v0.11.0 — notification channel validators.
 
-const ALLOWED_EVENTS = new Set(["scan_done", "scan_error", "scan_skipped"]);
+const ALLOWED_EVENTS = new Set([
+  "scan_done",
+  "scan_error",
+  "scan_skipped",
+  "baseline_diff", // v0.13.0
+]);
 const ALLOWED_CHANNEL_TYPES = new Set(["webhook", "ntfy"]);
 const ALLOWED_WEBHOOK_FORMATS = new Set(["generic", "discord", "slack"]);
 
@@ -537,6 +542,73 @@ app.post("/api/notifications/:id/test", async (req, res) => {
     db.recordChannelDispatch(id, { status: "error", error: e.message });
     res.status(502).json({ error: e.message, channel: db.getChannel(id) });
   }
+});
+
+// v0.13.0 — alerts: baseline-divergence events emitted after each scan.
+
+const ALERT_TYPES_SET = new Set(db.ALERT_TYPES);
+
+function parseCidrQuery(raw) {
+  if (raw === undefined || raw === null || raw === "") return { value: null };
+  if (typeof raw !== "string" || raw.length > 32) return { error: "invalid cidr" };
+  return { value: raw };
+}
+
+function parseAlertTypesQuery(raw) {
+  if (raw === undefined || raw === null || raw === "") return { value: null };
+  const parts = String(raw)
+    .split(",")
+    .map((s) => s.trim())
+    .filter(Boolean);
+  if (parts.length === 0) return { value: null };
+  for (const t of parts) {
+    if (!ALERT_TYPES_SET.has(t)) return { error: `unknown alert type: ${t}` };
+  }
+  return { value: parts };
+}
+
+app.get("/api/alerts", (req, res) => {
+  const cidrV = parseCidrQuery(req.query.cidr);
+  if (cidrV.error) return res.status(400).json({ error: cidrV.error });
+  const typesV = parseAlertTypesQuery(req.query.types);
+  if (typesV.error) return res.status(400).json({ error: typesV.error });
+
+  const filters = {};
+  if (cidrV.value) filters.cidr = cidrV.value;
+  if (req.query.unackOnly === "true") filters.unackOnly = true;
+  if (typesV.value) filters.types = typesV.value;
+  if (req.query.limit !== undefined) {
+    const n = parseInt(req.query.limit, 10);
+    if (!Number.isInteger(n) || n <= 0 || n > 1000) {
+      return res.status(400).json({ error: "limit must be an integer 1..1000" });
+    }
+    filters.limit = n;
+  }
+  res.json({ alerts: db.listAlerts(filters) });
+});
+
+app.get("/api/alerts/count", (req, res) => {
+  const cidrV = parseCidrQuery(req.query.cidr);
+  if (cidrV.error) return res.status(400).json({ error: cidrV.error });
+  const opts = {};
+  if (cidrV.value) opts.cidr = cidrV.value;
+  res.json({ count: db.countUnackedAlerts(opts) });
+});
+
+app.post("/api/alerts/:id/ack", (req, res) => {
+  const id = parseInt(req.params.id, 10);
+  if (!Number.isInteger(id) || id <= 0) return res.status(400).json({ error: "invalid id" });
+  const before = db.getAlert(id);
+  if (!before) return res.status(404).json({ error: "alert not found" });
+  const alert = db.ackAlert(id);
+  res.json({ alert });
+});
+
+app.delete("/api/alerts/:id", (req, res) => {
+  const id = parseInt(req.params.id, 10);
+  if (!Number.isInteger(id) || id <= 0) return res.status(400).json({ error: "invalid id" });
+  if (!db.deleteAlert(id)) return res.status(404).json({ error: "alert not found" });
+  res.status(204).end();
 });
 
 app.listen(PORT, () => {

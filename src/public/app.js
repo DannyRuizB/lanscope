@@ -153,6 +153,11 @@ async function loadHistory() {
     // Schedule rows reuse host_count from the matching scan in history, so
     // re-render them whenever history changes.
     if (schedules.length) renderSchedules();
+    // v0.13.0 — any history change (new scan, delete, clear) may add or remove
+    // alerts (ON DELETE CASCADE). Refresh the badge counter. Guarded with
+    // typeof because the alerts module evaluates after the boot call to
+    // loadHistory(); typeof avoids TDZ on first invocation.
+    if (typeof refreshAlertBadge === "function") refreshAlertBadge();
   } catch (e) {
     console.error("loadHistory failed:", e);
   }
@@ -2304,6 +2309,7 @@ const chanEls = {
   evtDone: document.getElementById("chan-evt-done"),
   evtError: document.getElementById("chan-evt-error"),
   evtSkipped: document.getElementById("chan-evt-skipped"),
+  evtBaseline: document.getElementById("chan-evt-baseline"),
 };
 
 let channels = [];
@@ -2442,6 +2448,7 @@ function selectedChannelEvents() {
   if (chanEls.evtDone?.checked) out.push("scan_done");
   if (chanEls.evtError?.checked) out.push("scan_error");
   if (chanEls.evtSkipped?.checked) out.push("scan_skipped");
+  if (chanEls.evtBaseline?.checked) out.push("baseline_diff");
   return out;
 }
 
@@ -2459,6 +2466,7 @@ function openChannelModal() {
   chanEls.evtDone.checked = true;
   chanEls.evtError.checked = true;
   chanEls.evtSkipped.checked = false;
+  chanEls.evtBaseline.checked = false;
   chanEls.typePresets.forEach((b, i) => b.classList.toggle("active", i === 0));
   chanEls.formatPresets.forEach((b, i) => b.classList.toggle("active", i === 0));
   syncChannelTypeUI();
@@ -2812,3 +2820,213 @@ function renderTimelineCharts(data) {
 }
 
 setupTimeline();
+
+// ===== Alerts (v0.13.0) =====
+// Sidebar entry opens a modal that lists baseline-divergence alerts. The
+// badge is the canonical unack count and is refreshed at boot, after every
+// scan / ack / delete / clear-history, and on a 30s timer to catch scheduled
+// scans that fire while the tab is open. List filtering is purely additive:
+// scope (unacked/all) is a single toggle, types are independent checkboxes.
+
+const ALERT_TYPE_LABELS = {
+  appeared: "appeared",
+  disappeared: "disappeared",
+  changed_mac: "changed mac",
+  changed_hostname: "changed hostname",
+  changed_os: "changed os",
+  changed_ports: "changed ports",
+};
+
+const alertsEls = {
+  badge: $("#alerts-badge"),
+  openBtn: $("#open-alerts-btn"),
+  modal: $("#modal-alerts"),
+  list: $("#alerts-list"),
+  scopeBtns: document.querySelectorAll("#modal-alerts [data-alert-scope]"),
+  typeChecks: document.querySelectorAll("#modal-alerts .alerts-type-filters input[type=checkbox]"),
+};
+
+const alertsState = {
+  scope: "unacked",
+  types: new Set(),
+};
+
+let alertCountTimer = null;
+
+function fmtAlertDetail(alert) {
+  const p = alert.payload || {};
+  const ip = p.ip || "?";
+  switch (alert.type) {
+    case "appeared": {
+      const parts = [ip];
+      if (p.hostname) parts.push(p.hostname);
+      if (p.mac) parts.push(p.mac);
+      return `New host: ${parts.join(" · ")}`;
+    }
+    case "disappeared": {
+      const parts = [ip];
+      if (p.last_seen_hostname) parts.push(p.last_seen_hostname);
+      return `Host gone: ${parts.join(" · ")}`;
+    }
+    case "changed_mac":
+      return `${ip}: MAC ${p.before || "?"} → ${p.after || "?"}`;
+    case "changed_hostname":
+      return `${ip}: hostname ${p.before || "?"} → ${p.after || "?"}`;
+    case "changed_os":
+      return `${ip}: OS ${p.before || "?"} → ${p.after || "?"}`;
+    case "changed_ports": {
+      const added = (p.added || []).join(", ") || "—";
+      const removed = (p.removed || []).join(", ") || "—";
+      return `${ip}: ports added [${added}], removed [${removed}]`;
+    }
+    default:
+      return ip;
+  }
+}
+
+function formatAlertTime(ts) {
+  if (!ts) return "";
+  const d = new Date(ts);
+  return d.toLocaleString();
+}
+
+async function refreshAlertBadge() {
+  // loadHistory() fires this on its boot pass before this module's const
+  // initializers run; typeof avoids a TDZ ReferenceError.
+  if (typeof alertsEls === "undefined" || !alertsEls?.badge) return;
+  try {
+    const res = await fetchJson("/api/alerts/count");
+    const n = res?.count ?? 0;
+    if (n > 0) {
+      alertsEls.badge.hidden = false;
+      alertsEls.badge.textContent = n > 99 ? "99+" : String(n);
+    } else {
+      alertsEls.badge.hidden = true;
+    }
+  } catch (e) {
+    console.error("refreshAlertBadge failed:", e);
+  }
+}
+
+async function loadAlerts() {
+  if (!alertsEls.list) return;
+  alertsEls.list.innerHTML = `<li class="muted">Loading…</li>`;
+  const params = new URLSearchParams();
+  if (alertsState.scope === "unacked") params.set("unackOnly", "true");
+  if (alertsState.types.size > 0) params.set("types", [...alertsState.types].join(","));
+  params.set("limit", "500");
+  try {
+    const res = await fetchJson(`/api/alerts?${params.toString()}`);
+    renderAlerts(res.alerts || []);
+  } catch (e) {
+    alertsEls.list.innerHTML = `<li class="muted">Error: ${escapeHtml(e.message)}</li>`;
+  }
+}
+
+function renderAlerts(alerts) {
+  if (!alerts.length) {
+    const scopeMsg = alertsState.scope === "unacked"
+      ? "No unacknowledged alerts."
+      : "No alerts match the current filter.";
+    alertsEls.list.innerHTML = `<li class="muted">${scopeMsg}</li>`;
+    return;
+  }
+  alertsEls.list.innerHTML = alerts.map(renderAlertRow).join("");
+  alertsEls.list.querySelectorAll('[data-act="ack"]').forEach((btn) => {
+    btn.addEventListener("click", () => ackAlertHandler(parseInt(btn.dataset.id, 10)));
+  });
+  alertsEls.list.querySelectorAll('[data-act="delete"]').forEach((btn) => {
+    btn.addEventListener("click", () => deleteAlertHandler(parseInt(btn.dataset.id, 10)));
+  });
+  alertsEls.list.querySelectorAll('[data-act="scan"]').forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const id = parseInt(btn.dataset.scanId, 10);
+      closeAlertsModal();
+      loadScan(id);
+    });
+  });
+}
+
+function renderAlertRow(a) {
+  const acked = a.acknowledged_at != null;
+  const detail = fmtAlertDetail(a);
+  const created = formatAlertTime(a.created_at);
+  const typeLabel = ALERT_TYPE_LABELS[a.type] || a.type;
+  return `
+    <li class="alert-row${acked ? " acked" : ""}" data-id="${a.id}">
+      <span class="alert-type-chip ${a.type}">${escapeHtml(typeLabel)}</span>
+      <span class="alert-detail">${escapeHtml(detail)}</span>
+      <span class="alert-meta">
+        <button class="ghost small" data-act="scan" data-scan-id="${a.scan_id}" title="Open scan #${a.scan_id}">scan #${a.scan_id}</button>
+        <span>· ${escapeHtml(created)}</span>
+        ${acked ? `<span class="alert-ack-label">· ✓ acked</span>` : ""}
+      </span>
+      <span class="alert-actions">
+        ${acked ? "" : `<button class="ghost small" data-act="ack" data-id="${a.id}" title="Acknowledge">✓ Ack</button>`}
+        <button class="alert-delete" data-act="delete" data-id="${a.id}" title="Delete alert">×</button>
+      </span>
+    </li>
+  `;
+}
+
+async function ackAlertHandler(id) {
+  try {
+    await fetchJson(`/api/alerts/${id}/ack`, { method: "POST" });
+    await Promise.all([loadAlerts(), refreshAlertBadge()]);
+  } catch (e) {
+    console.error("ack failed:", e);
+  }
+}
+
+async function deleteAlertHandler(id) {
+  try {
+    await fetchJson(`/api/alerts/${id}`, { method: "DELETE" });
+    await Promise.all([loadAlerts(), refreshAlertBadge()]);
+  } catch (e) {
+    console.error("delete failed:", e);
+  }
+}
+
+function openAlertsModal() {
+  if (!alertsEls.modal) return;
+  alertsEls.modal.hidden = false;
+  loadAlerts();
+}
+
+function closeAlertsModal() {
+  if (!alertsEls.modal) return;
+  alertsEls.modal.hidden = true;
+}
+
+function setupAlerts() {
+  if (!alertsEls.openBtn) return;
+  alertsEls.openBtn.addEventListener("click", openAlertsModal);
+  alertsEls.modal?.querySelectorAll("[data-modal-close]").forEach((el) => {
+    el.addEventListener("click", closeAlertsModal);
+  });
+  alertsEls.scopeBtns.forEach((btn) => {
+    btn.addEventListener("click", () => {
+      alertsEls.scopeBtns.forEach((b) => b.classList.toggle("active", b === btn));
+      alertsState.scope = btn.dataset.alertScope;
+      loadAlerts();
+    });
+  });
+  alertsEls.typeChecks.forEach((cb) => {
+    cb.addEventListener("change", () => {
+      if (cb.checked) alertsState.types.add(cb.value);
+      else alertsState.types.delete(cb.value);
+      loadAlerts();
+    });
+  });
+  document.addEventListener("keydown", (e) => {
+    if (e.key === "Escape" && alertsEls.modal && !alertsEls.modal.hidden) {
+      e.preventDefault();
+      closeAlertsModal();
+    }
+  });
+  refreshAlertBadge();
+  if (alertCountTimer) clearInterval(alertCountTimer);
+  alertCountTimer = setInterval(refreshAlertBadge, 30000);
+}
+
+setupAlerts();

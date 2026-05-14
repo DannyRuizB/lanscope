@@ -7,6 +7,7 @@
 const path = require("node:path");
 const Database = require("better-sqlite3");
 const db = require("./db");
+const { detectAlertsForScan } = require("./alerts");
 
 const DAY = 24 * 60 * 60 * 1000;
 const NOW = Date.now();
@@ -382,6 +383,28 @@ function seedSchedules(rawDb, { scan2Id, scan2EndedAt, scan3Id, scan3EndedAt }) 
   return { hourly: hourly.id, nightly: nightly.id, debug: debug.id };
 }
 
+// v0.13.0 — seed alerts by running the real detector against the seeded
+// scan2 and scan3 (both diverge from the declared baseline = scan1). Older
+// alerts from scan2 are acknowledged to showcase the mix; scan3's alerts
+// stay pending so visitors land on actionable rows.
+function seedAlerts(rawDb, { scan2Id, scan3Id, scan2EndedAt, scan3EndedAt }) {
+  const fromScan2 = detectAlertsForScan(scan2Id);
+  const fromScan3 = detectAlertsForScan(scan3Id);
+
+  // Backdate created_at to each source scan so the demo's chronology lines up
+  // with history rather than showing every alert as "just now".
+  const setCreated = rawDb.prepare(`UPDATE alerts SET created_at = ? WHERE id = ?`);
+  for (const a of fromScan2) setCreated.run(scan2EndedAt + 1000, a.id);
+  for (const a of fromScan3) setCreated.run(scan3EndedAt + 1000, a.id);
+
+  // Acknowledge scan2's alerts (10 min after the scan, as if a human triaged
+  // them). scan3's remain pending → the badge shows a non-zero count.
+  const setAck = rawDb.prepare(`UPDATE alerts SET acknowledged_at = ? WHERE id = ?`);
+  for (const a of fromScan2) setAck.run(scan2EndedAt + 10 * 60 * 1000, a.id);
+
+  return { fromScan2: fromScan2.length, fromScan3: fromScan3.length };
+}
+
 // v0.11.0 — seed two notification channels (both disabled) so the demo shows
 // the section populated without ever attempting an outbound call.
 function seedChannels(rawDb, { createdAtBase }) {
@@ -392,14 +415,14 @@ function seedChannels(rawDb, { createdAtBase }) {
       url: "https://discord.com/api/webhooks/XXXXXX/your-token-here",
       format: "discord",
     },
-    events: ["scan_done", "scan_error"],
+    events: ["scan_done", "scan_error", "baseline_diff"],
     enabled: false,
   });
   const ntfy = db.createChannel({
     name: "ntfy mobile push",
     type: "ntfy",
     config: { topic: "lanscope-demo", server: "https://ntfy.sh" },
-    events: ["scan_error"],
+    events: ["scan_error", "baseline_diff"],
     enabled: false,
   });
 
@@ -447,9 +470,17 @@ function run() {
     createdAtBase: T_DAYS_AGO_3 + 4700,
   });
 
+  const alertCounts = seedAlerts(rawDb, {
+    scan2Id: scan2,
+    scan3Id: scan3,
+    scan2EndedAt: T_DAYS_AGO_3 + 4700,
+    scan3EndedAt: T_HOURS_AGO_4 + 5100,
+  });
+
   console.log(`[seed] Seeded scans: ${scan1} (baseline), ${scan2}, ${scan3}.`);
   console.log(`[seed] Seeded schedules: hourly=${schedIds.hourly}, nightly=${schedIds.nightly}, debug=${schedIds.debug}.`);
   console.log(`[seed] Seeded channels: discord=${chanIds.discord}, ntfy=${chanIds.ntfy}.`);
+  console.log(`[seed] Seeded alerts: scan2=${alertCounts.fromScan2} (acked), scan3=${alertCounts.fromScan3} (pending).`);
   rawDb.close();
 }
 
