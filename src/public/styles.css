@@ -1684,7 +1684,11 @@ li.is-baseline .scan-cidr {
   display: flex;
   flex-direction: column;
   gap: 8px;
-  min-height: 240px;
+  /* Fixed height (not min-height) so Chart.js responsive resizing settles —
+     a flex child with `min-height` + `maintainAspectRatio: false` + a canvas
+     that itself had `min-height: 200px` produced a redraw loop that grew the
+     canvas on every render. */
+  height: 280px;
 }
 .timeline-card h3 {
   margin: 0;
@@ -1696,8 +1700,10 @@ li.is-baseline .scan-cidr {
 }
 .timeline-card canvas {
   flex: 1;
-  width: 100%;
-  min-height: 200px;
+  /* min-height:0 is required on a flex child whose intrinsic size would
+     otherwise push the parent taller on each resize. Chart.js sets the
+     canvas width/height itself when responsive:true is on. */
+  min-height: 0;
 }
 .timeline-no-baseline {
   padding: 8px;
