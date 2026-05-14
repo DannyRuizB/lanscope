@@ -2,12 +2,12 @@
 
 ## Supported versions
 
-LanScope is a personal homelab project. Only the **latest tagged release** receives security fixes. Pin to a specific version (`ghcr.io/dannyruizb/lanscope:0.13.1`) in production and upgrade when a fix lands.
+LanScope is a personal homelab project. Only the **latest tagged release** receives security fixes. Pin to a specific version (`ghcr.io/dannyruizb/lanscope:1.0.0`) in production and upgrade when a fix lands.
 
 | Version | Supported          |
 | ------- | ------------------ |
-| latest (0.13.1) | ✅ |
-| < 0.13.1 | ❌ (please upgrade) |
+| latest (1.0.0) | ✅ |
+| < 1.0.0 | ❌ (please upgrade) |
 
 ## Reporting a vulnerability
 
