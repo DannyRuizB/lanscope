@@ -21,22 +21,54 @@ const db = require("./db");
 const FETCH_TIMEOUT_MS = 5000;
 const DEMO_MODE = process.env.DEMO_MODE === "true";
 
-// Stable order for rendering baseline_diff count breakdowns.
-const ALERT_COUNT_ORDER = [
-  "appeared",
-  "disappeared",
-  "changed_mac",
-  "changed_hostname",
-  "changed_os",
-  "changed_ports",
-];
+// One row per event. Adding a fifth event = one new entry, not seven edits.
+const EVENT_META = {
+  scan_done: {
+    title: "Scheduled scan completed",
+    color: 0x2ecc71,
+    icon: "✓",
+    slackEmoji: ":white_check_mark:",
+    ntfyTag: "white_check_mark",
+    ntfyPriority: "low",
+  },
+  scan_error: {
+    title: "Scheduled scan failed",
+    color: 0xe74c3c,
+    icon: "✗",
+    slackEmoji: ":x:",
+    ntfyTag: "x",
+    ntfyPriority: "high",
+  },
+  scan_skipped: {
+    title: "Scheduled scan skipped",
+    color: 0xf1c40f,
+    icon: "⊘",
+    slackEmoji: ":warning:",
+    ntfyTag: "warning",
+    ntfyPriority: "default",
+  },
+  baseline_diff: {
+    title: "Baseline divergence detected",
+    color: 0xe67e22,
+    icon: "⚠",
+    slackEmoji: ":warning:",
+    ntfyTag: "warning",
+    ntfyPriority: "high",
+  },
+};
+
+const FALLBACK_META = {
+  color: 0x95a5a6,
+  icon: "•",
+  slackEmoji: ":bell:",
+  ntfyTag: "bell",
+  ntfyPriority: "low",
+};
+
+const metaFor = (event) => EVENT_META[event] || FALLBACK_META;
 
 function titleFor(event) {
-  if (event === "scan_done") return "Scheduled scan completed";
-  if (event === "scan_error") return "Scheduled scan failed";
-  if (event === "scan_skipped") return "Scheduled scan skipped";
-  if (event === "baseline_diff") return "Baseline divergence detected";
-  return `LanScope event: ${event}`;
+  return EVENT_META[event]?.title || `LanScope event: ${event}`;
 }
 
 function summaryFor(event, context) {
@@ -56,7 +88,7 @@ function summaryFor(event, context) {
     const total = context.total ?? 0;
     const counts = context.counts || {};
     const parts = [];
-    for (const k of ALERT_COUNT_ORDER) {
+    for (const k of db.ALERT_TYPES) {
       const v = counts[k] || 0;
       if (v > 0) parts.push(`${v} ${k.replace(/_/g, " ")}`);
     }
@@ -66,44 +98,11 @@ function summaryFor(event, context) {
   return `LanScope event: ${event}`;
 }
 
-function colorFor(event) {
-  if (event === "scan_done") return 0x2ecc71;
-  if (event === "scan_error") return 0xe74c3c;
-  if (event === "scan_skipped") return 0xf1c40f;
-  if (event === "baseline_diff") return 0xe67e22;
-  return 0x95a5a6;
-}
-
-function unicodeIconFor(event) {
-  if (event === "scan_done") return "✓";
-  if (event === "scan_error") return "✗";
-  if (event === "scan_skipped") return "⊘";
-  if (event === "baseline_diff") return "⚠";
-  return "•";
-}
-
-function slackEmojiFor(event) {
-  if (event === "scan_done") return ":white_check_mark:";
-  if (event === "scan_error") return ":x:";
-  if (event === "scan_skipped") return ":warning:";
-  if (event === "baseline_diff") return ":warning:";
-  return ":bell:";
-}
-
-function ntfyTagsFor(event) {
-  if (event === "scan_done") return "white_check_mark";
-  if (event === "scan_error") return "x";
-  if (event === "scan_skipped") return "warning";
-  if (event === "baseline_diff") return "warning";
-  return "bell";
-}
-
-function ntfyPriorityFor(event) {
-  if (event === "scan_error") return "high";
-  if (event === "scan_skipped") return "default";
-  if (event === "baseline_diff") return "high";
-  return "low";
-}
+const colorFor = (event) => metaFor(event).color;
+const unicodeIconFor = (event) => metaFor(event).icon;
+const slackEmojiFor = (event) => metaFor(event).slackEmoji;
+const ntfyTagsFor = (event) => metaFor(event).ntfyTag;
+const ntfyPriorityFor = (event) => metaFor(event).ntfyPriority;
 
 function buildWebhookGeneric(event, context) {
   return {

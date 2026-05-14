@@ -337,8 +337,8 @@ const stmts = {
   getAliveIpsByScan: db.prepare(
     `SELECT ip FROM hosts WHERE scan_id = ? AND status = 'up'`,
   ),
-  // v0.13.0 — alerts. List queries with optional filters are built dynamically
-  // in listAlerts() / countUnackedAlerts() since the WHERE shape varies.
+  // List queries with optional filters are built dynamically in listAlerts() /
+  // countUnackedAlerts() since the WHERE shape varies.
   insertAlertStmt: db.prepare(
     `INSERT INTO alerts (scan_id, host_id, cidr, type, payload, created_at)
      VALUES (?, ?, ?, ?, ?, ?) RETURNING id`,
@@ -811,7 +811,7 @@ function recordChannelDispatch(id, { status, error = null }) {
   return getChannel(id);
 }
 
-// v0.13.0 — alerts: changes detected against the declared baseline of a CIDR.
+// Alerts: changes detected against the declared baseline of a CIDR.
 const ALERT_TYPES = Object.freeze([
   "appeared",
   "disappeared",
@@ -843,24 +843,41 @@ function parseAlertRow(row) {
 
 function createAlert({ scan_id, host_id = null, cidr, type, payload }) {
   if (!ALERT_TYPES.includes(type)) throw new Error(`invalid alert type: ${type}`);
+  const created_at = Date.now();
   const row = stmts.insertAlertStmt.get(
     scan_id,
     host_id,
     cidr,
     type,
     JSON.stringify(payload ?? {}),
-    Date.now(),
+    created_at,
   );
-  return getAlert(row.id);
+  return {
+    id: row.id,
+    scan_id,
+    host_id,
+    cidr,
+    type,
+    payload: payload ?? {},
+    created_at,
+    acknowledged_at: null,
+  };
+}
+
+// Batch insert in a single transaction — one fsync instead of N for a
+// divergent scan with many changes.
+const createAlertsTx = db.transaction((specs) => specs.map((s) => createAlert(s)));
+function createAlerts(specs) {
+  return createAlertsTx(specs);
 }
 
 function getAlert(id) {
   return parseAlertRow(stmts.getAlertStmt.get(id));
 }
 
-// Dynamic SQL because the WHERE shape varies by filters. better-sqlite3 caches
-// prepared statements internally; for the handful of combos we'll see this is
-// fine. Limit is required to keep payloads bounded.
+// Dynamic SQL because the WHERE shape varies by filters. better-sqlite3
+// caches prepared statements internally; for the handful of combos we'll
+// see this is fine.
 function listAlerts({ cidr = null, unackOnly = false, types = null, limit = 200 } = {}) {
   const where = [];
   const args = [];
@@ -942,6 +959,7 @@ module.exports = {
   getTimeline,
   ALERT_TYPES,
   createAlert,
+  createAlerts,
   getAlert,
   listAlerts,
   listAlertsByScan,

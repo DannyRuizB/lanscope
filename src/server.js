@@ -550,7 +550,8 @@ const ALERT_TYPES_SET = new Set(db.ALERT_TYPES);
 
 function parseCidrQuery(raw) {
   if (raw === undefined || raw === null || raw === "") return { value: null };
-  if (typeof raw !== "string" || raw.length > 32) return { error: "invalid cidr" };
+  const err = validateCidr(raw);
+  if (err) return { error: err };
   return { value: raw };
 }
 

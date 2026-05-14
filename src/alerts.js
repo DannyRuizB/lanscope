@@ -1,9 +1,3 @@
-// v0.13.0 — detector of baseline-divergence alerts.
-//
-// Called after every successful CIDR sweep. Compares the freshly stored scan
-// against the declared inventory_baselines row for the same CIDR (if any) and
-// writes one alert row per detected change.
-//
 // Match between hosts is by IP — MACs can change (renumbering, spoofing,
 // virtual MACs) and hostnames may be missing, so IP is the only stable key.
 //
@@ -43,14 +37,9 @@ function normName(s) {
   return v || null;
 }
 
-// Inspect a completed scan and emit alerts vs the CIDR's declared baseline.
-// Returns the array of alerts created (already persisted). Returns [] when:
-//   - the scan doesn't exist or isn't 'done'
-//   - the CIDR has no declared baseline
-//   - the scan IS the baseline (self-compare would emit zero anyway, but skip
-//     the work)
-// Wrap callers in try/catch — a detection failure should never break the scan
-// flow.
+// Wrap callers in try/catch — a detection failure should never break the
+// scan flow. Returns [] when the scan isn't done, the CIDR has no declared
+// baseline, or the scan IS the baseline (self-compare).
 function detectAlertsForScan(scanId) {
   const scan = db.getScan(scanId);
   if (!scan || scan.status !== "done") return [];
@@ -71,40 +60,35 @@ function detectAlertsForScan(scanId) {
     if (h.status === "up") baselineByIp.set(h.ip, h);
   }
 
-  const created = [];
+  const specs = [];
+  const spec = (type, host_id, payload) => ({
+    scan_id: scanId,
+    host_id,
+    cidr: scan.cidr,
+    type,
+    payload,
+  });
 
   for (const [ip, h] of currentByIp) {
     if (baselineByIp.has(ip)) continue;
-    created.push(
-      db.createAlert({
-        scan_id: scanId,
-        host_id: h.id,
-        cidr: scan.cidr,
-        type: "appeared",
-        payload: {
-          ip,
-          mac: h.mac || null,
-          hostname: h.hostname || null,
-          vendor: h.vendor || null,
-        },
+    specs.push(
+      spec("appeared", h.id, {
+        ip,
+        mac: h.mac || null,
+        hostname: h.hostname || null,
+        vendor: h.vendor || null,
       }),
     );
   }
 
   for (const [ip, b] of baselineByIp) {
     if (currentByIp.has(ip)) continue;
-    created.push(
-      db.createAlert({
-        scan_id: scanId,
-        host_id: null,
-        cidr: scan.cidr,
-        type: "disappeared",
-        payload: {
-          ip,
-          last_seen_mac: b.mac || null,
-          last_seen_hostname: b.hostname || null,
-          last_seen_vendor: b.vendor || null,
-        },
+    specs.push(
+      spec("disappeared", null, {
+        ip,
+        last_seen_mac: b.mac || null,
+        last_seen_hostname: b.hostname || null,
+        last_seen_vendor: b.vendor || null,
       }),
     );
   }
@@ -116,27 +100,17 @@ function detectAlertsForScan(scanId) {
     const cm = normMac(current.mac);
     const bm = normMac(base.mac);
     if (cm && bm && cm !== bm) {
-      created.push(
-        db.createAlert({
-          scan_id: scanId,
-          host_id: current.id,
-          cidr: scan.cidr,
-          type: "changed_mac",
-          payload: { ip, before: base.mac, after: current.mac },
-        }),
-      );
+      specs.push(spec("changed_mac", current.id, { ip, before: base.mac, after: current.mac }));
     }
 
     const ch = normName(current.hostname);
     const bh = normName(base.hostname);
     if (ch && bh && ch !== bh) {
-      created.push(
-        db.createAlert({
-          scan_id: scanId,
-          host_id: current.id,
-          cidr: scan.cidr,
-          type: "changed_hostname",
-          payload: { ip, before: base.hostname, after: current.hostname },
+      specs.push(
+        spec("changed_hostname", current.id, {
+          ip,
+          before: base.hostname,
+          after: current.hostname,
         }),
       );
     }
@@ -144,15 +118,7 @@ function detectAlertsForScan(scanId) {
     const cob = osBucket(current);
     const bob = osBucket(base);
     if (cob && bob && cob !== bob) {
-      created.push(
-        db.createAlert({
-          scan_id: scanId,
-          host_id: current.id,
-          cidr: scan.cidr,
-          type: "changed_os",
-          payload: { ip, before: bob, after: cob },
-        }),
-      );
+      specs.push(spec("changed_os", current.id, { ip, before: bob, after: cob }));
     }
 
     const cp = tcpOpenPortSet(current);
@@ -161,20 +127,12 @@ function detectAlertsForScan(scanId) {
       const added = [...cp].filter((p) => !bp.has(p)).sort((a, b) => a - b);
       const removed = [...bp].filter((p) => !cp.has(p)).sort((a, b) => a - b);
       if (added.length || removed.length) {
-        created.push(
-          db.createAlert({
-            scan_id: scanId,
-            host_id: current.id,
-            cidr: scan.cidr,
-            type: "changed_ports",
-            payload: { ip, added, removed },
-          }),
-        );
+        specs.push(spec("changed_ports", current.id, { ip, added, removed }));
       }
     }
   }
 
-  return created;
+  return specs.length ? db.createAlerts(specs) : [];
 }
 
 // Aggregate counts per alert type for the notifier baseline_diff payload.

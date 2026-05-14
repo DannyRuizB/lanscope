@@ -153,11 +153,7 @@ async function loadHistory() {
     // Schedule rows reuse host_count from the matching scan in history, so
     // re-render them whenever history changes.
     if (schedules.length) renderSchedules();
-    // v0.13.0 — any history change (new scan, delete, clear) may add or remove
-    // alerts (ON DELETE CASCADE). Refresh the badge counter. Guarded with
-    // typeof because the alerts module evaluates after the boot call to
-    // loadHistory(); typeof avoids TDZ on first invocation.
-    if (typeof refreshAlertBadge === "function") refreshAlertBadge();
+    refreshAlertBadge();
   } catch (e) {
     console.error("loadHistory failed:", e);
   }
@@ -2558,11 +2554,6 @@ document.addEventListener("keydown", (e) => {
   }
 });
 
-loadBaselines();
-loadHistory();
-loadSchedules();
-loadChannels();
-
 // Demo mode (v0.9.0): the server tells us whether this is a read-only demo
 // deploy. If so, expose the warning banner and disable controls that would
 // otherwise produce 403s when the user tries them.
@@ -2821,12 +2812,9 @@ function renderTimelineCharts(data) {
 
 setupTimeline();
 
-// ===== Alerts (v0.13.0) =====
-// Sidebar entry opens a modal that lists baseline-divergence alerts. The
-// badge is the canonical unack count and is refreshed at boot, after every
-// scan / ack / delete / clear-history, and on a 30s timer to catch scheduled
-// scans that fire while the tab is open. List filtering is purely additive:
-// scope (unacked/all) is a single toggle, types are independent checkboxes.
+// ===== Alerts =====
+// The 30s polling timer is the only way to pick up scheduled-scan alerts
+// that fire while the tab is open without a user action.
 
 const ALERT_TYPE_LABELS = {
   appeared: "appeared",
@@ -2850,8 +2838,6 @@ const alertsState = {
   scope: "unacked",
   types: new Set(),
 };
-
-let alertCountTimer = null;
 
 function fmtAlertDetail(alert) {
   const p = alert.payload || {};
@@ -2884,19 +2870,14 @@ function fmtAlertDetail(alert) {
   }
 }
 
-function formatAlertTime(ts) {
-  if (!ts) return "";
-  const d = new Date(ts);
-  return d.toLocaleString();
-}
-
+let lastBadgeCount = -1;
 async function refreshAlertBadge() {
-  // loadHistory() fires this on its boot pass before this module's const
-  // initializers run; typeof avoids a TDZ ReferenceError.
-  if (typeof alertsEls === "undefined" || !alertsEls?.badge) return;
+  if (!alertsEls.badge) return;
   try {
     const res = await fetchJson("/api/alerts/count");
     const n = res?.count ?? 0;
+    if (n === lastBadgeCount) return;
+    lastBadgeCount = n;
     if (n > 0) {
       alertsEls.badge.hidden = false;
       alertsEls.badge.textContent = n > 99 ? "99+" : String(n);
@@ -2956,7 +2937,7 @@ function renderAlerts(alerts) {
 function renderAlertRow(a) {
   const acked = a.acknowledged_at != null;
   const detail = fmtAlertDetail(a);
-  const created = formatAlertTime(a.created_at);
+  const created = fmtTime(a.created_at);
   const typeLabel = ALERT_TYPE_LABELS[a.type] || a.type;
   return `
     <li class="alert-row${acked ? " acked" : ""}" data-id="${a.id}">
@@ -3030,9 +3011,30 @@ function setupAlerts() {
       closeAlertsModal();
     }
   });
+  let pollTimer = null;
+  const startPolling = () => {
+    if (pollTimer) return;
+    pollTimer = setInterval(refreshAlertBadge, 30000);
+  };
+  const stopPolling = () => {
+    if (!pollTimer) return;
+    clearInterval(pollTimer);
+    pollTimer = null;
+  };
+  document.addEventListener("visibilitychange", () => {
+    if (document.hidden) stopPolling();
+    else { refreshAlertBadge(); startPolling(); }
+  });
   refreshAlertBadge();
-  if (alertCountTimer) clearInterval(alertCountTimer);
-  alertCountTimer = setInterval(refreshAlertBadge, 30000);
+  if (!document.hidden) startPolling();
 }
 
 setupAlerts();
+
+// Boot fetches. Kept at the bottom so every module-level const above
+// (els, alertsEls, schedule/channel helpers, …) is already initialized
+// by the time any of these async calls invokes a function that touches them.
+loadBaselines();
+loadHistory();
+loadSchedules();
+loadChannels();
