@@ -1,0 +1,95 @@
+name: Smoke test
+
+# Fast sanity check on every push and PR to main: parses every server-side
+# JS file, builds the image, runs it, and probes the read-only endpoints.
+# Catches a broken Dockerfile, a typo in src/, or an endpoint regression
+# before the v* tag fires the heavier multi-arch release workflow.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Setup Node 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Syntax check JS files
+        run: |
+          set -e
+          while IFS= read -r f; do
+            node --check "$f"
+          done < <(find src -name "*.js")
+          echo "All src/**/*.js parsed OK"
+
+      - name: Build image
+        run: docker build -t lanscope:smoke .
+
+      - name: Start container
+        run: |
+          docker run -d --name lanscope-smoke -p 3030:3030 lanscope:smoke
+          for i in $(seq 1 30); do
+            if curl -fsS http://localhost:3030/api/config > /dev/null 2>&1; then
+              echo "Container responding after ${i}s"
+              exit 0
+            fi
+            sleep 1
+          done
+          echo "Container did not respond within 30s"
+          docker logs lanscope-smoke
+          exit 1
+
+      - name: Probe API endpoints
+        run: |
+          set -e
+
+          echo "--- /api/config ---"
+          curl -fsS http://localhost:3030/api/config | tee /tmp/config.json
+          echo
+          grep -q '"demoMode":false' /tmp/config.json
+
+          echo "--- /api/scans ---"
+          curl -fsS http://localhost:3030/api/scans | tee /tmp/scans.json
+          echo
+          grep -q '"scans":\[\]' /tmp/scans.json
+
+          echo "--- /api/alerts/count ---"
+          curl -fsS http://localhost:3030/api/alerts/count | tee /tmp/alerts.json
+          echo
+          grep -q '"count":0' /tmp/alerts.json
+
+          echo "--- /api/schedules ---"
+          curl -fsS http://localhost:3030/api/schedules | grep -q '"schedules":'
+
+          echo "--- /api/notifications ---"
+          curl -fsS http://localhost:3030/api/notifications | grep -q '"channels":'
+
+          echo "--- /api/inventory ---"
+          curl -fsS http://localhost:3030/api/inventory | grep -q '"baselines":'
+
+          echo "--- GET / ---"
+          curl -fsS -o /tmp/index.html -w "code=%{http_code}\n" http://localhost:3030/
+          grep -q '<title>LanScope' /tmp/index.html
+
+          echo "All endpoints responded with expected shape"
+
+      - name: Container logs on failure
+        if: failure()
+        run: docker logs lanscope-smoke
+
+      - name: Cleanup
+        if: always()
+        run: docker rm -f lanscope-smoke || true
