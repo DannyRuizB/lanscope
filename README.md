@@ -1,10 +1,15 @@
 # LanScope
 
+[![License: MIT](https://img.shields.io/github/license/DannyRuizB/lanscope?color=blue)](LICENSE)
+[![Latest release](https://img.shields.io/github/v/release/DannyRuizB/lanscope?sort=semver&color=22c55e)](https://github.com/DannyRuizB/lanscope/releases/latest)
+[![Docker image](https://img.shields.io/badge/ghcr.io-lanscope-2496ed?logo=docker&logoColor=white)](https://github.com/DannyRuizB/lanscope/pkgs/container/lanscope)
+[![Live demo](https://img.shields.io/badge/demo-lanscope--demo.onrender.com-22c55e)](https://lanscope-demo.onrender.com)
+
 > Visual LAN scanner for your home network or homelab — point it at a CIDR, see who's there.
 
 ![LanScope topology graph of a /24 scan, dark theme, gateway at the centre with concentric rings of hosts by relevance](screenshots/screenshot.png)
 
-🟢 Stable — v0.12.0.
+🟢 Stable — v0.13.1.
 
 ---
 
