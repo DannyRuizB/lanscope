@@ -37,7 +37,7 @@ It is **not** a security scanner — no exploit detection, no vulnerability data
 
 ### Requirements
 
-- **Linux host** with the LAN you want to scan attached directly (Wi-Fi or Ethernet). LanScope uses `network_mode: host`, which on Docker Desktop for macOS / Windows would only see the Docker VM's internal network, not your real LAN. See the [FAQ](#faq) for the macOS / Windows situation.
+- **Linux host** with the LAN you want to scan attached directly (Wi-Fi or Ethernet). LanScope uses `network_mode: host`, which on Docker Desktop for macOS / Windows would only see the Docker VM's internal network, not your real LAN. **Windows 11 22H2+** users can run LanScope via WSL2 with mirrored networking — see [Windows (via WSL2)](#windows-via-wsl2). macOS still requires a Linux VM with a bridged adapter; see the [FAQ](#faq).
 - **Docker Engine + Docker Compose v2** installed. `docker --version` should print 24.x or newer.
 - **A few minutes**. No build is needed — the prebuilt multi-arch image lives on GHCR (`linux/amd64` + `linux/arm64`, so Raspberry Pi 4 / 5 work out of the box).
 
@@ -94,6 +94,51 @@ xdg-open http://localhost:3030    # or just point your browser at it
 ```
 
 You should land on the empty LanScope dashboard. Type a CIDR in the **Target** input (e.g. `192.168.1.0/24`) and hit **Scan now**. Hosts that respond to the ping sweep appear in the table with their IP, MAC, vendor and reverse-DNS hostname. Every scan is saved in the **History** sidebar.
+
+### Windows (via WSL2)
+
+LanScope runs on Windows 11 (22H2 or newer) via **WSL2 with mirrored networking** — a WSL2 distro shares the host's network adapters directly, so `nmap` inside the container sees your real LAN. Docker Desktop is *not* the right path for this even with its WSL2 backend, because it wraps containers in its own internal subnet and `network_mode: host` only exposes that. Install Docker Engine inside the WSL distro instead.
+
+**1. Install WSL2 + Ubuntu** (in an elevated PowerShell):
+
+```powershell
+wsl --install -d Ubuntu
+```
+
+Reboot if asked, then open the Ubuntu terminal and finish first-run setup (create a user, set a password).
+
+**2. Turn on mirrored networking.** Create `%USERPROFILE%\.wslconfig` with:
+
+```ini
+[wsl2]
+networkingMode=mirrored
+```
+
+Then restart WSL from PowerShell:
+
+```powershell
+wsl --shutdown
+```
+
+The next time you open Ubuntu, run `ip a` — you should see the same adapters and IP addresses as `ipconfig /all` on Windows. If you only see `eth0` with a `172.x.x.x` address, mirrored isn't active: check that `wsl --version` reports `WSL 2.0.0` or newer and that you're on Windows 11 22H2+.
+
+**3. Install Docker Engine inside the WSL distro** (not Docker Desktop):
+
+```bash
+curl -fsSL https://get.docker.com | sh
+sudo usermod -aG docker $USER
+# close the WSL terminal and reopen it so the group takes effect
+```
+
+**4. Continue with the Linux quickstart above** from inside the WSL terminal: create `~/lanscope/`, drop in the `docker-compose.yml`, run `docker compose up -d`.
+
+**5. Open the UI** from your Windows browser at `http://localhost:3030`. Mirrored networking shares localhost between Windows and WSL, so no port forwarding is needed.
+
+Caveats specific to this path:
+
+- Mirrored networking is a Windows 11 22H2+ feature. On older Windows there is no clean way to expose the real LAN to a container — the only fallback is a full Linux VM in Hyper-V with a bridged adapter.
+- MAC addresses may be empty for some hosts depending on whether the Windows network adapter exposes ARP for that segment (typical with some Wi-Fi drivers). It's the same `nmap` limitation as on Linux past a router, just triggered by a different cause.
+- Docker Desktop running alongside is fine for unrelated work — just don't use its compose integration for LanScope. Install Docker Engine inside the WSL distro and run `docker compose` from there.
 
 ### Something went wrong?
 
@@ -169,7 +214,7 @@ OS sub-row and ports sub-row are independent — you can have both expanded for 
 
 ### Caveats
 
-- **Linux only.** `network_mode: host` doesn't behave the same on Docker Desktop for macOS / Windows: the container would only see Docker's internal network, not your real LAN.
+- **Linux-first**, plus Windows via WSL2 mirrored networking (see [Windows (via WSL2)](#windows-via-wsl2)). On macOS, `network_mode: host` only exposes the Docker VM's internal network, not your real LAN — run inside a Linux VM with a bridged adapter for real scanning.
 - **Same subnet.** LanScope scans whatever subnet the host machine can reach. To scan a remote network you'd need a VPN or to run LanScope on a host inside that network.
 - **Not a security scanner.** No exploit detection, no CVE matching. If you need that, use Nessus, OpenVAS or similar.
 - **Large port ranges with mostly-closed ports show only the interesting ones.** When more than 25 ports share the same state (e.g. `closed`), nmap collapses them into an `<extraports>` summary in its XML output and only emits individual `<port>` entries for the ones that stand out (typically `open`). LanScope currently shows just the individual ports, so a `Range` of `1-65535` against a sparsely-listening host may render as a short list. The handful of *accessible* ports you do see are still accurate.
@@ -212,7 +257,10 @@ LanScope's direction: cover as many `nmap` options as possible behind a visual U
 On a network you own, manage, or have explicit permission to scan — yes. LanScope is built for your home LAN, your homelab, or a customer network where you've been hired to inventory devices. Scanning a network you don't have permission to scan is illegal in most jurisdictions and is **not** what this tool is for. The project deliberately ships with NSE limited to `default` / `safe` (no `vuln` / `exploit` / `brute`) so it can't be twisted into a remote exploitation tool, but you can still get yourself into trouble by pointing it at someone else's network. Don't.
 
 ### Does it work on macOS or Windows?
-Not for real scanning. On Docker Desktop (macOS / Windows) the container runs inside a Linux VM, and `network_mode: host` only exposes that VM's network — not your real LAN. You can run LanScope to play with the UI, but it'll only see the VM's tiny internal subnet. For real use, run it on a Linux host (or a Linux VM with bridged networking) on the same LAN you want to scan.
+
+**Windows** — yes, via **WSL2 with mirrored networking** on Windows 11 22H2 or newer. See the [Windows quickstart](#windows-via-wsl2). A WSL2 distro shares the host's network adapters directly, so `nmap` inside the container sees your real LAN end-to-end. Docker Desktop is *not* the right path even with its WSL2 backend — it wraps containers in its own internal subnet and `network_mode: host` only exposes that. Install Docker Engine inside the WSL distro instead.
+
+**macOS** — not for real scanning. Docker Desktop on macOS runs containers inside a Linux VM with no LAN-bridged option, and there's no WSL2-equivalent path. You can run LanScope to play with the UI, but it'll only see the VM's internal subnet. For real use on a Mac, run LanScope inside a Linux VM with a bridged network adapter on the same LAN you want to scan.
 
 ### Does it need root on the host?
 No. `nmap` inside the container runs as the unprivileged `node` user; the Dockerfile uses `setcap cap_net_raw,cap_net_admin,cap_net_bind_service+eip` on the `nmap` binary so it can craft raw packets without root. What the *container* needs is the two capabilities — `NET_RAW` and `NET_ADMIN` — declared in `cap_add`. Compose handles that.
