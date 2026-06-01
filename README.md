@@ -27,6 +27,15 @@ Most LAN-scanning tools are command-line only or feel stuck in 2005. LanScope is
 
 It is **not** a security scanner — no exploit detection, no vulnerability database. The goal is *visibility*: who's on your network, what they expose, what changed since last time.
 
+## What this demonstrates
+
+A practical systems-and-networking project. Skills on display:
+
+- **Networking** — host discovery and service/port scanning with `nmap`, CIDR/subnet targeting, network topology mapping and scan-to-scan diffing.
+- **Containers & deployment** — Docker with `network_mode: host` and `NET_RAW` / `NET_ADMIN` capabilities, multi-arch images (amd64/arm64) published to GHCR, `docker-compose`.
+- **Backend & persistence** — a web service on top of `nmap` with scan history in SQLite and scheduled recurring sweeps.
+- **Ops** — read-only public demo deployed on Render's free tier.
+
 ## Scope
 
 - Designed for **your own LAN** (home network, homelab, small office). Scan only networks you have permission to scan.
@@ -361,6 +370,10 @@ If you suspect actual corruption, run `PRAGMA integrity_check;` against the same
 - **Frontend**: vanilla HTML / CSS / JS, no build step.
 - **Scanner**: shells out to `nmap` and parses the XML output.
 - **Distribution**: Docker image built from `node:20-alpine` plus the Alpine `nmap` package.
+
+## About
+
+Built by **[Danny Ruiz](https://github.com/DannyRuizB)** — systems & network administrator (ASIR, *Administración de Sistemas Informáticos en Red*). [More projects →](https://github.com/DannyRuizB?tab=repositories)
 
 ## License
 
