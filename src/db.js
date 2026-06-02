@@ -668,8 +668,8 @@ function recordScheduleRun(id, { scan_id = null, status, error = null }) {
 
 function parseChannelRow(row) {
   if (!row) return null;
-  let config = null;
-  let events = [];
+  let config;
+  let events;
   try {
     config = row.config ? JSON.parse(row.config) : null;
   } catch {
@@ -823,7 +823,7 @@ const ALERT_TYPES = Object.freeze([
 
 function parseAlertRow(row) {
   if (!row) return null;
-  let payload = null;
+  let payload;
   try {
     payload = row.payload ? JSON.parse(row.payload) : null;
   } catch {

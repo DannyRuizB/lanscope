@@ -1031,19 +1031,6 @@ function osBucketLabel(host) {
   return OS_LABELS[osBucketKey(host)];
 }
 
-function ipInCidr(ip, cidr) {
-  const [base] = cidr.split("/");
-  const baseParts = base.split(".").map((x) => parseInt(x, 10));
-  const ipParts = ip.split(".").map((x) => parseInt(x, 10));
-  return (
-    baseParts.length === 4 &&
-    ipParts.length === 4 &&
-    baseParts[0] === ipParts[0] &&
-    baseParts[1] === ipParts[1] &&
-    baseParts[2] === ipParts[2]
-  );
-}
-
 function findGateway(scan) {
   const hosts = (scan.hosts || []).filter((h) => h.status === "up");
   if (!hosts.length) return null;
@@ -1844,7 +1831,7 @@ themeBtn?.addEventListener("click", () => {
 els.refresh.addEventListener("click", loadHistory);
 
 els.clearHistory?.addEventListener("click", async () => {
-  let scans = [];
+  let scans;
   try {
     const res = await fetchJson("/api/scans?limit=200");
     scans = res.scans || [];

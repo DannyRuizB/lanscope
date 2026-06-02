@@ -4,7 +4,8 @@
   "description": "Visual LAN scanner — point it at a CIDR, see who's there.",
   "main": "src/server.js",
   "scripts": {
-    "start": "node src/server.js"
+    "start": "node src/server.js",
+    "lint": "eslint 'src/**/*.js'"
   },
   "engines": {
     "node": ">=20"
@@ -20,5 +21,10 @@
   "repository": {
     "type": "git",
     "url": "git+https://github.com/DannyRuizB/lanscope.git"
+  },
+  "devDependencies": {
+    "@eslint/js": "^10.0.1",
+    "eslint": "^10.4.1",
+    "globals": "^17.6.0"
   }
 }

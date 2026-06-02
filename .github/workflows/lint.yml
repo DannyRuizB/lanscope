@@ -1,0 +1,32 @@
+name: lint
+
+# Static analysis on every push and pull request: ESLint over the Node backend
+# (CommonJS) and the browser code in src/public. Complements the smoke test,
+# which builds the image and probes endpoints. No host is touched here.
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  eslint:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Set up Node
+        uses: actions/setup-node@v5
+        with:
+          node-version: "22"
+
+      # This repo does not commit a lockfile (see .gitignore), so install
+      # rather than `npm ci`.
+      - name: Install dependencies
+        run: npm install
+
+      - name: ESLint
+        run: npm run lint
