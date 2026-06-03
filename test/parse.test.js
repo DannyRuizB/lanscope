@@ -98,6 +98,44 @@ test('parsePorts decodes nmap numeric XML entities into real newlines', () => {
   assert.ok(!ssh.scripts[0].output.includes('&#x'));
 });
 
+test('parsePorts joins extrainfo / ostype / cpe into one extra field', () => {
+  const xml = `<nmaprun><host><address addr="10.0.0.1" addrtype="ipv4"/><ports>
+    <port protocol="tcp" portid="443">
+      <state state="open" reason="syn-ack"/>
+      <service name="https" product="nginx" version="1.27" extrainfo="ssl" ostype="Linux" cpe="cpe:/a:nginx:nginx"/>
+    </port>
+  </ports></host></nmaprun>`;
+  assert.equal(S.parsePorts(xml)[0].extra, 'ssl · Linux · cpe:/a:nginx:nginx');
+});
+
+test('parsePorts handles UDP ports and composite states', () => {
+  const xml = `<nmaprun><host><address addr="1.1.1.1" addrtype="ipv4"/><ports>
+    <port protocol="udp" portid="53">
+      <state state="open|filtered" reason="no-response"/>
+      <service name="domain"/>
+    </port>
+  </ports></host></nmaprun>`;
+  const [p] = S.parsePorts(xml);
+  assert.equal(p.protocol, 'udp');
+  assert.equal(p.state, 'open|filtered');
+  assert.equal(p.service, 'domain');
+});
+
+test('parseOsMatches keeps every match and tolerates a missing osclass', () => {
+  const xml = `<nmaprun><host><os>
+    <osmatch name="Linux 5.4" accuracy="98">
+      <osclass type="general purpose" vendor="Linux" osfamily="Linux" osgen="5.X"/>
+    </osmatch>
+    <osmatch name="Linux 4.x" accuracy="90"/>
+  </os></host></nmaprun>`;
+  const m = S.parseOsMatches(xml);
+  assert.equal(m.length, 2);
+  assert.equal(m[0].accuracy, 98);
+  assert.equal(m[0].family, 'Linux');
+  assert.equal(m[1].accuracy, 90);
+  assert.equal(m[1].family, null); // second match has no osclass → null fields
+});
+
 test('parseHostScripts pulls host-level NSE script output', () => {
   const xml = `<nmaprun><host><hostscript>
     <script id="smb-os-discovery" output="OS: Windows&#xa;Name: PC"/>

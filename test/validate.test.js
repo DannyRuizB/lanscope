@@ -74,3 +74,18 @@ test('validatePortsSpec handles default, top-N and range, rejecting bad specs', 
   assert.match(S.validatePortsSpec({ mode: 'range', value: '80-1' }).error, /invalid port token/);
   assert.match(S.validatePortsSpec({ mode: 'bogus' }).error, /top.*range/);
 });
+
+test('validatePortsSpec accepts single-port / multi-token ranges and a stringified top-N', () => {
+  assert.deepEqual(S.validatePortsSpec({ mode: 'range', value: '443' }), {
+    args: ['-p', '443'],
+    error: null,
+  });
+  assert.deepEqual(S.validatePortsSpec({ mode: 'range', value: '22,80,8000-8100' }), {
+    args: ['-p', '22,80,8000-8100'],
+    error: null,
+  });
+  assert.deepEqual(S.validatePortsSpec({ mode: 'top', value: '50' }), {
+    args: ['--top-ports', '50'],
+    error: null,
+  });
+});
