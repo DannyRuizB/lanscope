@@ -75,6 +75,33 @@ test('validatePortsSpec handles default, top-N and range, rejecting bad specs', 
   assert.match(S.validatePortsSpec({ mode: 'bogus' }).error, /top.*range/);
 });
 
+test('validateScripts de-duplicates categories', () => {
+  assert.deepEqual(S.validateScripts(['default', 'safe', 'default']), {
+    args: ['--script=default,safe'],
+    error: null,
+  });
+});
+
+test('validateDiscovery de-dupes ping types, and skipPing wins over them', () => {
+  assert.deepEqual(S.validateDiscovery({ pingTypes: ['PE', 'PE', 'PS'] }), {
+    args: ['-PE', '-PS'],
+    error: null,
+  });
+  assert.deepEqual(S.validateDiscovery({ skipPing: false, pingTypes: ['PA'] }), {
+    args: ['-PA'],
+    error: null,
+  });
+  assert.deepEqual(S.validateDiscovery({ skipPing: true, pingTypes: ['PE'] }), {
+    args: ['-Pn'],
+    error: null,
+  });
+});
+
+test('validateCidr accepts the /0 and /32 boundaries', () => {
+  assert.equal(S.validateCidr('0.0.0.0/0'), null);
+  assert.equal(S.validateCidr('192.168.1.1/32'), null);
+});
+
 test('validatePortsSpec accepts single-port / multi-token ranges and a stringified top-N', () => {
   assert.deepEqual(S.validatePortsSpec({ mode: 'range', value: '443' }), {
     args: ['-p', '443'],

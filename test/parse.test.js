@@ -65,6 +65,22 @@ test('parseHosts returns [] for an empty run', () => {
   assert.deepEqual(S.parseHosts('<nmaprun></nmaprun>'), []);
 });
 
+test('parseHosts takes the first hostname and tolerates a vendorless MAC', () => {
+  const xml = `<nmaprun><host>
+    <status state="up" reason="arp"/>
+    <address addr="10.0.0.7" addrtype="ipv4"/>
+    <address addr="DE:AD:BE:EF:00:01" addrtype="mac"/>
+    <hostnames>
+      <hostname name="a.local" type="PTR"/>
+      <hostname name="b.local" type="user"/>
+    </hostnames>
+  </host></nmaprun>`;
+  const [h] = S.parseHosts(xml);
+  assert.equal(h.hostname, 'a.local');
+  assert.equal(h.mac, 'DE:AD:BE:EF:00:01');
+  assert.equal(h.vendor, null);
+});
+
 test('parsePorts normalizes ports, service detail and script output', () => {
   assert.deepEqual(S.parsePorts(PORTS_XML), [
     {
