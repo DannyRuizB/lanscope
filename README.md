@@ -371,6 +371,17 @@ If you suspect actual corruption, run `PRAGMA integrity_check;` against the same
 - **Scanner**: shells out to `nmap` and parses the XML output.
 - **Distribution**: Docker image built from `node:20-alpine` plus the Alpine `nmap` package.
 
+## Tests
+
+A [`node:test`](https://nodejs.org/api/test.html) suite covers the pure parts of the scanner — the input validators that guard everything reaching the nmap argv (`validateCidr`, `validatePortsSpec`, `validateDiscovery`, …) and the nmap-XML parsers (`parseHosts`, `parsePorts`, `parseHostScripts`, `parseOsMatches`), fed hand-written `nmap -oX` fixtures. No nmap binary, no network, no host touched — so it runs anywhere, including CI.
+
+```bash
+npm install   # dev deps
+npm test      # node --test over test/*.test.js
+```
+
+CI runs ESLint **and** this suite on every push and pull request (the separate smoke workflow exercises the live container).
+
 ## About
 
 Built by **[Danny Ruiz](https://github.com/DannyRuizB)** — systems & network administrator (ASIR, *Administración de Sistemas Informáticos en Red*). [More projects →](https://github.com/DannyRuizB?tab=repositories)

@@ -1,8 +1,9 @@
 name: lint
 
-# Static analysis on every push and pull request: ESLint over the Node backend
-# (CommonJS) and the browser code in src/public. Complements the smoke test,
-# which builds the image and probes endpoints. No host is touched here.
+# Static checks on every push and pull request: ESLint over the Node backend
+# (CommonJS) and the browser code in src/public, then the node:test suite over
+# the pure scanner helpers. Complements the smoke test, which builds the image
+# and probes endpoints. No host or network is touched here.
 on:
   push:
     branches: [main]
@@ -30,3 +31,6 @@ jobs:
 
       - name: ESLint
         run: npm run lint
+
+      - name: Tests
+        run: npm test

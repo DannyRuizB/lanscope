@@ -43,4 +43,14 @@ module.exports = [
     },
     rules: sharedRules,
   },
+  {
+    // node:test suite over the pure scanner helpers (CommonJS, Node).
+    files: ['test/**/*.js'],
+    languageOptions: {
+      ecmaVersion: 'latest',
+      sourceType: 'commonjs',
+      globals: { ...globals.node },
+    },
+    rules: sharedRules,
+  },
 ];
