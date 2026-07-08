@@ -1,4 +1,4 @@
-FROM node:20-alpine
+FROM node:24-alpine
 
 # OCI image labels — show up on the GHCR package page and in `docker inspect`.
 LABEL org.opencontainers.image.title="LanScope"
