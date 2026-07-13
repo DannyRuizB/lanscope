@@ -20,6 +20,7 @@ const {
   validateChannelConfig,
   validateChannelEvents,
 } = require("./http-validators");
+const { scanToCsv, exportFilename } = require("./export");
 const { executeCidrScan } = require("./runner");
 const scheduler = require("./scheduler");
 const notifier = require("./notifier");
@@ -67,6 +68,24 @@ app.get("/api/scans/:id", (req, res) => {
   const scan = db.getScan(id);
   if (!scan) return res.status(404).json({ error: "scan not found" });
   res.json(scan);
+});
+
+// v1.1.0 — export a scan as a file. GET on purpose: it works in the
+// read-only public demo too, and the browser can download it with a plain
+// anchor click (no fetch/blob dance).
+app.get("/api/scans/:id/export", (req, res) => {
+  const id = parseInt(req.params.id, 10);
+  if (!Number.isInteger(id) || id <= 0) return res.status(400).json({ error: "invalid id" });
+  const format = req.query.format || "csv";
+  if (format !== "csv" && format !== "json") {
+    return res.status(400).json({ error: "invalid format, use csv|json" });
+  }
+  const scan = db.getScan(id);
+  if (!scan) return res.status(404).json({ error: "scan not found" });
+
+  res.setHeader("Content-Disposition", `attachment; filename="${exportFilename(scan, format)}"`);
+  if (format === "json") return res.json(scan);
+  res.type("text/csv; charset=utf-8").send(scanToCsv(scan));
 });
 
 app.delete("/api/scans/:id", (req, res) => {
