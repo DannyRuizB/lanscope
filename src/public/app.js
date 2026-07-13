@@ -47,6 +47,9 @@ const els = {
   diffExit: $("#diff-exit"),
   baselineBtn: $("#baseline-btn"),
   timelineBtn: $("#timeline-btn"),
+  exportWrap: $("#export-wrap"),
+  exportBtn: $("#export-btn"),
+  exportList: $("#export-list"),
   demoBanner: $("#demo-banner"),
 };
 
@@ -1445,6 +1448,7 @@ async function loadBaselines() {
 
 function refreshBaselineButton() {
   if (els.timelineBtn) els.timelineBtn.hidden = !lastScan;
+  if (els.exportBtn) els.exportBtn.hidden = !lastScan;
   if (!els.baselineBtn) return;
   if (!lastScan) {
     els.baselineBtn.hidden = true;
@@ -1984,6 +1988,24 @@ els.compareList?.addEventListener("click", (e) => {
   if (!Number.isNaN(scanId)) setCompareBase(scanId);
 });
 
+// Export dropdown (v1.1.0). The download itself is a plain GET the browser
+// handles natively — a temporary anchor click, no fetch/blob juggling.
+els.exportBtn?.addEventListener("click", (e) => {
+  e.stopPropagation();
+  if (els.exportList) els.exportList.hidden = !els.exportList.hidden;
+});
+
+els.exportList?.addEventListener("click", (e) => {
+  const item = e.target.closest(".compare-item");
+  if (!item || !lastScan) return;
+  const a = document.createElement("a");
+  a.href = `/api/scans/${lastScan.id}/export?format=${item.dataset.format}`;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  els.exportList.hidden = true;
+});
+
 els.diffExit?.addEventListener("click", exitDiff);
 
 els.baselineBtn?.addEventListener("click", toggleBaseline);
@@ -1993,6 +2015,13 @@ document.addEventListener("click", (e) => {
   if (els.compareList?.hidden) return;
   if (!els.compareWrap.contains(e.target)) {
     els.compareList.hidden = true;
+  }
+});
+
+document.addEventListener("click", (e) => {
+  if (els.exportList?.hidden !== false) return;
+  if (!els.exportWrap?.contains(e.target)) {
+    els.exportList.hidden = true;
   }
 });
 

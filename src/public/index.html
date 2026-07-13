@@ -232,6 +232,13 @@
               <button id="bulk-osscan" class="ghost small" title="Run OS fingerprint on every host that hasn't been scanned yet">Scan all OS</button>
               <button id="bulk-udpscan" class="ghost small" title="Run UDP scan on every host that hasn't been scanned yet — slow!">Scan all UDP</button>
               <button id="timeline-btn" class="ghost small" hidden title="Open a per-CIDR timeline aggregating all scans of this network">📈 Timeline</button>
+              <div class="compare-wrap" id="export-wrap">
+                <button type="button" id="export-btn" class="ghost small" hidden title="Download this scan as a file">⬇ Export</button>
+                <ul id="export-list" class="compare-list" hidden>
+                  <li class="compare-item" data-format="csv" title="One row per host — opens in Excel / LibreOffice">CSV — hosts table</li>
+                  <li class="compare-item" data-format="json" title="Full scan data: hosts, ports, scripts, OS matches">JSON — full scan</li>
+                </ul>
+              </div>
               <button id="baseline-btn" class="ghost small" hidden title="Mark this scan as the baseline for its CIDR — future scans of the same CIDR will be compared against it automatically">★ Set as baseline</button>
               <button id="delete-scan" class="ghost danger small" hidden title="Delete this scan">Delete</button>
             </div>
