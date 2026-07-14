@@ -21,6 +21,7 @@ const {
   validateChannelEvents,
 } = require("./http-validators");
 const { scanToCsv, exportFilename } = require("./export");
+const { sendWake } = require("./wol");
 const { executeCidrScan } = require("./runner");
 const scheduler = require("./scheduler");
 const notifier = require("./notifier");
@@ -223,6 +224,26 @@ app.post("/api/hosts/:id/osscan", async (req, res) => {
       osscanned_at: refreshed.osscanned_at,
       os_matches: saved,
     });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// v1.2.0 — Wake-on-LAN. Unlike the scan endpoints this does NOT require the
+// host to be up: waking a sleeping/disappeared device is the whole point. It
+// does require a MAC — the magic packet is addressed to the NIC, not the IP.
+app.post("/api/hosts/:id/wake", async (req, res) => {
+  const id = parseInt(req.params.id, 10);
+  if (!Number.isInteger(id) || id <= 0) return res.status(400).json({ error: "invalid id" });
+  const host = db.getHost(id);
+  if (!host) return res.status(404).json({ error: "host not found" });
+  if (!host.mac) {
+    return res.status(400).json({ error: "host has no MAC address — Wake-on-LAN needs one" });
+  }
+
+  try {
+    const result = await sendWake(host.mac);
+    res.json({ host_id: id, ip: host.ip, mac: host.mac, sent: true, ...result });
   } catch (e) {
     res.status(500).json({ error: e.message });
   }

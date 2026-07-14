@@ -1901,3 +1901,15 @@ li.is-baseline .scan-cidr {
   }
   .alert-actions { justify-content: flex-end; }
 }
+
+/* v1.2.0 — Wake-on-LAN button in the MAC cell */
+.mac-cell { white-space: nowrap; }
+.wake-btn {
+  margin-left: 8px;
+  padding: 1px 7px;
+  line-height: 1.3;
+}
+.wake-btn:disabled {
+  opacity: 0.75;
+  cursor: default;
+}

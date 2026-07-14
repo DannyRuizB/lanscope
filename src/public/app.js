@@ -258,6 +258,15 @@ function renderPortsButton(host) {
   return `<button class="ghost small portscan-btn" data-host-id="${host.id}">${portsButtonLabel(host)}</button>`;
 }
 
+// Wake-on-LAN is addressed to the NIC, so the button only renders when the
+// scan captured a MAC. It is most useful on a *disappeared* host (wake it
+// back up), but it stays available on live rows too — sending a magic packet
+// to a machine that is already awake is harmless.
+function renderWakeButton(host) {
+  if (!host.mac || !host.id) return "";
+  return `<button class="ghost small wake-btn" data-host-id="${host.id}" title="Wake this device — broadcast a Wake-on-LAN magic packet to ${escapeHtml(host.mac)}" aria-label="Send Wake-on-LAN packet to ${escapeHtml(host.mac)}">⏻</button>`;
+}
+
 function udpStateClass(state) {
   if (state === "open") return "responsive";
   if (state === "open|filtered") return "unknown";
@@ -335,7 +344,7 @@ function renderDisappearedRow(h) {
   return `
     <tr class="host-row diff-disappeared" data-disappeared-ip="${escapeHtml(h.ip)}">
       <td class="ip">${escapeHtml(h.ip)}</td>
-      <td class="${h.mac ? "" : "muted"}">${escapeHtml(h.mac) || "—"}</td>
+      <td class="${h.mac ? "mac-cell" : "muted"}">${escapeHtml(h.mac) || "—"}${renderWakeButton(h)}</td>
       <td class="${h.vendor ? "" : "muted"}">${escapeHtml(h.vendor) || "—"}</td>
       <td class="${h.hostname ? "" : "muted"}">${escapeHtml(h.hostname) || "—"}</td>
       <td class="muted">${escapeHtml(h.reason) || "—"}</td>
@@ -366,7 +375,7 @@ function renderHostRow(h) {
   return `
     <tr class="host-row${rowClass}" data-host-id="${h.id}">
       <td class="ip">${escapeHtml(h.ip)}${reasonBadge}</td>
-      <td class="${h.mac ? "" : "muted"}">${escapeHtml(h.mac) || "—"}</td>
+      <td class="${h.mac ? "mac-cell" : "muted"}">${escapeHtml(h.mac) || "—"}${renderWakeButton(h)}</td>
       <td class="${h.vendor ? "" : "muted"}">${escapeHtml(h.vendor) || "—"}</td>
       <td class="${h.hostname ? "" : "muted"}">${escapeHtml(h.hostname) || "—"}</td>
       <td class="muted">${escapeHtml(h.reason) || "—"}</td>
@@ -655,6 +664,7 @@ function renderScan(scan) {
   attachPortscanHandlers();
   attachOsscanHandlers();
   attachUdpscanHandlers();
+  attachWakeHandlers();
   updateBulkButtons();
 
   if (viewMode === "graph") {
@@ -811,6 +821,34 @@ function attachUdpscanHandlers() {
   els.body.querySelectorAll(".udpscan-btn").forEach((btn) => {
     btn.addEventListener("click", () => onUdpscanClick(parseInt(btn.dataset.hostId, 10)));
   });
+}
+
+function attachWakeHandlers() {
+  els.body.querySelectorAll(".wake-btn").forEach((btn) => {
+    btn.addEventListener("click", () => onWakeClick(btn));
+  });
+}
+
+// The packet is fire-and-forget (nothing acks a WOL broadcast), so the only
+// honest feedback is "sent" — whether the device actually wakes shows up in
+// the next scan. The button flashes the outcome inline instead of repainting
+// the table.
+async function onWakeClick(btn) {
+  const hostId = parseInt(btn.dataset.hostId, 10);
+  if (!Number.isInteger(hostId)) return;
+  btn.disabled = true;
+  const original = btn.textContent;
+  try {
+    await fetchJson(`/api/hosts/${hostId}/wake`, { method: "POST" });
+    btn.textContent = "✓ sent";
+  } catch (e) {
+    btn.textContent = "✗";
+    setStatus(`Wake-on-LAN failed: ${e.message}`, true);
+  }
+  setTimeout(() => {
+    btn.textContent = original;
+    btn.disabled = false;
+  }, 2500);
 }
 
 async function onPortscanClick(hostId) {
