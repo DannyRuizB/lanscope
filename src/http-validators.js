@@ -108,6 +108,28 @@ function validateChannelEvents(events) {
   return { value: out };
 }
 
+// ----- Host labels (v1.3.0) ------------------------------------------------
+// A label is a short display name; notes are free text. Both optional —
+// clearing both is how a label is removed — but when present they are
+// trimmed and length-capped so the table and the CSV export stay sane.
+function validateLabelText(s) {
+  if (s == null) return { value: null };
+  if (typeof s !== "string") return { error: "label must be a string" };
+  const v = s.trim();
+  if (v.length === 0) return { value: null };
+  if (v.length > 64) return { error: "label too long (max 64 chars)" };
+  return { value: v };
+}
+
+function validateNotesText(s) {
+  if (s == null) return { value: null };
+  if (typeof s !== "string") return { error: "notes must be a string" };
+  const v = s.trim();
+  if (v.length === 0) return { value: null };
+  if (v.length > 500) return { error: "notes too long (max 500 chars)" };
+  return { value: v };
+}
+
 module.exports = {
   validateScheduleName,
   validateCronExpr,
@@ -116,6 +138,8 @@ module.exports = {
   validateHttpUrl,
   validateChannelConfig,
   validateChannelEvents,
+  validateLabelText,
+  validateNotesText,
   ALLOWED_EVENTS,
   ALLOWED_CHANNEL_TYPES,
   ALLOWED_WEBHOOK_FORMATS,

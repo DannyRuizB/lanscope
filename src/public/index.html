@@ -465,8 +465,31 @@
       </div>
     </div>
 
+    <div id="modal-label" class="modal-root" hidden role="dialog" aria-modal="true" aria-labelledby="label-modal-title">
+      <div class="modal-backdrop" data-modal-close></div>
+      <div class="modal-box modal-form-box">
+        <h3 id="label-modal-title" class="modal-title">Label host</h3>
+        <div id="label-modal-error" class="modal-form-error" hidden></div>
+        <form id="label-modal-form" autocomplete="off">
+          <label class="form-field">
+            <span class="form-label">Friendly name</span>
+            <input id="label-name" type="text" placeholder="Office printer" maxlength="64" />
+          </label>
+          <label class="form-field">
+            <span class="form-label">Notes</span>
+            <textarea id="label-notes" rows="3" maxlength="500" placeholder="Asset tag, owner, rack position…"></textarea>
+          </label>
+          <span class="form-hint">The label is attached to this IP within this network and shows on every scan of it — past and future. Clear both fields to remove it.</span>
+        </form>
+        <div class="modal-actions">
+          <button type="button" class="ghost" data-modal-close>Cancel</button>
+          <button id="label-modal-save" type="button">Save</button>
+        </div>
+      </div>
+    </div>
+
     <footer class="bottombar">
-      <span>v0.12.0</span>
+      <span>v1.3.0</span>
       <span>·</span>
       <span>MIT</span>
       <span>·</span>

@@ -5,6 +5,7 @@
 
 const CSV_COLUMNS = [
   "ip",
+  "label",
   "mac",
   "vendor",
   "hostname",
@@ -25,7 +26,7 @@ function csvField(value) {
   return /[",\r\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
 }
 
-function hostToRow(host) {
+function hostToRow(host, labelsByIp = {}) {
   const bestOs = (host.os_matches || [])[0] || null;
   const openTcp = (host.ports || []).filter((p) => p.state === "open");
   // Same criterion as the UI's "responsive" pill: plain open only —
@@ -41,6 +42,7 @@ function hostToRow(host) {
 
   return [
     host.ip,
+    labelsByIp[host.ip] || "",
     host.mac,
     host.vendor,
     host.hostname,
@@ -55,10 +57,10 @@ function hostToRow(host) {
 
 // UTF-8 BOM up front so Excel detects the encoding instead of mangling
 // vendor names like "Zyxel Communications Ç"; CRLF line endings per RFC 4180.
-function scanToCsv(scan) {
+function scanToCsv(scan, labelsByIp = {}) {
   const lines = [CSV_COLUMNS.join(",")];
   for (const host of scan.hosts || []) {
-    lines.push(hostToRow(host).map(csvField).join(","));
+    lines.push(hostToRow(host, labelsByIp).map(csvField).join(","));
   }
   return "\uFEFF" + lines.join("\r\n") + "\r\n";
 }

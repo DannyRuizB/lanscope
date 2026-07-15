@@ -70,7 +70,7 @@ test("scanToCsv starts with the UTF-8 BOM and the header row", () => {
   assert.ok(
     csv
       .slice(1)
-      .startsWith("ip,mac,vendor,hostname,status,os,os_accuracy,tcp_open_ports,tcp_services,udp_open_ports"),
+      .startsWith("ip,label,mac,vendor,hostname,status,os,os_accuracy,tcp_open_ports,tcp_services,udp_open_ports"),
   );
 });
 
@@ -96,7 +96,19 @@ test("scanToCsv quotes the vendor that carries a comma", () => {
 
 test("scanToCsv leaves unknown fields empty on bare hosts", () => {
   const rows = scanToCsv(fixtureScan()).split("\r\n");
-  assert.equal(rows[2], "192.168.1.50,,,,up,,,,,");
+  assert.equal(rows[2], "192.168.1.50,,,,,up,,,,,");
+});
+
+test("scanToCsv fills the label column from the labels map (v1.3.0)", () => {
+  const rows = scanToCsv(fixtureScan(), { "192.168.1.1": "Router — FTTH" }).split("\r\n");
+  assert.ok(rows[1].startsWith("192.168.1.1,Router — FTTH,"));
+  // Hosts without a label keep the column empty.
+  assert.ok(rows[2].startsWith("192.168.1.50,,"));
+});
+
+test("scanToCsv quotes a label carrying a comma", () => {
+  const rows = scanToCsv(fixtureScan(), { "192.168.1.1": "Router, main" }).split("\r\n");
+  assert.ok(rows[1].includes('"Router, main"'));
 });
 
 test("scanToCsv handles a scan with no hosts", () => {

@@ -72,3 +72,24 @@ test('validateChannelEvents allowlists and de-dupes preserving order', () => {
   assert.ok(V.validateChannelEvents('scan_done').error);
   assert.ok(V.validateChannelEvents(['scan_done', 'nope']).error);
 });
+
+// --- host labels (v1.3.0) ------------------------------------------------
+
+test('validateLabelText trims, caps at 64 and treats empty as null', () => {
+  assert.equal(V.validateLabelText('  Office printer  ').value, 'Office printer');
+  assert.equal(V.validateLabelText(null).value, null);
+  assert.equal(V.validateLabelText(undefined).value, null);
+  assert.equal(V.validateLabelText('   ').value, null); // whitespace-only clears
+  assert.equal(V.validateLabelText('x'.repeat(64)).value, 'x'.repeat(64));
+  assert.ok(V.validateLabelText('x'.repeat(65)).error);
+  assert.ok(V.validateLabelText(42).error);
+  assert.ok(V.validateLabelText(['a']).error);
+});
+
+test('validateNotesText trims, caps at 500 and treats empty as null', () => {
+  assert.equal(V.validateNotesText(' rack 3, PSU B ').value, 'rack 3, PSU B');
+  assert.equal(V.validateNotesText('').value, null);
+  assert.equal(V.validateNotesText('x'.repeat(500)).value, 'x'.repeat(500));
+  assert.ok(V.validateNotesText('x'.repeat(501)).error);
+  assert.ok(V.validateNotesText({}).error);
+});
