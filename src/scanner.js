@@ -191,6 +191,16 @@ function pickAddress(addresses, type) {
   return addresses?.find((a) => a.addrtype === type);
 }
 
+// nmap reports the smoothed round-trip time per host as <times srtt="…"/>
+// in MICROseconds. Kept as ms with one decimal (0.3 ms on a wired LAN,
+// 45 ms on a flaky Wi-Fi repeater — the decimal matters on the low end).
+// Absent (null) when nmap didn't time the host, e.g. -Pn without probes.
+function parseSrttMs(times) {
+  const raw = Number(times?.srtt);
+  if (!Number.isFinite(raw) || raw <= 0) return null;
+  return Math.round(raw / 100) / 10;
+}
+
 function parseHosts(xml) {
   const doc = xmlParser.parse(xml);
   const hosts = doc?.nmaprun?.host || [];
@@ -207,6 +217,7 @@ function parseHosts(xml) {
         hostname: hostnames[0]?.name || null,
         status: h.status?.state === "up" ? "up" : "down",
         reason: h.status?.reason || null,
+        latency_ms: parseSrttMs(h.times),
       };
     })
     .filter((h) => h.ip);

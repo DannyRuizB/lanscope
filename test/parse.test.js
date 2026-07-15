@@ -14,6 +14,7 @@ const HOSTS_XML = `<?xml version="1.0"?><nmaprun>
     <address addr="192.168.1.10" addrtype="ipv4"/>
     <address addr="AA:BB:CC:DD:EE:FF" addrtype="mac" vendor="Raspberry Pi"/>
     <hostnames><hostname name="pi.local" type="PTR"/></hostnames>
+    <times srtt="2340" rttvar="1200" to="100000"/>
   </host>
   <host>
     <status state="down" reason="no-response"/>
@@ -49,6 +50,7 @@ test('parseHosts normalizes hosts and drops entries without an IPv4', () => {
       hostname: 'pi.local',
       status: 'up',
       reason: 'arp-response',
+      latency_ms: 2.3, // srtt is µs; 2340 µs → 2.3 ms
     },
     {
       ip: '192.168.1.11',
@@ -57,8 +59,18 @@ test('parseHosts normalizes hosts and drops entries without an IPv4', () => {
       hostname: null,
       status: 'down',
       reason: 'no-response',
+      latency_ms: null, // nmap never timed this host
     },
   ]);
+});
+
+test('parseHosts ignores a zero/garbage srtt', () => {
+  const xml = `<nmaprun><host>
+    <status state="up" reason="arp-response"/>
+    <address addr="10.0.0.1" addrtype="ipv4"/>
+    <times srtt="0" rttvar="0" to="100000"/>
+  </host></nmaprun>`;
+  assert.equal(S.parseHosts(xml)[0].latency_ms, null);
 });
 
 test('parseHosts returns [] for an empty run', () => {

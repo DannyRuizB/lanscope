@@ -70,7 +70,7 @@ test("scanToCsv starts with the UTF-8 BOM and the header row", () => {
   assert.ok(
     csv
       .slice(1)
-      .startsWith("ip,label,mac,vendor,hostname,status,os,os_accuracy,tcp_open_ports,tcp_services,udp_open_ports"),
+      .startsWith("ip,label,mac,vendor,hostname,status,latency_ms,os,os_accuracy,tcp_open_ports,tcp_services,udp_open_ports"),
   );
 });
 
@@ -96,7 +96,14 @@ test("scanToCsv quotes the vendor that carries a comma", () => {
 
 test("scanToCsv leaves unknown fields empty on bare hosts", () => {
   const rows = scanToCsv(fixtureScan()).split("\r\n");
-  assert.equal(rows[2], "192.168.1.50,,,,,up,,,,,");
+  assert.equal(rows[2], "192.168.1.50,,,,,up,,,,,,");
+});
+
+test("scanToCsv carries latency_ms when the host has one (v1.4.0)", () => {
+  const scan = fixtureScan();
+  scan.hosts[0].latency_ms = 0.4;
+  const rows = scanToCsv(scan).split("\r\n");
+  assert.ok(rows[1].includes(",up,0.4,"));
 });
 
 test("scanToCsv fills the label column from the labels map (v1.3.0)", () => {
