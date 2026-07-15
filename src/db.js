@@ -113,7 +113,18 @@ db.exec(`
     acknowledged_at INTEGER
   );
 
+  CREATE TABLE IF NOT EXISTS host_labels (
+    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    cidr       TEXT NOT NULL,
+    ip         TEXT NOT NULL,
+    label      TEXT,
+    notes      TEXT,
+    updated_at INTEGER NOT NULL,
+    UNIQUE (cidr, ip)
+  );
+
   CREATE INDEX IF NOT EXISTS idx_hosts_scan ON hosts(scan_id);
+  CREATE INDEX IF NOT EXISTS idx_labels_cidr ON host_labels(cidr);
   CREATE INDEX IF NOT EXISTS idx_scans_started ON scans(started_at DESC);
   CREATE INDEX IF NOT EXISTS idx_ports_host ON host_ports(host_id);
   CREATE INDEX IF NOT EXISTS idx_os_matches_host ON host_os_matches(host_id);
@@ -927,6 +938,37 @@ function deleteAlert(id) {
   return stmts.deleteAlertStmt.run(id).changes > 0;
 }
 
+// ----- Host labels (v1.3.0): user-assigned friendly name + notes ----------
+// Keyed by (cidr, ip), NOT by host row: a label follows the device across
+// every scan of that network, past and future.
+function listLabels(cidr) {
+  return db
+    .prepare(`SELECT * FROM host_labels WHERE cidr = ? ORDER BY ip`)
+    .all(cidr);
+}
+
+// Upsert semantics: setting both fields to empty removes the row entirely —
+// a cleared label is an absent label, not an empty string to drag around.
+function upsertLabel({ cidr, ip, label = null, notes = null }) {
+  const lbl = label && label.length ? label : null;
+  const nts = notes && notes.length ? notes : null;
+  if (lbl === null && nts === null) {
+    db.prepare(`DELETE FROM host_labels WHERE cidr = ? AND ip = ?`).run(cidr, ip);
+    return null;
+  }
+  db.prepare(
+    `INSERT INTO host_labels (cidr, ip, label, notes, updated_at)
+     VALUES (?, ?, ?, ?, ?)
+     ON CONFLICT(cidr, ip) DO UPDATE SET
+       label = excluded.label,
+       notes = excluded.notes,
+       updated_at = excluded.updated_at`
+  ).run(cidr, ip, lbl, nts, Date.now());
+  return db
+    .prepare(`SELECT * FROM host_labels WHERE cidr = ? AND ip = ?`)
+    .get(cidr, ip);
+}
+
 module.exports = {
   startScan,
   finishScan,
@@ -966,4 +1008,6 @@ module.exports = {
   countUnackedAlerts,
   ackAlert,
   deleteAlert,
+  listLabels,
+  upsertLabel,
 };

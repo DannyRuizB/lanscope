@@ -3,6 +3,7 @@ const express = require("express");
 const db = require("./db");
 const {
   validateCidr,
+  validateIpv4,
   validateTiming,
   validatePortsSpec,
   validateScanType,
@@ -19,6 +20,8 @@ const {
   validateChannelType,
   validateChannelConfig,
   validateChannelEvents,
+  validateLabelText,
+  validateNotesText,
 } = require("./http-validators");
 const { scanToCsv, exportFilename } = require("./export");
 const { sendWake } = require("./wol");
@@ -86,7 +89,10 @@ app.get("/api/scans/:id/export", (req, res) => {
 
   res.setHeader("Content-Disposition", `attachment; filename="${exportFilename(scan, format)}"`);
   if (format === "json") return res.json(scan);
-  res.type("text/csv; charset=utf-8").send(scanToCsv(scan));
+  const labelsByIp = Object.fromEntries(
+    db.listLabels(scan.cidr).filter((l) => l.label).map((l) => [l.ip, l.label])
+  );
+  res.type("text/csv; charset=utf-8").send(scanToCsv(scan, labelsByIp));
 });
 
 app.delete("/api/scans/:id", (req, res) => {
@@ -275,6 +281,32 @@ app.delete("/api/inventory/:cidr", (req, res) => {
   const ok = db.clearBaselineByCidr(cidr);
   if (!ok) return res.status(404).json({ error: "no baseline for this CIDR" });
   res.status(204).end();
+});
+
+// v1.3.0 — host labels: user-assigned friendly name + notes, keyed by
+// (cidr, ip) so they follow the device across every scan of that network.
+app.get("/api/labels", (req, res) => {
+  const cidr = req.query.cidr;
+  const errorMsg = validateCidr(cidr);
+  if (errorMsg) return res.status(400).json({ error: errorMsg });
+  res.json({ labels: db.listLabels(cidr) });
+});
+
+// PUT (idempotent upsert) on purpose: the UI has exactly one form per
+// (cidr, ip) and saving it twice must not create two rows. Sending both
+// fields empty clears the label entirely.
+app.put("/api/labels", (req, res) => {
+  const { cidr, ip } = req.body || {};
+  const cidrError = validateCidr(cidr);
+  if (cidrError) return res.status(400).json({ error: cidrError });
+  const ipError = validateIpv4(ip);
+  if (ipError) return res.status(400).json({ error: ipError });
+  const label = validateLabelText(req.body.label);
+  if (label.error) return res.status(400).json({ error: label.error });
+  const notes = validateNotesText(req.body.notes);
+  if (notes.error) return res.status(400).json({ error: notes.error });
+  const row = db.upsertLabel({ cidr, ip, label: label.value, notes: notes.value });
+  res.json({ label: row }); // null when the upsert cleared it
 });
 
 // v0.10.0 — scheduled scans. Persistence + REST surface. The actual cron

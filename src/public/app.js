@@ -267,6 +267,46 @@ function renderWakeButton(host) {
   return `<button class="ghost small wake-btn" data-host-id="${host.id}" title="Wake this device — broadcast a Wake-on-LAN magic packet to ${escapeHtml(host.mac)}" aria-label="Send Wake-on-LAN packet to ${escapeHtml(host.mac)}">⏻</button>`;
 }
 
+// ----- Host labels (v1.3.0): friendly name + notes per (cidr, ip) ----------
+// Cached per CIDR; labels are cosmetic, so a failed load never breaks the
+// view — the table just falls back to bare hostnames.
+let hostLabels = new Map(); // ip -> {label, notes, ...}
+let hostLabelsCidr = null;
+
+async function ensureLabels(cidr) {
+  if (hostLabelsCidr === cidr) return;
+  hostLabelsCidr = cidr; // set before the await so re-renders don't re-fetch
+  hostLabels = new Map();
+  try {
+    const data = await fetchJson(`/api/labels?cidr=${encodeURIComponent(cidr)}`);
+    hostLabels = new Map((data.labels || []).map((l) => [l.ip, l]));
+  } catch {
+    /* keep the empty map */
+  }
+}
+
+function renderHostnameCell(h) {
+  const l = hostLabels.get(h.ip);
+  const editBtn = `<button class="ghost small label-btn" data-ip="${escapeHtml(h.ip)}" title="${l ? "Edit label / notes" : "Add label / notes"}" aria-label="Edit label for ${escapeHtml(h.ip)}">✎</button>`;
+  const notesChip = l && l.notes
+    ? ` <span class="label-notes" title="${escapeHtml(l.notes)}" aria-label="Notes: ${escapeHtml(l.notes)}">🗒</span>`
+    : "";
+  if (l && l.label) {
+    const hn = h.hostname ? `<span class="label-hostname">${escapeHtml(h.hostname)}</span>` : "";
+    return `<td class="hostname-cell"><span class="host-label">${escapeHtml(l.label)}</span>${notesChip}${editBtn}${hn}</td>`;
+  }
+  return `<td class="hostname-cell ${h.hostname ? "" : "muted"}">${escapeHtml(h.hostname) || "—"}${notesChip}${editBtn}</td>`;
+}
+
+function attachLabelHandlers() {
+  els.body.querySelectorAll(".label-btn").forEach((btn) => {
+    btn.addEventListener("click", (e) => {
+      e.stopPropagation();
+      openLabelModal(btn.dataset.ip);
+    });
+  });
+}
+
 function udpStateClass(state) {
   if (state === "open") return "responsive";
   if (state === "open|filtered") return "unknown";
@@ -346,7 +386,7 @@ function renderDisappearedRow(h) {
       <td class="ip">${escapeHtml(h.ip)}</td>
       <td class="${h.mac ? "mac-cell" : "muted"}">${escapeHtml(h.mac) || "—"}${renderWakeButton(h)}</td>
       <td class="${h.vendor ? "" : "muted"}">${escapeHtml(h.vendor) || "—"}</td>
-      <td class="${h.hostname ? "" : "muted"}">${escapeHtml(h.hostname) || "—"}</td>
+      ${renderHostnameCell(h)}
       <td class="muted">${escapeHtml(h.reason) || "—"}</td>
       <td class="muted">—</td>
       <td class="muted">—</td>
@@ -377,7 +417,7 @@ function renderHostRow(h) {
       <td class="ip">${escapeHtml(h.ip)}${reasonBadge}</td>
       <td class="${h.mac ? "mac-cell" : "muted"}">${escapeHtml(h.mac) || "—"}${renderWakeButton(h)}</td>
       <td class="${h.vendor ? "" : "muted"}">${escapeHtml(h.vendor) || "—"}</td>
-      <td class="${h.hostname ? "" : "muted"}">${escapeHtml(h.hostname) || "—"}</td>
+      ${renderHostnameCell(h)}
       <td class="muted">${escapeHtml(h.reason) || "—"}</td>
       <td class="os-cell">${renderOsButton(h)}</td>
       <td class="ports-cell">${renderPortsButton(h)}</td>
@@ -617,6 +657,14 @@ function renderPortsTable(host) {
 
 function renderScan(scan) {
   lastScan = scan;
+  // Labels load lazily per CIDR; on first sight of a network, re-render once
+  // they arrive (ensureLabels caches the CIDR before awaiting, so the second
+  // pass through here is a no-op and cannot loop).
+  if (hostLabelsCidr !== scan.cidr) {
+    ensureLabels(scan.cidr).then(() => {
+      if (lastScan === scan) renderScan(scan);
+    });
+  }
   if (compareBaseScan && compareBaseScan.cidr !== scan.cidr) {
     compareBaseScan = null;
     compareBaseScanId = null;
@@ -665,6 +713,7 @@ function renderScan(scan) {
   attachOsscanHandlers();
   attachUdpscanHandlers();
   attachWakeHandlers();
+  attachLabelHandlers();
   updateBulkButtons();
 
   if (viewMode === "graph") {
@@ -1097,7 +1146,8 @@ function openPortCount(host) {
 }
 
 function nodeLabelFor(host, isGateway) {
-  const lines = [host.ip];
+  const userLabel = hostLabels.get(host.ip)?.label;
+  const lines = userLabel ? [userLabel, host.ip] : [host.ip];
   if (host.hostname) lines.push(host.hostname);
   const ports = openPortCount(host);
   const hasOs = !!host.osscanned_at && (host.os_matches || []).length > 0;
@@ -2249,6 +2299,76 @@ async function deleteScheduleAction(id) {
     setStatus(e.message, true);
   }
 }
+
+// ----- Label modal (v1.3.0) -------------------------------------------------
+const labelEls = {
+  modal: document.getElementById("modal-label"),
+  title: document.getElementById("label-modal-title"),
+  error: document.getElementById("label-modal-error"),
+  form: document.getElementById("label-modal-form"),
+  name: document.getElementById("label-name"),
+  notes: document.getElementById("label-notes"),
+  save: document.getElementById("label-modal-save"),
+};
+let labelModalIp = null;
+
+function openLabelModal(ip) {
+  if (!lastScan) return;
+  labelModalIp = ip;
+  const existing = hostLabels.get(ip);
+  labelEls.title.textContent = `Label ${ip}`;
+  labelEls.name.value = existing?.label || "";
+  labelEls.notes.value = existing?.notes || "";
+  labelEls.error.hidden = true;
+  labelEls.error.textContent = "";
+  labelEls.modal.hidden = false;
+  setTimeout(() => labelEls.name.focus(), 0);
+}
+
+function closeLabelModal() {
+  labelEls.modal.hidden = true;
+  labelModalIp = null;
+}
+
+async function submitLabelModal() {
+  if (!labelModalIp || !lastScan) return;
+  const ip = labelModalIp;
+  try {
+    labelEls.save.disabled = true;
+    const data = await fetchJson("/api/labels", {
+      method: "PUT",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        cidr: lastScan.cidr,
+        ip,
+        label: labelEls.name.value,
+        notes: labelEls.notes.value,
+      }),
+    });
+    // Server returns null when both fields were cleared (label removed).
+    if (data.label) hostLabels.set(ip, data.label);
+    else hostLabels.delete(ip);
+    closeLabelModal();
+    if (lastScan) renderScan(lastScan);
+  } catch (e) {
+    labelEls.error.textContent = e.message;
+    labelEls.error.hidden = false;
+  } finally {
+    labelEls.save.disabled = false;
+  }
+}
+
+labelEls.save?.addEventListener("click", submitLabelModal);
+labelEls.form?.addEventListener("submit", (e) => {
+  e.preventDefault();
+  submitLabelModal();
+});
+labelEls.modal?.querySelectorAll("[data-modal-close]").forEach((el) => {
+  el.addEventListener("click", closeLabelModal);
+});
+document.addEventListener("keydown", (e) => {
+  if (e.key === "Escape" && labelEls.modal && !labelEls.modal.hidden) closeLabelModal();
+});
 
 function openScheduleModal() {
   schedEls.inputName.value = "";

@@ -470,6 +470,12 @@ function run() {
     createdAtBase: T_DAYS_AGO_3 + 4700,
   });
 
+  // v1.3.0 — host labels: show the feature populated in the read-only demo
+  // (editing is blocked by DEMO_MODE, so these are the only ones visitors see).
+  db.upsertLabel({ cidr: CIDR, ip: ROUTER.ip, label: "Router — FTTH gateway", notes: "ISP router. Admin UI on :80, do not firewall the household." });
+  db.upsertLabel({ cidr: CIDR, ip: NAS.ip, label: "NAS (backups)", notes: "Synology DS220+. Nightly Hyper Backup to USB, quarterly restore test." });
+  db.upsertLabel({ cidr: CIDR, ip: WIN_DESKTOP.ip, label: "Danny's desktop" });
+
   const alertCounts = seedAlerts(rawDb, {
     scan2Id: scan2,
     scan3Id: scan3,
