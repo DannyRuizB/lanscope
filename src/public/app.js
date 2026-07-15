@@ -285,6 +285,19 @@ async function ensureLabels(cidr) {
   }
 }
 
+// One decimal below 10 ms (0.3 vs 4.8 matters on a wired LAN), whole
+// milliseconds above. null → the scan never timed this host (e.g. -Pn).
+function fmtLatency(ms) {
+  if (ms == null) return null;
+  return ms < 10 ? `${ms.toFixed(1)} ms` : `${Math.round(ms)} ms`;
+}
+
+function renderLatencyCell(h) {
+  const v = fmtLatency(h.latency_ms);
+  if (v === null) return `<td class="latency-cell muted">—</td>`;
+  return `<td class="latency-cell" title="Smoothed RTT reported by nmap (srtt)">${v}</td>`;
+}
+
 function renderHostnameCell(h) {
   const l = hostLabels.get(h.ip);
   const editBtn = `<button class="ghost small label-btn" data-ip="${escapeHtml(h.ip)}" title="${l ? "Edit label / notes" : "Add label / notes"}" aria-label="Edit label for ${escapeHtml(h.ip)}">✎</button>`;
@@ -388,6 +401,7 @@ function renderDisappearedRow(h) {
       <td class="${h.vendor ? "" : "muted"}">${escapeHtml(h.vendor) || "—"}</td>
       ${renderHostnameCell(h)}
       <td class="muted">${escapeHtml(h.reason) || "—"}</td>
+      ${renderLatencyCell(h)}
       <td class="muted">—</td>
       <td class="muted">—</td>
       <td class="muted">—</td>
@@ -398,7 +412,7 @@ function renderDisappearedSection() {
   if (!lastDiff || !lastDiff.disappeared.length) return "";
   const header = `
     <tr class="diff-section-header">
-      <td colspan="8">Disappeared since base scan (${lastDiff.disappeared.length})</td>
+      <td colspan="9">Disappeared since base scan (${lastDiff.disappeared.length})</td>
     </tr>`;
   const rows = lastDiff.disappeared
     .slice()
@@ -419,18 +433,19 @@ function renderHostRow(h) {
       <td class="${h.vendor ? "" : "muted"}">${escapeHtml(h.vendor) || "—"}</td>
       ${renderHostnameCell(h)}
       <td class="muted">${escapeHtml(h.reason) || "—"}</td>
+      ${renderLatencyCell(h)}
       <td class="os-cell">${renderOsButton(h)}</td>
       <td class="ports-cell">${renderPortsButton(h)}</td>
       <td class="udp-cell">${renderUdpButton(h)}</td>
     </tr>
     <tr class="host-detail" data-host-id="${h.id}" data-kind="os" hidden>
-      <td colspan="8">${h.os_matches?.length ? renderOsTable(h) : ""}</td>
+      <td colspan="9">${h.os_matches?.length ? renderOsTable(h) : ""}</td>
     </tr>
     <tr class="host-detail" data-host-id="${h.id}" data-kind="ports" hidden>
-      <td colspan="8">${h.ports?.length ? renderPortsTable(h) : ""}</td>
+      <td colspan="9">${h.ports?.length ? renderPortsTable(h) : ""}</td>
     </tr>
     <tr class="host-detail" data-host-id="${h.id}" data-kind="udp" hidden>
-      <td colspan="8">${h.udp_ports?.length ? renderUdpPortsTable(h) : ""}</td>
+      <td colspan="9">${h.udp_ports?.length ? renderUdpPortsTable(h) : ""}</td>
     </tr>`;
 }
 
@@ -972,7 +987,7 @@ function portsOpenCount(host) {
   return (host.ports || []).filter((p) => p.state === "open").length;
 }
 
-const DEFAULT_SORT_DIR = { ip: "asc", vendor: "asc", os: "asc", ports: "desc" };
+const DEFAULT_SORT_DIR = { ip: "asc", vendor: "asc", os: "asc", ports: "desc", latency: "asc" };
 
 let filterPort = null;
 
@@ -1060,6 +1075,14 @@ function sortHosts(hosts) {
       if (ca === null) return 1;
       if (cb === null) return -1;
       return dir * (ca - cb);
+    }
+    if (sortState.key === "latency") {
+      const la = a.latency_ms;
+      const lb = b.latency_ms;
+      if (la == null && lb == null) return 0;
+      if (la == null) return 1; // hosts without a measurement fall to the bottom
+      if (lb == null) return -1;
+      return dir * (la - lb);
     }
     return 0;
   });

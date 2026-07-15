@@ -24,6 +24,7 @@ const CIDR = "192.168.1.0/24";
 // snapshot a subset per scan moment to create plausible diff signals.
 const ROUTER = {
   ip: "192.168.1.1",
+  latency_ms: 0.4,
   mac: "9C:9D:7E:11:22:33",
   vendor: "TP-LINK TECHNOLOGIES",
   hostname: "router.lan",
@@ -43,6 +44,7 @@ const ROUTER = {
 
 const NAS = {
   ip: "192.168.1.2",
+  latency_ms: 0.6,
   mac: "00:11:32:AA:BB:CC",
   vendor: "Synology Incorporated",
   hostname: "nas.lan",
@@ -62,6 +64,7 @@ const NAS = {
 
 const WIN_DESKTOP = {
   ip: "192.168.1.10",
+  latency_ms: 0.9,
   mac: "B4:2E:99:DD:EE:01",
   vendor: "Intel Corporate",
   hostname: "desktop-win.lan",
@@ -80,6 +83,7 @@ const WIN_DESKTOP = {
 
 const LINUX_DESKTOP = {
   ip: "192.168.1.11",
+  latency_ms: 1.2,
   mac: "DC:A6:32:11:22:33",
   vendor: "ASUSTek COMPUTER INC.",
   hostname: "ubuntu.lan",
@@ -95,6 +99,7 @@ const LINUX_DESKTOP = {
 
 const MACBOOK = {
   ip: "192.168.1.12",
+  latency_ms: 0.8,
   mac: "F0:18:98:AA:BB:CC",
   vendor: "Apple, Inc.",
   hostname: "danny-macbook.lan",
@@ -111,6 +116,7 @@ const MACBOOK = {
 
 const PIHOLE = {
   ip: "192.168.1.20",
+  latency_ms: 1.5,
   mac: "DC:A6:32:55:66:77",
   vendor: "Raspberry Pi Trading Ltd",
   hostname: "pihole.lan",
@@ -128,6 +134,7 @@ const PIHOLE = {
 
 const HOMEASSISTANT = {
   ip: "192.168.1.21",
+  latency_ms: 1.1,
   mac: "DC:A6:32:99:AA:BB",
   vendor: "Raspberry Pi Trading Ltd",
   hostname: "homeassistant.lan",
@@ -144,6 +151,7 @@ const HOMEASSISTANT = {
 
 const SMART_TV = {
   ip: "192.168.1.30",
+  latency_ms: 12,
   mac: "F4:7B:5E:11:22:33",
   vendor: "Samsung Electronics",
   hostname: "samsung-tv.lan",
@@ -161,6 +169,7 @@ const SMART_TV = {
 
 const CHROMECAST = {
   ip: "192.168.1.31",
+  latency_ms: 18,
   mac: "F4:F5:D8:AA:BB:CC",
   vendor: "Google, Inc.",
   hostname: "chromecast.lan",
@@ -174,6 +183,7 @@ const CHROMECAST = {
 
 const IP_CAMERA = {
   ip: "192.168.1.40",
+  latency_ms: 24,
   mac: "EC:71:DB:11:22:33",
   vendor: "Reolink Innovation Limited",
   hostname: "camera-front.lan",
@@ -188,6 +198,7 @@ const IP_CAMERA = {
 
 const PRINTER = {
   ip: "192.168.1.50",
+  latency_ms: 3.2,
   mac: "94:18:82:AA:BB:CC",
   vendor: "Hewlett Packard",
   hostname: "hp-laserjet.lan",
@@ -203,6 +214,7 @@ const PRINTER = {
 
 const IPHONE = {
   ip: "192.168.1.100",
+  latency_ms: 41,
   mac: "AC:DE:48:00:11:22",
   vendor: "Apple, Inc.",
   hostname: "iphone-danny.lan",
@@ -212,6 +224,7 @@ const IPHONE = {
 
 const ANDROID_PHONE = {
   ip: "192.168.1.101",
+  latency_ms: 56,
   mac: "E8:50:8B:33:44:55",
   vendor: "Xiaomi Communications",
   hostname: "redmi-note-12.lan",
@@ -221,6 +234,7 @@ const ANDROID_PHONE = {
 
 const GUEST_LAPTOP = {
   ip: "192.168.1.150",
+  latency_ms: 2.1,
   mac: "5C:CF:7F:99:88:77",
   vendor: "Espressif Inc.",
   hostname: null,

@@ -30,6 +30,7 @@ db.exec(`
     hostname      TEXT,
     status        TEXT    NOT NULL CHECK (status IN ('up','down')),
     reason        TEXT,
+    latency_ms    REAL,
     portscanned_at INTEGER
   );
 
@@ -154,6 +155,9 @@ if (!columnExists("hosts", "osscanned_at")) {
 if (!columnExists("host_ports", "state_reason")) {
   db.exec(`ALTER TABLE host_ports ADD COLUMN state_reason TEXT`);
 }
+if (!columnExists("hosts", "latency_ms")) {
+  db.exec(`ALTER TABLE hosts ADD COLUMN latency_ms REAL`);
+}
 if (!columnExists("hosts", "udp_portscanned_at")) {
   db.exec(`ALTER TABLE hosts ADD COLUMN udp_portscanned_at INTEGER`);
 }
@@ -175,8 +179,8 @@ const stmts = {
     `UPDATE scans SET status = 'error', finished_at = ?, error_message = ? WHERE id = ?`,
   ),
   insertHost: db.prepare(
-    `INSERT INTO hosts (scan_id, ip, mac, vendor, hostname, status, reason)
-     VALUES (?, ?, ?, ?, ?, ?, ?)`,
+    `INSERT INTO hosts (scan_id, ip, mac, vendor, hostname, status, reason, latency_ms)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
   ),
   listScans: db.prepare(
     `SELECT id, cidr, started_at, finished_at, status, error_message, host_count, schedule_id
@@ -187,11 +191,11 @@ const stmts = {
        FROM scans WHERE id = ?`,
   ),
   getHostsByScan: db.prepare(
-    `SELECT id, ip, mac, vendor, hostname, status, reason, portscanned_at, osscanned_at, udp_portscanned_at
+    `SELECT id, ip, mac, vendor, hostname, status, reason, latency_ms, portscanned_at, osscanned_at, udp_portscanned_at
        FROM hosts WHERE scan_id = ? ORDER BY ip`,
   ),
   getHost: db.prepare(
-    `SELECT id, scan_id, ip, mac, vendor, hostname, status, reason, portscanned_at, osscanned_at, udp_portscanned_at
+    `SELECT id, scan_id, ip, mac, vendor, hostname, status, reason, latency_ms, portscanned_at, osscanned_at, udp_portscanned_at
        FROM hosts WHERE id = ?`,
   ),
   deleteScan: db.prepare(`DELETE FROM scans WHERE id = ?`),
@@ -378,6 +382,7 @@ const insertHostsTx = db.transaction((scanId, hosts) => {
       h.hostname || null,
       h.status,
       h.reason || null,
+      h.latency_ms ?? null,
     );
   }
 });
