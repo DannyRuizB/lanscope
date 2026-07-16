@@ -349,6 +349,11 @@ const stmts = {
        JOIN hosts h ON h.id = p.host_id
       WHERE h.scan_id = ? AND p.state = 'open'`,
   ),
+  avgLatencyByScan: db.prepare(
+    `SELECT AVG(latency_ms) AS avg
+       FROM hosts
+      WHERE scan_id = ? AND status = 'up' AND latency_ms IS NOT NULL`,
+  ),
   getAliveIpsByScan: db.prepare(
     `SELECT ip FROM hosts WHERE scan_id = ? AND status = 'up'`,
   ),
@@ -792,6 +797,10 @@ function getTimeline(cidr, fromTs = 0) {
     const port_count = stmts.countOpenPortsByScan.get(s.id)?.n || 0;
     const duration_ms =
       s.finished_at && s.started_at ? Math.max(0, s.finished_at - s.started_at) : null;
+    // Null when no host in the scan carries a measured latency (e.g. -Pn
+    // without probes) — the chart leaves a gap instead of faking a zero.
+    const avgLat = stmts.avgLatencyByScan.get(s.id)?.avg;
+    const avg_latency_ms = avgLat != null ? Math.round(avgLat * 10) / 10 : null;
 
     let diff = null;
     if (baselineIps && s.status === "done") {
@@ -811,6 +820,7 @@ function getTimeline(cidr, fromTs = 0) {
       host_count: s.host_count || 0,
       port_count,
       duration_ms,
+      avg_latency_ms,
       diff,
     };
   });

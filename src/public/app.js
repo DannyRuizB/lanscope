@@ -2767,8 +2767,8 @@ document.addEventListener("keydown", (e) => {
 })();
 
 // ===== Timeline (v0.12.0) =====
-// Per-CIDR view aggregating all scans into 4 charts:
-// hosts alive, open ports, scan duration and baseline diff.
+// Per-CIDR view aggregating all scans into one chart per metric:
+// hosts alive, open ports, scan duration, average latency and baseline diff.
 const tlEls = {
   wrap: $("#results-timeline"),
   title: $("#timeline-title"),
@@ -2782,6 +2782,7 @@ const tlEls = {
     hosts: $("#chart-hosts"),
     ports: $("#chart-ports"),
     duration: $("#chart-duration"),
+    latency: $("#chart-latency"),
     diff: $("#chart-diff"),
   },
 };
@@ -2966,6 +2967,27 @@ function renderTimelineCharts(data) {
       }],
     },
     options: baseOpts("seconds"),
+  });
+
+  // Average latency (ms). spanGaps bridges scans with no measured latency
+  // (e.g. -Pn without probes) instead of dropping the line to zero.
+  tlState.charts.latency = new Chart(tlEls.canvas.latency, {
+    type: "line",
+    data: {
+      labels,
+      datasets: [{
+        label: "Avg latency (ms)",
+        data: points.map((p) => p.avg_latency_ms ?? null),
+        borderColor: "#f59e0b",
+        backgroundColor: "#f59e0b33",
+        tension: 0.2,
+        pointRadius: 4,
+        pointHoverRadius: 6,
+        spanGaps: true,
+        fill: true,
+      }],
+    },
+    options: baseOpts("ms"),
   });
 
   // Baseline diff (appeared / disappeared)
