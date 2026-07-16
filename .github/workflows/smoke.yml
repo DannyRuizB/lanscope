@@ -83,6 +83,9 @@ jobs:
           echo "--- /api/labels (v1.3.0) ---"
           curl -fsS "http://localhost:3030/api/labels?cidr=192.168.0.0%2F24" | grep -q '"labels":\[\]'
 
+          echo "--- /api/timeline (v1.5.0) ---"
+          curl -fsS "http://localhost:3030/api/timeline?cidr=192.168.0.0%2F24" | grep -q '"points":\[\]'
+
           echo "--- GET / ---"
           curl -fsS -o /tmp/index.html -w "code=%{http_code}\n" http://localhost:3030/
           grep -q '<title>LanScope' /tmp/index.html
