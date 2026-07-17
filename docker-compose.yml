@@ -11,6 +11,10 @@ services:
     environment:
       PORT: 3030
       DB_PATH: /var/lib/lanscope/lanscope.db
+      # Optional HTTP Basic Auth — set BOTH to lock the UI and the API
+      # (LanScope refuses to start with only one of them set):
+      # AUTH_USER: ops
+      # AUTH_PASS: change-me
     volumes:
       - lanscope-data:/var/lib/lanscope
 
