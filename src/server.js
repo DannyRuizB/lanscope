@@ -144,6 +144,17 @@ app.get("/api/timeline", (req, res) => {
   res.json(db.getTimeline(cidr, fromTs));
 });
 
+// v1.7.0 — one host across every scan of its CIDR (the UI's drill-down
+// modal). A GET on purpose, like export: it works on the read-only demo.
+app.get("/api/host-history", (req, res) => {
+  const { cidr, ip } = req.query || {};
+  const cidrErr = validateCidr(cidr);
+  if (cidrErr) return res.status(400).json({ error: cidrErr });
+  const ipErr = validateIpv4(ip);
+  if (ipErr) return res.status(400).json({ error: ipErr });
+  res.json(db.getHostHistory(cidr, ip));
+});
+
 app.post("/api/scan", async (req, res) => {
   const { cidr } = req.body || {};
   const error = validateCidr(cidr);

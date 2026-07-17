@@ -300,7 +300,8 @@ function renderLatencyCell(h) {
 
 function renderHostnameCell(h) {
   const l = hostLabels.get(h.ip);
-  const editBtn = `<button class="ghost small label-btn" data-ip="${escapeHtml(h.ip)}" title="${l ? "Edit label / notes" : "Add label / notes"}" aria-label="Edit label for ${escapeHtml(h.ip)}">✎</button>`;
+  const editBtn = `<button class="ghost small label-btn" data-ip="${escapeHtml(h.ip)}" title="${l ? "Edit label / notes" : "Add label / notes"}" aria-label="Edit label for ${escapeHtml(h.ip)}">✎</button>` +
+    `<button class="ghost small history-btn" data-ip="${escapeHtml(h.ip)}" title="History across scans of this network" aria-label="History for ${escapeHtml(h.ip)}">📈</button>`;
   const notesChip = l && l.notes
     ? ` <span class="label-notes" title="${escapeHtml(l.notes)}" aria-label="Notes: ${escapeHtml(l.notes)}">🗒</span>`
     : "";
@@ -316,6 +317,12 @@ function attachLabelHandlers() {
     btn.addEventListener("click", (e) => {
       e.stopPropagation();
       openLabelModal(btn.dataset.ip);
+    });
+  });
+  els.body.querySelectorAll(".history-btn").forEach((btn) => {
+    btn.addEventListener("click", (e) => {
+      e.stopPropagation();
+      openHistoryModal(btn.dataset.ip);
     });
   });
 }
@@ -2391,6 +2398,91 @@ labelEls.modal?.querySelectorAll("[data-modal-close]").forEach((el) => {
 });
 document.addEventListener("keydown", (e) => {
   if (e.key === "Escape" && labelEls.modal && !labelEls.modal.hidden) closeLabelModal();
+});
+
+// ----- Host history modal (v1.7.0) ------------------------------------------
+const histEls = {
+  modal: document.getElementById("modal-history"),
+  title: document.getElementById("history-modal-title"),
+  canvas: document.getElementById("history-chart"),
+  chartWrap: document.getElementById("history-chart-wrap"),
+  tableWrap: document.getElementById("history-table-wrap"),
+};
+let histChart = null;
+
+async function openHistoryModal(ip) {
+  if (!lastScan || !histEls.modal) return;
+  const l = hostLabels.get(ip);
+  histEls.title.textContent = `${l?.label ? `${l.label} · ` : ""}${ip} — history in ${lastScan.cidr}`;
+  histEls.modal.hidden = false;
+  histEls.tableWrap.innerHTML = `<p class="muted">Loading…</p>`;
+  try {
+    const data = await fetchJson(
+      `/api/host-history?cidr=${encodeURIComponent(lastScan.cidr)}&ip=${encodeURIComponent(ip)}`,
+    );
+    renderHostHistory(data);
+  } catch (err) {
+    histEls.tableWrap.innerHTML = `<p class="muted">${escapeHtml(err.message)}</p>`;
+  }
+}
+
+function closeHistoryModal() {
+  if (!histEls.modal) return;
+  histEls.modal.hidden = true;
+  if (histChart) {
+    histChart.destroy();
+    histChart = null;
+  }
+}
+
+function renderHostHistory(data) {
+  const pts = data.points || [];
+  // Latency line over every scan; a scan where the host was absent (or the
+  // ping didn't time it) is a null → gap, never a fake zero. Point colour
+  // tells presence at a glance: green up, red down, grey gap.
+  if (histChart) histChart.destroy();
+  histChart = new Chart(histEls.canvas, {
+    type: "line",
+    data: {
+      labels: pts.map((p) => fmtTime(p.started_at)),
+      datasets: [{
+        label: "Latency (ms)",
+        data: pts.map((p) => (p.present && p.latency_ms != null ? p.latency_ms : null)),
+        borderColor: "#f59e0b",
+        backgroundColor: "#f59e0b33",
+        spanGaps: true,
+        tension: 0.25,
+        pointRadius: 4,
+        pointBackgroundColor: pts.map((p) =>
+          !p.present ? "#9ca3af" : p.status === "up" ? "#22c55e" : "#ef4444",
+        ),
+      }],
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      plugins: { legend: { display: false } },
+      scales: { y: { beginAtZero: true, title: { display: true, text: "ms" } } },
+    },
+  });
+  const rows = pts.map((p) => {
+    const state = !p.present
+      ? `<span class="muted">not seen</span>`
+      : p.status === "up" ? "up" : `<span class="hist-down">down</span>`;
+    const lat = p.present && p.latency_ms != null ? `${p.latency_ms} ms` : "—";
+    const ports = p.tcp_open_ports != null ? p.tcp_open_ports : "—";
+    return `<tr><td>#${p.scan_id}</td><td>${fmtTime(p.started_at)}</td><td>${state}</td><td>${lat}</td><td>${ports}</td></tr>`;
+  }).join("");
+  histEls.tableWrap.innerHTML = pts.length
+    ? `<table class="hist-table"><thead><tr><th>Scan</th><th>When</th><th>State</th><th>Latency</th><th>Open TCP</th></tr></thead><tbody>${rows}</tbody></table>`
+    : `<p class="muted">No scans of this network yet.</p>`;
+}
+
+histEls.modal?.querySelectorAll("[data-modal-close]").forEach((el) => {
+  el.addEventListener("click", closeHistoryModal);
+});
+document.addEventListener("keydown", (e) => {
+  if (e.key === "Escape" && histEls.modal && !histEls.modal.hidden) closeHistoryModal();
 });
 
 function openScheduleModal() {

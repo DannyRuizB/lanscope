@@ -357,6 +357,15 @@ const stmts = {
   getAliveIpsByScan: db.prepare(
     `SELECT ip FROM hosts WHERE scan_id = ? AND status = 'up'`,
   ),
+  // v1.7.0 — per-host history queries.
+  getHostByScanAndIp: db.prepare(
+    `SELECT id, status, latency_ms, hostname, portscanned_at
+       FROM hosts WHERE scan_id = ? AND ip = ?`,
+  ),
+  countOpenTcpPortsByHost: db.prepare(
+    `SELECT COUNT(*) AS n FROM host_ports
+      WHERE host_id = ? AND protocol = 'tcp' AND state = 'open'`,
+  ),
   // List queries with optional filters are built dynamically in listAlerts() /
   // countUnackedAlerts() since the WHERE shape varies.
   insertAlertStmt: db.prepare(
@@ -832,6 +841,41 @@ function getTimeline(cidr, fromTs = 0) {
   };
 }
 
+// v1.7.0 — one host's trajectory across every scan of its network, in
+// chronological order. A scan where the IP never answered is present:false
+// (the chart shows the hole instead of skipping the scan); tcp_open_ports
+// stays null until that scan actually port-scanned the host — "not scanned"
+// and "zero ports open" are different facts.
+function getHostHistory(cidr, ip) {
+  const scans = stmts.listScansByCidrSince.all(cidr, 0);
+  const points = scans.map((s) => {
+    const host = stmts.getHostByScanAndIp.get(s.id, ip);
+    if (!host) {
+      return {
+        scan_id: s.id,
+        started_at: s.started_at,
+        present: false,
+        status: null,
+        latency_ms: null,
+        hostname: null,
+        tcp_open_ports: null,
+      };
+    }
+    return {
+      scan_id: s.id,
+      started_at: s.started_at,
+      present: true,
+      status: host.status,
+      latency_ms: host.latency_ms,
+      hostname: host.hostname || null,
+      tcp_open_ports: host.portscanned_at
+        ? (stmts.countOpenTcpPortsByHost.get(host.id)?.n ?? 0)
+        : null,
+    };
+  });
+  return { cidr, ip, points };
+}
+
 function recordChannelDispatch(id, { status, error = null }) {
   stmts.recordChannelDispatchStmt.run(Date.now(), status, error, id);
   return getChannel(id);
@@ -1014,6 +1058,7 @@ module.exports = {
   deleteChannel,
   recordChannelDispatch,
   getTimeline,
+  getHostHistory,
   ALERT_TYPES,
   createAlert,
   createAlerts,
