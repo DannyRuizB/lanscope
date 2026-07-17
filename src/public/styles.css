@@ -1955,3 +1955,14 @@ li.is-baseline .scan-cidr {
   outline: none;
   border-color: var(--accent);
 }
+
+/* ----- Host history modal (v1.7.0) ---------------------------------------- */
+/* Pinned height, not min-height: Chart.js responsive + a flex parent is the
+   v0.13.1 resize-loop trap all over again. */
+.history-chart-wrap { height: 220px; position: relative; margin-bottom: 12px; }
+.history-chart-wrap canvas { min-height: 0; }
+.history-table-wrap { max-height: 220px; overflow-y: auto; }
+.hist-table { width: 100%; border-collapse: collapse; font-size: 0.85rem; }
+.hist-table th, .hist-table td { padding: 4px 8px; text-align: left; border-bottom: 1px solid var(--border); }
+.hist-table th { color: var(--text-mute); font-weight: 600; }
+.hist-down { color: var(--danger); font-weight: 600; }
