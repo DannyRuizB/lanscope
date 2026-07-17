@@ -28,9 +28,20 @@ const { sendWake } = require("./wol");
 const { executeCidrScan } = require("./runner");
 const scheduler = require("./scheduler");
 const notifier = require("./notifier");
+const { basicAuth } = require("./auth");
 
 const PORT = parseInt(process.env.PORT, 10) || 3030;
 const DEMO_MODE = process.env.DEMO_MODE === "true";
+
+// Optional HTTP Basic Auth (v1.6.0): both variables or neither. A
+// half-configured lock silently left open is the worst outcome, so refuse
+// to start rather than guess what the operator meant.
+const AUTH_USER = process.env.AUTH_USER || "";
+const AUTH_PASS = process.env.AUTH_PASS || "";
+if ((AUTH_USER === "") !== (AUTH_PASS === "")) {
+  console.error("[auth] AUTH_USER and AUTH_PASS must be set together — refusing to start half-configured.");
+  process.exit(1);
+}
 
 if (DEMO_MODE) {
   try {
@@ -42,6 +53,15 @@ if (DEMO_MODE) {
 
 const app = express();
 app.use(express.json({ limit: "32kb" }));
+
+// Auth sits ABOVE the static files on purpose: the UI itself is the
+// inventory of your network — there is nothing here worth serving to an
+// unauthenticated visitor.
+if (AUTH_USER) {
+  app.use(basicAuth({ user: AUTH_USER, pass: AUTH_PASS }));
+  console.log("[auth] HTTP Basic Auth enabled");
+}
+
 app.use(express.static(path.join(__dirname, "public")));
 
 // Demo mode (v0.9.0): the public demo deploy serves pre-seeded fixtures and
