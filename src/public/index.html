@@ -479,9 +479,12 @@
       <div class="modal-backdrop" data-modal-close></div>
       <div class="modal-box modal-form-box">
         <h3 id="history-modal-title" class="modal-title">Host history</h3>
+        <div id="history-summary" class="history-summary"></div>
         <div id="history-chart-wrap" class="history-chart-wrap"><canvas id="history-chart"></canvas></div>
         <div id="history-table-wrap" class="history-table-wrap"></div>
         <div class="modal-actions">
+          <a id="history-export-csv" class="ghost small" download>⬇ CSV</a>
+          <a id="history-export-json" class="ghost small" download>⬇ JSON</a>
           <button type="button" class="ghost" data-modal-close>Close</button>
         </div>
       </div>
@@ -511,7 +514,7 @@
     </div>
 
     <footer class="bottombar">
-      <span>v1.9.0</span>
+      <span>v1.10.0</span>
       <span>·</span>
       <span>MIT</span>
       <span>·</span>

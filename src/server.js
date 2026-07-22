@@ -24,7 +24,7 @@ const {
   validateLabelText,
   validateNotesText,
 } = require("./http-validators");
-const { scanToCsv, exportFilename } = require("./export");
+const { scanToCsv, exportFilename, historyToCsv, historyFilename } = require("./export");
 const { sendWake } = require("./wol");
 const { executeCidrScan } = require("./runner");
 const scheduler = require("./scheduler");
@@ -154,6 +154,25 @@ app.get("/api/host-history", (req, res) => {
   const ipErr = validateIpv4(ip);
   if (ipErr) return res.status(400).json({ error: ipErr });
   res.json(db.getHostHistory(cidr, ip));
+});
+
+// v1.10.0 — download a host's history as CSV / JSON, mirroring the scan
+// export. GET on purpose: the ⬇ button in the history modal is a plain
+// anchor, and it works on the read-only demo.
+app.get("/api/host-history/export", (req, res) => {
+  const { cidr, ip } = req.query || {};
+  const cidrErr = validateCidr(cidr);
+  if (cidrErr) return res.status(400).json({ error: cidrErr });
+  const ipErr = validateIpv4(ip);
+  if (ipErr) return res.status(400).json({ error: ipErr });
+  const format = req.query.format || "csv";
+  if (format !== "csv" && format !== "json") {
+    return res.status(400).json({ error: "invalid format, use csv|json" });
+  }
+  const history = db.getHostHistory(cidr, ip);
+  res.setHeader("Content-Disposition", `attachment; filename="${historyFilename(history, format)}"`);
+  if (format === "json") return res.json(history);
+  res.type("text/csv; charset=utf-8").send(historyToCsv(history));
 });
 
 // v1.9.0 — every host's latency series over the last scans of a network, in
