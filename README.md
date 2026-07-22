@@ -7,7 +7,7 @@
 
 > Visual LAN scanner for your home network or homelab — point it at a CIDR, see who's there.
 
-![LanScope dashboard in dark theme, showing the read-only demo banner, the scan history sidebar populated with a week of /24 scans, an *Hourly home LAN sweep* schedule entry, and the target / scan-now form ready for the next sweep](screenshots/screenshot.png)
+![LanScope dashboard in dark theme: the left sidebar lists a week of /24 scans and an *Hourly home LAN sweep* schedule; the main pane shows the latest scan compared against its baseline (2 appeared, 1 disappeared, 1 changed) as a host table with vendor, hostname, a latency column with inline sparklines, detected OS and open-port counts per device](screenshots/screenshot.png)
 
 🟢 Stable — since v1.0.0.
 
