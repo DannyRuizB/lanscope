@@ -9,7 +9,7 @@
 
 ![LanScope dashboard in dark theme, showing the read-only demo banner, the scan history sidebar populated with a week of /24 scans, an *Hourly home LAN sweep* schedule entry, and the target / scan-now form ready for the next sweep](screenshots/screenshot.png)
 
-🟢 Stable — v1.0.0.
+🟢 Stable — since v1.0.0.
 
 ---
 
@@ -61,7 +61,7 @@ mkdir -p ~/lanscope && cd ~/lanscope
 cat > docker-compose.yml <<'YAML'
 services:
   lanscope:
-    image: ghcr.io/dannyruizb/lanscope:1.0.0
+    image: ghcr.io/dannyruizb/lanscope:1.8.0
     container_name: lanscope
     network_mode: host
     cap_add:
@@ -78,7 +78,7 @@ volumes:
 YAML
 ```
 
-Pin a specific version (`:1.0.0`) in production so upgrades are intentional. Use `:latest` if you actively want to track the newest release.
+Pin a specific version (as in the snippet above) in production so upgrades are intentional. Use `:latest` if you actively want to track the newest release.
 
 **2. Start it**:
 
