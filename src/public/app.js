@@ -285,6 +285,64 @@ async function ensureLabels(cidr) {
   }
 }
 
+// ----- Latency sparklines (v1.9.0): per-host series, cached per CIDR ------
+// Same lazy pattern as labels: cosmetic, so a failed load never breaks the
+// table — rows just show the plain number without the trend.
+let hostSparks = new Map(); // ip -> [latency_ms|null, ...] oldest → newest
+// Keyed by cidr AND scan id (unlike labels): a new scan of the same network
+// adds a point, so the series must refresh when the viewed scan changes.
+let hostSparksKey = null;
+
+function sparksKeyFor(scan) {
+  return `${scan.cidr}#${scan.id}`;
+}
+
+async function ensureSparks(scan) {
+  const key = sparksKeyFor(scan);
+  if (hostSparksKey === key) return;
+  hostSparksKey = key; // set before the await so re-renders don't re-fetch
+  hostSparks = new Map();
+  try {
+    const data = await fetchJson(`/api/latency-sparks?cidr=${encodeURIComponent(scan.cidr)}`);
+    hostSparks = new Map(Object.entries(data.sparks || {}));
+  } catch {
+    /* keep the empty map */
+  }
+}
+
+// Tiny inline SVG for one host's latency across the last scans of its
+// network. Scaled to the host's OWN min..max — the shape (spikes, drift)
+// is the point, not cross-host comparison. Gaps (scans where the host was
+// absent or untimed) split the line instead of faking a zero; an isolated
+// measurement between gaps becomes a dot.
+function sparklineSvg(series) {
+  const W = 56;
+  const H = 14;
+  const PAD = 1.5;
+  const vals = series.filter((v) => v != null);
+  if (vals.length < 2) return ""; // one point has no trend to show
+  const min = Math.min(...vals);
+  const span = (Math.max(...vals) - min) || 1;
+  const x = (i) => PAD + (i * (W - 2 * PAD)) / (series.length - 1);
+  const y = (v) => H - PAD - ((v - min) * (H - 2 * PAD)) / span;
+  const segs = [];
+  let seg = [];
+  series.forEach((v, i) => {
+    if (v == null) {
+      if (seg.length) segs.push(seg);
+      seg = [];
+      return;
+    }
+    seg.push([x(i).toFixed(1), y(v).toFixed(1)]);
+  });
+  if (seg.length) segs.push(seg);
+  const parts = segs.map((s) =>
+    s.length === 1
+      ? `<circle cx="${s[0][0]}" cy="${s[0][1]}" r="1.3" />`
+      : `<polyline points="${s.map((p) => p.join(",")).join(" ")}" />`);
+  return `<svg class="spark" viewBox="0 0 ${W} ${H}" width="${W}" height="${H}" aria-hidden="true">${parts.join("")}</svg>`;
+}
+
 // One decimal below 10 ms (0.3 vs 4.8 matters on a wired LAN), whole
 // milliseconds above. null → the scan never timed this host (e.g. -Pn).
 function fmtLatency(ms) {
@@ -294,8 +352,12 @@ function fmtLatency(ms) {
 
 function renderLatencyCell(h) {
   const v = fmtLatency(h.latency_ms);
-  if (v === null) return `<td class="latency-cell muted">—</td>`;
-  return `<td class="latency-cell" title="Smoothed RTT reported by nmap (srtt)">${v}</td>`;
+  const spark = sparklineSvg(hostSparks.get(h.ip) || []);
+  if (v === null && !spark) return `<td class="latency-cell muted">—</td>`;
+  const title = spark
+    ? "Smoothed RTT reported by nmap (srtt) — sparkline: this host across the last scans of this network"
+    : "Smoothed RTT reported by nmap (srtt)";
+  return `<td class="latency-cell" title="${title}">${v === null ? '<span class="muted">—</span>' : v}${spark}</td>`;
 }
 
 function renderHostnameCell(h) {
@@ -684,6 +746,13 @@ function renderScan(scan) {
   // pass through here is a no-op and cannot loop).
   if (hostLabelsCidr !== scan.cidr) {
     ensureLabels(scan.cidr).then(() => {
+      if (lastScan === scan) renderScan(scan);
+    });
+  }
+  // Sparklines load the same lazy way (and re-render once, harmlessly, if
+  // both arrive: renderScan is idempotent for the same scan).
+  if (hostSparksKey !== sparksKeyFor(scan)) {
+    ensureSparks(scan).then(() => {
       if (lastScan === scan) renderScan(scan);
     });
   }

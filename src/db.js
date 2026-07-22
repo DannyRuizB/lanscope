@@ -354,12 +354,13 @@ const stmts = {
         SET last_sent_at = ?, last_status = ?, last_error = ?
       WHERE id = ?`,
   ),
-  // v0.12.0 — timeline queries.
+  // v0.12.0 — timeline queries. id breaks started_at ties (scans created
+  // within the same millisecond) so the axis order is deterministic.
   listScansByCidrSince: db.prepare(
     `SELECT id, started_at, finished_at, status, host_count
        FROM scans
       WHERE cidr = ? AND started_at >= ?
-      ORDER BY started_at ASC`,
+      ORDER BY started_at ASC, id ASC`,
   ),
   countOpenPortsByScan: db.prepare(
     `SELECT COUNT(*) AS n
@@ -379,6 +380,10 @@ const stmts = {
   getHostByScanAndIp: db.prepare(
     `SELECT id, status, latency_ms, hostname, portscanned_at
        FROM hosts WHERE scan_id = ? AND ip = ?`,
+  ),
+  // v1.9.0 — latency sparkline query (all hosts of one scan at once).
+  listHostLatenciesByScan: db.prepare(
+    `SELECT ip, latency_ms FROM hosts WHERE scan_id = ?`,
   ),
   countOpenTcpPortsByHost: db.prepare(
     `SELECT COUNT(*) AS n FROM host_ports
@@ -915,6 +920,23 @@ function getHostHistory(cidr, ip) {
   return { cidr, ip, points };
 }
 
+// v1.9.0 — per-host latency series across the last N scans of a network,
+// aligned on one shared scan axis so every row's sparkline reads the same
+// timeline. A scan where the host was absent (or never timed) stays null:
+// the hole is the story, never a fake zero.
+const SPARK_SCAN_LIMIT = 20;
+function getLatencySparks(cidr, limit = SPARK_SCAN_LIMIT) {
+  const scans = stmts.listScansByCidrSince.all(cidr, 0).slice(-limit);
+  const sparks = {};
+  scans.forEach((s, i) => {
+    for (const row of stmts.listHostLatenciesByScan.all(s.id)) {
+      if (!sparks[row.ip]) sparks[row.ip] = new Array(scans.length).fill(null);
+      sparks[row.ip][i] = row.latency_ms;
+    }
+  });
+  return { cidr, scan_ids: scans.map((s) => s.id), sparks };
+}
+
 function recordChannelDispatch(id, { status, error = null }) {
   stmts.recordChannelDispatchStmt.run(Date.now(), status, error, id);
   return getChannel(id);
@@ -1099,6 +1121,7 @@ module.exports = {
   recordChannelDispatch,
   getTimeline,
   getHostHistory,
+  getLatencySparks,
   ALERT_TYPES,
   createAlert,
   createAlerts,

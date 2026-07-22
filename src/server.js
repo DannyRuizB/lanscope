@@ -156,6 +156,16 @@ app.get("/api/host-history", (req, res) => {
   res.json(db.getHostHistory(cidr, ip));
 });
 
+// v1.9.0 — every host's latency series over the last scans of a network, in
+// one call (the sparkline column needs all rows at once). A GET on purpose:
+// it also works on the read-only public demo.
+app.get("/api/latency-sparks", (req, res) => {
+  const { cidr } = req.query || {};
+  const err = validateCidr(cidr);
+  if (err) return res.status(400).json({ error: err });
+  res.json(db.getLatencySparks(cidr));
+});
+
 app.post("/api/scan", async (req, res) => {
   const { cidr } = req.body || {};
   const error = validateCidr(cidr);

@@ -773,6 +773,10 @@ button.ghost.danger:hover {
 .hosts-table th.udp-col {
   width: 130px;
 }
+/* v1.9.0 — room for the number plus its sparkline (56px SVG + margin). */
+.hosts-table th.latency-col {
+  width: 138px;
+}
 .ports-cell,
 .os-cell,
 .udp-cell {
@@ -1966,3 +1970,20 @@ li.is-baseline .scan-cidr {
 .hist-table th, .hist-table td { padding: 4px 8px; text-align: left; border-bottom: 1px solid var(--border); }
 .hist-table th { color: var(--text-mute); font-weight: 600; }
 .hist-down { color: var(--danger); font-weight: 600; }
+
+/* v1.9.0 — latency sparklines: the host's trend inline, next to the number */
+.latency-cell .spark {
+  margin-left: 6px;
+  vertical-align: middle;
+  opacity: 0.85;
+}
+.latency-cell .spark polyline {
+  fill: none;
+  stroke: var(--accent);
+  stroke-width: 1.2;
+  stroke-linejoin: round;
+  stroke-linecap: round;
+}
+.latency-cell .spark circle {
+  fill: var(--accent);
+}
