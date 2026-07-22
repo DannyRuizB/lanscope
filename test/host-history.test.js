@@ -59,3 +59,40 @@ test('getHostHistory tells presence, latency and port counts apart', () => {
   // Unknown network → empty series, not an error.
   assert.equal(db.getHostHistory('172.31.0.0/24', '172.31.0.1').points.length, 0);
 });
+
+test('uptime% counts only the scans that covered the host', () => {
+  const C = '10.9.10.0/24';
+  // up, down, absent, up → covered = 3 (up/down/up), of which 2 up = 66.7%
+  const a = db.startScan(C); db.finishScan(a, [{ ip: '10.9.10.5', status: 'up', latency_ms: 1 }]);
+  const b = db.startScan(C); db.finishScan(b, [{ ip: '10.9.10.5', status: 'down' }]);
+  const c = db.startScan(C); db.finishScan(c, [{ ip: '10.9.10.6', status: 'up' }]); // 10.5 absent
+  const d = db.startScan(C); db.finishScan(d, [{ ip: '10.9.10.5', status: 'up', latency_ms: 2 }]);
+
+  const u = db.getHostHistory(C, '10.9.10.5').uptime;
+  assert.equal(u.scans_counted, 3, 'the absent scan is not counted');
+  assert.equal(u.scans_up, 2);
+  assert.equal(u.pct, 66.7);
+});
+
+test('uptime% is null when nothing covered the host (no data, not 0%)', () => {
+  const C = '10.9.11.0/24';
+  const s = db.startScan(C); db.finishScan(s, [{ ip: '10.9.11.1', status: 'up' }]);
+  const u = db.getHostHistory(C, '10.9.11.99').uptime; // never seen
+  assert.equal(u.scans_counted, 0);
+  assert.equal(u.pct, null);
+});
+
+test('historyToCsv keeps a row per scan (gaps included) with a header + BOM', () => {
+  const { historyToCsv, historyFilename } = require('../src/export');
+  const C = '10.9.12.0/24';
+  const a = db.startScan(C); db.finishScan(a, [{ ip: '10.9.12.5', status: 'up', latency_ms: 3 }]);
+  const b = db.startScan(C); db.finishScan(b, [{ ip: '10.9.12.6', status: 'up' }]); // 12.5 absent
+  const hist = db.getHostHistory(C, '10.9.12.5');
+  const csv = historyToCsv(hist);
+  assert.ok(csv.startsWith('\uFEFF'), 'UTF-8 BOM for Excel');
+  const lines = csv.trim().split('\r\n');
+  assert.equal(lines.length, 3, 'header + 2 scans (the absent one kept)');
+  assert.match(lines[0], /^\uFEFF?scan_id,started_at,present/);
+  assert.ok(lines.some((l) => l.includes(',false,')), 'the absent scan is present=false');
+  assert.match(historyFilename(hist, 'csv'), /^lanscope_host-history_10-9-12-5_10-9-12-0-24\.csv$/);
+});

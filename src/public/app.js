@@ -2474,9 +2474,12 @@ document.addEventListener("keydown", (e) => {
 const histEls = {
   modal: document.getElementById("modal-history"),
   title: document.getElementById("history-modal-title"),
+  summary: document.getElementById("history-summary"),
   canvas: document.getElementById("history-chart"),
   chartWrap: document.getElementById("history-chart-wrap"),
   tableWrap: document.getElementById("history-table-wrap"),
+  exportCsv: document.getElementById("history-export-csv"),
+  exportJson: document.getElementById("history-export-json"),
 };
 let histChart = null;
 
@@ -2485,10 +2488,15 @@ async function openHistoryModal(ip) {
   const l = hostLabels.get(ip);
   histEls.title.textContent = `${l?.label ? `${l.label} · ` : ""}${ip} — history in ${lastScan.cidr}`;
   histEls.modal.hidden = false;
+  if (histEls.summary) histEls.summary.innerHTML = "";
+  // Point the export anchors at this host now that we know the CIDR + IP.
+  const q = `cidr=${encodeURIComponent(lastScan.cidr)}&ip=${encodeURIComponent(ip)}`;
+  if (histEls.exportCsv) histEls.exportCsv.href = `/api/host-history/export?${q}&format=csv`;
+  if (histEls.exportJson) histEls.exportJson.href = `/api/host-history/export?${q}&format=json`;
   histEls.tableWrap.innerHTML = `<p class="muted">Loading…</p>`;
   try {
     const data = await fetchJson(
-      `/api/host-history?cidr=${encodeURIComponent(lastScan.cidr)}&ip=${encodeURIComponent(ip)}`,
+      `/api/host-history?${q}`,
     );
     renderHostHistory(data);
   } catch (err) {
@@ -2507,6 +2515,19 @@ function closeHistoryModal() {
 
 function renderHostHistory(data) {
   const pts = data.points || [];
+  // Uptime chip: share of the scans that COVERED this host where it was up
+  // (absent scans aren't counted — see db.getHostHistory). null = no data.
+  const u = data.uptime;
+  if (histEls.summary) {
+    if (u && u.pct != null) {
+      const cls = u.pct >= 99 ? "up" : u.pct >= 90 ? "warn" : "down";
+      histEls.summary.innerHTML =
+        `<span class="uptime-chip uptime-${cls}">${u.pct}% uptime</span>` +
+        `<span class="muted"> · up in ${u.scans_up} of ${u.scans_counted} scans that covered it</span>`;
+    } else {
+      histEls.summary.innerHTML = `<span class="muted">No coverage yet — uptime unavailable.</span>`;
+    }
+  }
   // Latency line over every scan; a scan where the host was absent (or the
   // ping didn't time it) is a null → gap, never a fake zero. Point colour
   // tells presence at a glance: green up, red down, grey gap.

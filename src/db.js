@@ -917,7 +917,19 @@ function getHostHistory(cidr, ip) {
         : null,
     };
   });
-  return { cidr, ip, points };
+  // v1.10.0 — uptime% over the scans that actually covered this host. A
+  // scan where the host was present AND up counts as up; present-but-down
+  // counts as down; absent scans (present:false) are NOT counted — the host
+  // simply wasn't in that sweep's scope, which is not a downtime signal.
+  const covered = points.filter((p) => p.present);
+  const up = covered.filter((p) => p.status === "up").length;
+  const uptime = {
+    scans_up: up,
+    scans_counted: covered.length,
+    // null when nothing covered the host — "no data", not "0%".
+    pct: covered.length ? Math.round((up / covered.length) * 1000) / 10 : null,
+  };
+  return { cidr, ip, points, uptime };
 }
 
 // v1.9.0 — per-host latency series across the last N scans of a network,

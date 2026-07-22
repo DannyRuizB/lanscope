@@ -92,6 +92,9 @@ jobs:
           echo "--- /api/latency-sparks (v1.9.0) ---"
           curl -fsS "http://localhost:3030/api/latency-sparks?cidr=192.168.0.0%2F24" | grep -q '"sparks":{}'
 
+          echo "--- /api/host-history/export (v1.10.0) ---"
+          curl -fsS "http://localhost:3030/api/host-history/export?cidr=192.168.0.0%2F24&ip=192.168.0.1&format=csv" | grep -q 'scan_id,started_at,present'
+
           echo "--- schedules keep_last (v1.8.0) ---"
           # Round-trips the retention field; enabled=false so the cron never ticks.
           curl -fsS -X POST -H 'content-type: application/json' \

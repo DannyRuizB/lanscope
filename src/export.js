@@ -74,4 +74,42 @@ function exportFilename(scan, format) {
   return `lanscope_scan-${scan.id}_${cidr}.${format}`;
 }
 
-module.exports = { scanToCsv, exportFilename, csvField };
+// v1.10.0 — host-history export. One row per scan of the host's network, in
+// the same chronological order as the modal chart. Absent scans keep their
+// row (present=false) so the file shows the gaps, not a compacted history.
+const HISTORY_COLUMNS = [
+  "scan_id",
+  "started_at",
+  "present",
+  "status",
+  "latency_ms",
+  "hostname",
+  "tcp_open_ports",
+];
+
+function historyToCsv(history) {
+  const lines = [HISTORY_COLUMNS.join(",")];
+  for (const p of history.points || []) {
+    lines.push([
+      p.scan_id,
+      p.started_at ? new Date(p.started_at).toISOString() : "",
+      p.present ? "true" : "false",
+      p.status ?? "",
+      p.latency_ms ?? "",
+      p.hostname ?? "",
+      p.tcp_open_ports ?? "",
+    ].map(csvField).join(","));
+  }
+  return "\uFEFF" + lines.join("\r\n") + "\r\n";
+}
+
+// lanscope_host-history_192-168-1-42_192-168-1-0_24.csv
+function historyFilename(history, format) {
+  const ip = String(history.ip || "host").replace(/[^A-Za-z0-9_-]+/g, "-");
+  const cidr = String(history.cidr || "net").replace(/[^A-Za-z0-9_-]+/g, "-");
+  return `lanscope_host-history_${ip}_${cidr}.${format}`;
+}
+
+module.exports = {
+  scanToCsv, exportFilename, csvField, historyToCsv, historyFilename,
+};
