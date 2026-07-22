@@ -74,6 +74,21 @@ async function runScheduled(schedule) {
     scan_id: result.scanId,
     status: "done",
   });
+  // v1.8.0 — retention: prune AFTER recording the run, so last_scan_id points
+  // at the scan that was just kept. A prune failure never taints the run —
+  // the scan itself succeeded; log and move on.
+  if (Number.isInteger(schedule.keep_last) && schedule.keep_last > 0) {
+    try {
+      const pruned = db.pruneScheduleScans(schedule.id, schedule.keep_last);
+      if (pruned > 0) {
+        console.log(
+          `[scheduler] schedule ${schedule.id}: pruned ${pruned} old scan(s) (keep_last=${schedule.keep_last})`,
+        );
+      }
+    } catch (e) {
+      console.error(`[scheduler] schedule ${schedule.id}: prune failed: ${e.message}`);
+    }
+  }
   notifier
     .dispatch("scan_done", { schedule, scan: result.scan })
     .catch((e) => console.error(`[scheduler] notify scan_done failed: ${e.message}`));

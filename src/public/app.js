@@ -2182,6 +2182,7 @@ const schedEls = {
   inputName: document.getElementById("sched-name"),
   inputCidr: document.getElementById("sched-cidr"),
   inputCron: document.getElementById("sched-cron"),
+  inputKeep: document.getElementById("sched-keep"),
   cronPresets: Array.from(document.querySelectorAll(".cron-preset")),
   cronHint: document.getElementById("sched-cron-hint"),
 };
@@ -2252,7 +2253,7 @@ function renderScheduleRow(s) {
   return `
     <li class="${s.enabled ? "" : "disabled"}" data-id="${s.id}">
       <span class="schedule-name">${escapeHtml(s.name)}</span>
-      <span class="schedule-meta"><code>${escapeHtml(s.cidr)}</code> · ${escapeHtml(cronHumanLabel(s.cron_expr))}</span>
+      <span class="schedule-meta"><code>${escapeHtml(s.cidr)}</code> · ${escapeHtml(cronHumanLabel(s.cron_expr))}${s.keep_last ? ` · keeps last ${s.keep_last}` : ""}</span>
       ${lastRunSummary(s)}
       <div class="schedule-controls">
         <button class="ghost small sched-run" data-act="run" data-id="${s.id}" title="Run this scan now">▶ Run now</button>
@@ -2489,6 +2490,7 @@ function openScheduleModal() {
   schedEls.inputName.value = "";
   schedEls.inputCidr.value = els.cidr?.value?.trim() || "";
   schedEls.inputCron.value = "";
+  schedEls.inputKeep.value = "";
   schedEls.inputCron.hidden = true;
   schedEls.cronPresets.forEach((b, i) => b.classList.toggle("active", i === 0));
   schedEls.cronHint.innerHTML = "Runs every 15 minutes (<code>*/15 * * * *</code>).";
@@ -2521,12 +2523,20 @@ async function submitScheduleModal() {
   if (!name) return showSchedError("Name is required.");
   if (!cidr) return showSchedError("CIDR is required.");
   if (!cronExpr) return showSchedError("Cron expression is required.");
+  const keepRaw = schedEls.inputKeep.value.trim();
+  let keepLast = null;
+  if (keepRaw !== "") {
+    keepLast = Number(keepRaw);
+    if (!Number.isInteger(keepLast) || keepLast < 1 || keepLast > 10000) {
+      return showSchedError("Retention must be a whole number between 1 and 10000.");
+    }
+  }
   try {
     schedEls.modalCreate.disabled = true;
     await fetchJson("/api/schedules", {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ name, cidr, cron_expr: cronExpr, enabled: true }),
+      body: JSON.stringify({ name, cidr, cron_expr: cronExpr, enabled: true, keep_last: keepLast }),
     });
     closeScheduleModal();
     await loadSchedules();

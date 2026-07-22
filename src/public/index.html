@@ -462,6 +462,11 @@
             <input id="sched-cron" type="text" placeholder="m h dom mon dow (e.g. 30 9 * * 1-5)" spellcheck="false" autocomplete="off" hidden />
             <span id="sched-cron-hint" class="form-hint">Runs every 15 minutes (<code>*/15 * * * *</code>).</span>
           </div>
+          <label class="form-field">
+            <span class="form-label">Retention</span>
+            <input id="sched-keep" type="number" min="1" max="10000" step="1" placeholder="keep every scan" />
+            <span class="form-hint">Keep only the last N scans of this schedule — older ones are pruned after each run. The ★ baseline and scans with pending alerts are never deleted. Leave empty to keep everything.</span>
+          </label>
         </form>
         <div class="modal-actions">
           <button type="button" class="ghost" data-modal-close>Cancel</button>
@@ -506,7 +511,7 @@
     </div>
 
     <footer class="bottombar">
-      <span>v1.7.0</span>
+      <span>v1.8.0</span>
       <span>·</span>
       <span>MIT</span>
       <span>·</span>
