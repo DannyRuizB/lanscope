@@ -25,6 +25,18 @@ function validateCronExpr(s) {
   return { value: expr };
 }
 
+// v1.8.0 — per-schedule retention. null/absent means "keep every scan".
+// The cap is a sanity bound, not a real limit — 10000 hourly scans is over
+// a year of history; anything above that is a typo, not a policy.
+const KEEP_LAST_MAX = 10000;
+function validateKeepLast(v) {
+  if (v === null || v === undefined) return { value: null };
+  if (!Number.isInteger(v) || v < 1 || v > KEEP_LAST_MAX) {
+    return { error: `keep_last must be an integer between 1 and ${KEEP_LAST_MAX}, or null` };
+  }
+  return { value: v };
+}
+
 const ALLOWED_EVENTS = new Set([
   "scan_done",
   "scan_error",
@@ -133,6 +145,7 @@ function validateNotesText(s) {
 module.exports = {
   validateScheduleName,
   validateCronExpr,
+  validateKeepLast,
   validateChannelName,
   validateChannelType,
   validateHttpUrl,

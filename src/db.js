@@ -167,6 +167,11 @@ if (!columnExists("scans", "schedule_id")) {
     `ALTER TABLE scans ADD COLUMN schedule_id INTEGER REFERENCES scheduled_scans(id) ON DELETE SET NULL`,
   );
 }
+// v1.8.0 — per-schedule retention. NULL means "keep every scan" (the
+// pre-v1.8 behaviour, and still the default).
+if (!columnExists("scheduled_scans", "keep_last")) {
+  db.exec(`ALTER TABLE scheduled_scans ADD COLUMN keep_last INTEGER`);
+}
 
 const stmts = {
   insertScan: db.prepare(
@@ -287,24 +292,37 @@ const stmts = {
   // v0.10.0 — scheduled scans. scan_options stored as JSON text; parsed on read.
   listSchedulesStmt: db.prepare(
     `SELECT id, name, cidr, cron_expr, enabled, scan_options,
-            last_run_at, last_scan_id, last_status, last_error, created_at
+            last_run_at, last_scan_id, last_status, last_error, created_at, keep_last
        FROM scheduled_scans ORDER BY created_at DESC`,
   ),
   listEnabledSchedulesStmt: db.prepare(
     `SELECT id, name, cidr, cron_expr, enabled, scan_options,
-            last_run_at, last_scan_id, last_status, last_error, created_at
+            last_run_at, last_scan_id, last_status, last_error, created_at, keep_last
        FROM scheduled_scans WHERE enabled = 1 ORDER BY id`,
   ),
   getScheduleStmt: db.prepare(
     `SELECT id, name, cidr, cron_expr, enabled, scan_options,
-            last_run_at, last_scan_id, last_status, last_error, created_at
+            last_run_at, last_scan_id, last_status, last_error, created_at, keep_last
        FROM scheduled_scans WHERE id = ?`,
   ),
   insertScheduleStmt: db.prepare(
-    `INSERT INTO scheduled_scans (name, cidr, cron_expr, enabled, scan_options, created_at)
-     VALUES (?, ?, ?, ?, ?, ?) RETURNING id`,
+    `INSERT INTO scheduled_scans (name, cidr, cron_expr, enabled, scan_options, keep_last, created_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?) RETURNING id`,
   ),
   deleteScheduleStmt: db.prepare(`DELETE FROM scheduled_scans WHERE id = ?`),
+  // v1.8.0 — retention. Deletes this schedule's scans beyond the newest
+  // `keepLast`, except two protected kinds: the declared baseline (its
+  // inventory_baselines row is ON DELETE CASCADE — pruning it would silently
+  // drop the CIDR's declared inventory) and scans that still carry pending
+  // (unacknowledged) alerts — retention must never swallow open findings.
+  pruneScheduleScansStmt: db.prepare(
+    `DELETE FROM scans
+      WHERE schedule_id = ?
+        AND id NOT IN (SELECT id FROM scans WHERE schedule_id = ?
+                        ORDER BY started_at DESC, id DESC LIMIT ?)
+        AND id NOT IN (SELECT scan_id FROM inventory_baselines)
+        AND id NOT IN (SELECT scan_id FROM alerts WHERE acknowledged_at IS NULL)`,
+  ),
   recordScheduleRunStmt: db.prepare(
     `UPDATE scheduled_scans
         SET last_run_at = ?, last_scan_id = ?, last_status = ?, last_error = ?
@@ -626,6 +644,7 @@ function parseScheduleRow(row) {
     last_status: row.last_status,
     last_error: row.last_error,
     created_at: row.created_at,
+    keep_last: row.keep_last,
   };
 }
 
@@ -641,7 +660,14 @@ function getSchedule(id) {
   return parseScheduleRow(stmts.getScheduleStmt.get(id));
 }
 
-function createSchedule({ name, cidr, cron_expr, enabled = true, scan_options = null }) {
+function createSchedule({
+  name,
+  cidr,
+  cron_expr,
+  enabled = true,
+  scan_options = null,
+  keep_last = null,
+}) {
   const optsJson = scan_options ? JSON.stringify(scan_options) : null;
   const row = stmts.insertScheduleStmt.get(
     name,
@@ -649,6 +675,7 @@ function createSchedule({ name, cidr, cron_expr, enabled = true, scan_options = 
     cron_expr,
     enabled ? 1 : 0,
     optsJson,
+    keep_last,
     Date.now(),
   );
   return getSchedule(row.id);
@@ -681,6 +708,10 @@ function updateSchedule(id, patch) {
     sets.push("scan_options = ?");
     args.push(patch.scan_options ? JSON.stringify(patch.scan_options) : null);
   }
+  if (Object.prototype.hasOwnProperty.call(patch, "keep_last")) {
+    sets.push("keep_last = ?");
+    args.push(patch.keep_last);
+  }
   if (sets.length === 0) return parseScheduleRow(current);
   args.push(id);
   db.prepare(`UPDATE scheduled_scans SET ${sets.join(", ")} WHERE id = ?`).run(...args);
@@ -689,6 +720,14 @@ function updateSchedule(id, patch) {
 
 function deleteSchedule(id) {
   return stmts.deleteScheduleStmt.run(id).changes > 0;
+}
+
+// v1.8.0 — apply a schedule's retention policy. Returns how many scans were
+// deleted (each takes its hosts / ports / scripts / acked alerts along via
+// ON DELETE CASCADE). No-op when keepLast isn't a positive integer.
+function pruneScheduleScans(scheduleId, keepLast) {
+  if (!Number.isInteger(keepLast) || keepLast < 1) return 0;
+  return stmts.pruneScheduleScansStmt.run(scheduleId, scheduleId, keepLast).changes;
 }
 
 function recordScheduleRun(id, { scan_id = null, status, error = null }) {
@@ -1048,6 +1087,7 @@ module.exports = {
   getSchedule,
   createSchedule,
   updateSchedule,
+  pruneScheduleScans,
   deleteSchedule,
   recordScheduleRun,
   listChannels,

@@ -343,6 +343,7 @@ function seedSchedules(rawDb, { scan2Id, scan2EndedAt, scan3Id, scan3EndedAt }) 
     cron_expr: "0 * * * *",
     enabled: true,
     scan_options: null,
+    keep_last: 24, // v1.8.0 — show the retention feature in the demo row
   });
   const nightly = db.createSchedule({
     name: "Nightly inventory check",

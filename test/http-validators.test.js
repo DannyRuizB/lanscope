@@ -93,3 +93,16 @@ test('validateNotesText trims, caps at 500 and treats empty as null', () => {
   assert.ok(V.validateNotesText('x'.repeat(501)).error);
   assert.ok(V.validateNotesText({}).error);
 });
+
+// --- schedule retention (v1.8.0) ------------------------------------------
+
+test('validateKeepLast accepts positive integers up to 10000, null clears', () => {
+  assert.equal(V.validateKeepLast(1).value, 1);
+  assert.equal(V.validateKeepLast(24).value, 24);
+  assert.equal(V.validateKeepLast(10000).value, 10000);
+  assert.equal(V.validateKeepLast(null).value, null);
+  assert.equal(V.validateKeepLast(undefined).value, null);
+  for (const bad of [0, -1, 1.5, 10001, '24', 'abc', true, {}, []]) {
+    assert.ok(V.validateKeepLast(bad).error, `should reject ${JSON.stringify(bad)}`);
+  }
+});

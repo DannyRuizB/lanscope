@@ -89,6 +89,13 @@ jobs:
           echo "--- /api/host-history (v1.7.0) ---"
           curl -fsS "http://localhost:3030/api/host-history?cidr=192.168.0.0%2F24&ip=192.168.0.1" | grep -q '"points":\[\]'
 
+          echo "--- schedules keep_last (v1.8.0) ---"
+          # Round-trips the retention field; enabled=false so the cron never ticks.
+          curl -fsS -X POST -H 'content-type: application/json' \
+            -d '{"name":"smoke retention","cidr":"192.168.0.0/24","cron_expr":"0 3 * * *","enabled":false,"keep_last":24}' \
+            http://localhost:3030/api/schedules | grep -q '"keep_last":24'
+          curl -fsS http://localhost:3030/api/schedules | grep -q '"keep_last":24'
+
           echo "--- GET / ---"
           curl -fsS -o /tmp/index.html -w "code=%{http_code}\n" http://localhost:3030/
           grep -q '<title>LanScope' /tmp/index.html

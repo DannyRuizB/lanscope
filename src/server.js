@@ -15,6 +15,7 @@ const {
 } = require("./scanner");
 const {
   validateScheduleName,
+  validateKeepLast,
   validateCronExpr,
   validateChannelName,
   validateChannelType,
@@ -362,12 +363,16 @@ app.post("/api/schedules", (req, res) => {
   const optsV = scheduler.validateScheduleScanOptions(body.scan_options);
   if (optsV.error) return res.status(400).json({ error: optsV.error });
 
+  const keepV = validateKeepLast(body.keep_last);
+  if (keepV.error) return res.status(400).json({ error: keepV.error });
+
   const schedule = db.createSchedule({
     name: nameV.value,
     cidr: body.cidr,
     cron_expr: cronV.value,
     enabled: body.enabled !== false,
     scan_options: body.scan_options || null,
+    keep_last: keepV.value,
   });
   scheduler.reload();
   res.status(201).json({ schedule });
@@ -406,6 +411,11 @@ app.patch("/api/schedules/:id", (req, res) => {
     const v = scheduler.validateScheduleScanOptions(body.scan_options);
     if (v.error) return res.status(400).json({ error: v.error });
     patch.scan_options = body.scan_options;
+  }
+  if (Object.prototype.hasOwnProperty.call(body, "keep_last")) {
+    const v = validateKeepLast(body.keep_last);
+    if (v.error) return res.status(400).json({ error: v.error });
+    patch.keep_last = v.value;
   }
 
   const schedule = db.updateSchedule(id, patch);
