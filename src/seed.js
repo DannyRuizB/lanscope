@@ -327,8 +327,18 @@ function seedTimelineFiller(rawDb, baselineEndedAt, latestStartedAt) {
     const variant = variants[i % variants.length];
     const trim = i % 3; // 0, 1 or 2 hosts removed deterministically
     const hosts = trim === 0 ? variant : variant.slice(0, variant.length - trim);
+    // v1.9.0 — deterministic per-scan latency sway so the sparkline column
+    // has real shapes in the demo: WiFi-grade latencies (>= 10 ms) swing
+    // ±30%, wired ones stay tight (±12%). No Math.random on purpose — the
+    // seed must be reproducible run to run.
+    const jittered = hosts.map((h, hi) => {
+      if (h.latency_ms == null) return h;
+      const sway = h.latency_ms >= 10 ? 0.3 : 0.12;
+      const f = 1 + sway * Math.sin(i * 1.7 + hi);
+      return { ...h, latency_ms: Math.round(h.latency_ms * f * 10) / 10 };
+    });
     const duration = 3500 + ((i * 911) % 4500); // ~3.5–8s, deterministic spread
-    const scanId = seedScan(rawDb, t, hosts, duration);
+    const scanId = seedScan(rawDb, t, jittered, duration);
     ids.push(scanId);
   }
   return ids;
