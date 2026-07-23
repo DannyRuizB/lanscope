@@ -589,6 +589,38 @@ button.ghost.danger:hover {
   gap: 8px;
   flex-wrap: wrap;
 }
+/* v1.11.0 — free-text host search, styled to match the port filter */
+.host-search {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.host-search-input {
+  width: 150px;
+  padding: 4px 10px;
+  background: transparent;
+  color: var(--text-strong);
+  border: 1px solid var(--border-strong);
+  border-radius: 4px;
+  font-family: var(--mono);
+  font-size: 12px;
+  font-weight: 600;
+}
+.host-search-input::placeholder {
+  color: var(--text-mute);
+  font-weight: 500;
+}
+.host-search-input:focus {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-soft);
+}
+.host-search-count {
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
 .port-filter {
   position: relative;
   display: inline-flex;

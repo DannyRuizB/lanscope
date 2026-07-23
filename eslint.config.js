@@ -39,6 +39,10 @@ module.exports = [
         // Loaded from CDN <script> tags in index.html, not bundled.
         cytoscape: 'readonly',
         Chart: 'readonly',
+        // Pure helper module loaded via its own <script> before app.js.
+        HostSearch: 'readonly',
+        // host-search.js is dual browser/node (module.exports fallback).
+        module: 'readonly',
       },
     },
     rules: sharedRules,
