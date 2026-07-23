@@ -37,28 +37,46 @@ function normName(s) {
   return v || null;
 }
 
+// v1.12.0 — latency threshold. LATENCY_ALERT_MS is a global knob (unset =
+// feature off, the default): when a scan times a host at or above the
+// threshold, a high_latency alert fires. Parsed on every call so tests can
+// flip it; strict parse — zero, negatives and garbage mean "off" rather than
+// a threshold that accidentally matches everything.
+function latencyThresholdMs() {
+  const raw = (process.env.LATENCY_ALERT_MS || "").trim();
+  if (!raw) return null;
+  const n = Number(raw);
+  return Number.isFinite(n) && n > 0 ? n : null;
+}
+
+// Unlike the drift detectors below, high latency is a statement about the
+// CURRENT scan's health, not about divergence from a declared inventory —
+// so it deliberately needs no baseline and fires on any done scan.
+function pushLatencySpecs(scan, specs, spec) {
+  const threshold = latencyThresholdMs();
+  if (threshold === null) return;
+  for (const h of scan.hosts || []) {
+    if (h.status !== "up") continue;
+    if (h.latency_ms == null) continue; // not timed is not "slow"
+    if (h.latency_ms < threshold) continue;
+    specs.push(
+      spec("high_latency", h.id, {
+        ip: h.ip,
+        hostname: h.hostname || null,
+        latency_ms: h.latency_ms,
+        threshold_ms: threshold,
+      }),
+    );
+  }
+}
+
 // Wrap callers in try/catch — a detection failure should never break the
-// scan flow. Returns [] when the scan isn't done, the CIDR has no declared
-// baseline, or the scan IS the baseline (self-compare).
+// scan flow. Returns [] when the scan isn't done. The baseline-drift
+// detectors additionally need a declared baseline that isn't this very scan
+// (self-compare); high_latency runs regardless.
 function detectAlertsForScan(scanId) {
   const scan = db.getScan(scanId);
   if (!scan || scan.status !== "done") return [];
-
-  const baseline = db.getBaselineByCidr(scan.cidr);
-  if (!baseline) return [];
-  if (baseline.scan_id === scanId) return [];
-
-  const baselineScan = db.getScan(baseline.scan_id);
-  if (!baselineScan) return [];
-
-  const currentByIp = new Map();
-  for (const h of scan.hosts || []) {
-    if (h.status === "up") currentByIp.set(h.ip, h);
-  }
-  const baselineByIp = new Map();
-  for (const h of baselineScan.hosts || []) {
-    if (h.status === "up") baselineByIp.set(h.ip, h);
-  }
 
   const specs = [];
   const spec = (type, host_id, payload) => ({
@@ -68,6 +86,27 @@ function detectAlertsForScan(scanId) {
     type,
     payload,
   });
+
+  pushLatencySpecs(scan, specs, spec);
+
+  const baseline = db.getBaselineByCidr(scan.cidr);
+  if (!baseline || baseline.scan_id === scanId) {
+    return specs.length ? db.createAlerts(specs) : [];
+  }
+
+  const baselineScan = db.getScan(baseline.scan_id);
+  if (!baselineScan) {
+    return specs.length ? db.createAlerts(specs) : [];
+  }
+
+  const currentByIp = new Map();
+  for (const h of scan.hosts || []) {
+    if (h.status === "up") currentByIp.set(h.ip, h);
+  }
+  const baselineByIp = new Map();
+  for (const h of baselineScan.hosts || []) {
+    if (h.status === "up") baselineByIp.set(h.ip, h);
+  }
 
   for (const [ip, h] of currentByIp) {
     if (baselineByIp.has(ip)) continue;
@@ -144,4 +183,4 @@ function summarizeAlerts(alerts) {
   return { total: alerts.length, counts };
 }
 
-module.exports = { detectAlertsForScan, osBucket, summarizeAlerts };
+module.exports = { detectAlertsForScan, osBucket, summarizeAlerts, latencyThresholdMs };

@@ -1879,6 +1879,9 @@ li.is-baseline .scan-cidr {
 .alert-type-chip.changed_ports {
   background: #b45309;
 }
+/* v1.12.0 — health finding, not inventory drift: its own hue (indigo) so it
+   reads apart from the green/red/amber baseline chips. */
+.alert-type-chip.high_latency { background: #4338ca; }
 .alert-detail {
   grid-area: detail;
   color: var(--text-strong);
