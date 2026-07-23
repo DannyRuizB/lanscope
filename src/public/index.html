@@ -79,7 +79,7 @@
         </div>
         <ul class="alerts-cta-list">
           <li>
-            <button id="open-alerts-btn" class="alerts-cta-btn" type="button" title="View baseline-divergence alerts (appeared / disappeared / changed hosts)">
+            <button id="open-alerts-btn" class="alerts-cta-btn" type="button" title="View alerts: baseline divergence (appeared / disappeared / changed hosts) and high-latency findings">
               <span class="alerts-cta-icon" aria-hidden="true">⚠</span>
               <span class="alerts-cta-label">View alerts</span>
               <span id="alerts-badge" class="alerts-badge" hidden>0</span>
@@ -429,6 +429,7 @@
             <label class="adv-check"><input type="checkbox" value="changed_hostname" /><span>changed_hostname</span></label>
             <label class="adv-check"><input type="checkbox" value="changed_os" /><span>changed_os</span></label>
             <label class="adv-check"><input type="checkbox" value="changed_ports" /><span>changed_ports</span></label>
+            <label class="adv-check"><input type="checkbox" value="high_latency" /><span>high_latency</span></label>
           </div>
         </div>
         <ul id="alerts-list" class="alerts-list">
@@ -518,7 +519,7 @@
     </div>
 
     <footer class="bottombar">
-      <span>v1.11.0</span>
+      <span>v1.12.0</span>
       <span>·</span>
       <span>MIT</span>
       <span>·</span>

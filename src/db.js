@@ -108,7 +108,8 @@ db.exec(`
     type            TEXT    NOT NULL CHECK (type IN (
                       'appeared','disappeared',
                       'changed_mac','changed_hostname',
-                      'changed_os','changed_ports')),
+                      'changed_os','changed_ports',
+                      'high_latency')),
     payload         TEXT    NOT NULL,
     created_at      INTEGER NOT NULL,
     acknowledged_at INTEGER
@@ -171,6 +172,43 @@ if (!columnExists("scans", "schedule_id")) {
 // pre-v1.8 behaviour, and still the default).
 if (!columnExists("scheduled_scans", "keep_last")) {
   db.exec(`ALTER TABLE scheduled_scans ADD COLUMN keep_last INTEGER`);
+}
+// v1.12.0 — the alerts.type CHECK predates high_latency, and SQLite cannot
+// alter a CHECK in place: an existing DB gets the table rebuilt once (same
+// columns, ids and data preserved; nothing references alerts, so the drop is
+// safe even with foreign_keys ON). The indexes fall with the old table and
+// are recreated after the rename.
+const alertsDdl =
+  db
+    .prepare(`SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'alerts'`)
+    .get()?.sql || "";
+if (!alertsDdl.includes("high_latency")) {
+  db.exec(`
+    BEGIN;
+    CREATE TABLE alerts_new (
+      id              INTEGER PRIMARY KEY AUTOINCREMENT,
+      scan_id         INTEGER NOT NULL REFERENCES scans(id) ON DELETE CASCADE,
+      host_id         INTEGER          REFERENCES hosts(id) ON DELETE SET NULL,
+      cidr            TEXT    NOT NULL,
+      type            TEXT    NOT NULL CHECK (type IN (
+                        'appeared','disappeared',
+                        'changed_mac','changed_hostname',
+                        'changed_os','changed_ports',
+                        'high_latency')),
+      payload         TEXT    NOT NULL,
+      created_at      INTEGER NOT NULL,
+      acknowledged_at INTEGER
+    );
+    INSERT INTO alerts_new
+      SELECT id, scan_id, host_id, cidr, type, payload, created_at, acknowledged_at
+      FROM alerts;
+    DROP TABLE alerts;
+    ALTER TABLE alerts_new RENAME TO alerts;
+    CREATE INDEX IF NOT EXISTS idx_alerts_created ON alerts(created_at DESC);
+    CREATE INDEX IF NOT EXISTS idx_alerts_cidr_ack ON alerts(cidr, acknowledged_at);
+    CREATE INDEX IF NOT EXISTS idx_alerts_scan ON alerts(scan_id);
+    COMMIT;
+  `);
 }
 
 const stmts = {
@@ -954,7 +992,8 @@ function recordChannelDispatch(id, { status, error = null }) {
   return getChannel(id);
 }
 
-// Alerts: changes detected against the declared baseline of a CIDR.
+// Alerts: changes detected against the declared baseline of a CIDR, plus
+// high_latency (v1.12.0) — a per-scan health finding that needs no baseline.
 const ALERT_TYPES = Object.freeze([
   "appeared",
   "disappeared",
@@ -962,6 +1001,7 @@ const ALERT_TYPES = Object.freeze([
   "changed_hostname",
   "changed_os",
   "changed_ports",
+  "high_latency",
 ]);
 
 function parseAlertRow(row) {

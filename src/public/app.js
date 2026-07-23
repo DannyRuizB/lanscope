@@ -3260,6 +3260,7 @@ const ALERT_TYPE_LABELS = {
   changed_hostname: "changed hostname",
   changed_os: "changed os",
   changed_ports: "changed ports",
+  high_latency: "high latency",
 };
 
 const alertsEls = {
@@ -3301,6 +3302,10 @@ function fmtAlertDetail(alert) {
       const added = (p.added || []).join(", ") || "—";
       const removed = (p.removed || []).join(", ") || "—";
       return `${ip}: ports added [${added}], removed [${removed}]`;
+    }
+    case "high_latency": {
+      const who = p.hostname ? `${ip} (${p.hostname})` : ip;
+      return `${who}: latency ${p.latency_ms} ms ≥ threshold ${p.threshold_ms} ms`;
     }
     default:
       return ip;
