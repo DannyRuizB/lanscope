@@ -14,6 +14,8 @@ const els = {
   empty: $("#results-empty"),
   table: $("#results-table"),
   body: $("#results-body"),
+  hostSearch: $("#host-search"),
+  hostSearchCount: $("#host-search-count"),
   deleteBtn: $("#delete-scan"),
   advTiming: $("#adv-timing"),
   advScanType: $("#adv-scantype"),
@@ -800,6 +802,7 @@ function renderScan(scan) {
   els.body.innerHTML =
     sortHosts(filtered).map(renderHostRow).join("") +
     renderDisappearedSection();
+  updateHostSearchCount(filtered.length, upCount);
   attachPortscanHandlers();
   attachOsscanHandlers();
   attachUdpscanHandlers();
@@ -1066,6 +1069,7 @@ function portsOpenCount(host) {
 const DEFAULT_SORT_DIR = { ip: "asc", vendor: "asc", os: "asc", ports: "desc", latency: "asc" };
 
 let filterPort = null;
+let searchQuery = "";
 
 function hasOpenPort(host, port) {
   if (!host.portscanned_at) return false;
@@ -1073,8 +1077,11 @@ function hasOpenPort(host, port) {
 }
 
 function filterHosts(hosts) {
-  if (filterPort === null) return hosts;
-  return hosts.filter((h) => hasOpenPort(h, filterPort));
+  let out = filterPort === null ? hosts : hosts.filter((h) => hasOpenPort(h, filterPort));
+  // Free-text search (v1.11.0) on top of the port filter. HostSearch is the
+  // shared pure module; the label lookup makes friendly names searchable.
+  out = HostSearch.searchHosts(out, searchQuery, (ip) => hostLabels.get(ip)?.label || null);
+  return out;
 }
 
 function topOpenPorts(hosts, limit = 5) {
@@ -2145,6 +2152,25 @@ els.portFilterInput?.addEventListener("input", () => {
   filterPort = v === "" || isNaN(n) || n < 1 || n > 65535 ? null : n;
   if (lastScan) renderScan(lastScan);
 });
+
+// v1.11.0 — free-text host search. Re-render on each keystroke (same pattern
+// as the port filter); host counts are small enough that it's instant.
+els.hostSearch?.addEventListener("input", () => {
+  searchQuery = els.hostSearch.value;
+  if (lastScan) renderScan(lastScan);
+});
+
+// Show "N of M" only while a search is active; hide the count otherwise so
+// the toolbar stays quiet on the common (unfiltered) path.
+function updateHostSearchCount(shown, total) {
+  if (!els.hostSearchCount) return;
+  if (!searchQuery.trim()) {
+    els.hostSearchCount.hidden = true;
+    return;
+  }
+  els.hostSearchCount.hidden = false;
+  els.hostSearchCount.textContent = `${shown} of ${total}`;
+}
 
 els.portFilterInput?.addEventListener("focus", () => {
   if (els.portFilterList) els.portFilterList.hidden = false;

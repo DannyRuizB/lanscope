@@ -223,6 +223,10 @@
                 <button type="button" id="compare-btn" class="ghost small" title="Compare this scan with a previous one of the same CIDR">Compare with…</button>
                 <ul id="compare-list" class="compare-list" hidden></ul>
               </div>
+              <div class="host-search" id="host-search-wrap">
+                <input id="host-search" class="host-search-input" type="search" placeholder="Search hosts…" autocomplete="off" spellcheck="false" title="Filter the table by IP, MAC, vendor, hostname, label, OS or open port" />
+                <span id="host-search-count" class="host-search-count muted" hidden></span>
+              </div>
               <div class="port-filter" hidden id="port-filter-wrap">
                 <input id="port-filter-input" class="port-filter-input" type="number" min="1" max="65535" placeholder="Filter port" title="Type a port (1–65535) or pick from the dropdown" />
                 <button type="button" id="port-filter-toggle" class="port-filter-toggle" aria-label="Show top open ports" title="Top open ports in this scan">▾</button>
@@ -514,7 +518,7 @@
     </div>
 
     <footer class="bottombar">
-      <span>v1.10.0</span>
+      <span>v1.11.0</span>
       <span>·</span>
       <span>MIT</span>
       <span>·</span>
@@ -523,6 +527,7 @@
 
     <script src="https://cdn.jsdelivr.net/npm/cytoscape@3.30.4/dist/cytoscape.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js"></script>
+    <script src="host-search.js"></script>
     <script src="app.js"></script>
   </body>
 </html>
