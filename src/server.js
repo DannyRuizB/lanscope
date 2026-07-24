@@ -492,6 +492,20 @@ app.post("/api/schedules/:id/run-now", async (req, res) => {
   res.json({ scan_id: result.scanId, scan: result.scan, schedule: updated });
 });
 
+// v1.16.0 — fire the daily digest on demand instead of waiting for the
+// DIGEST_CRON tick. Same code path as the cron (scheduler.runDigest), so a
+// channel subscribed to daily_digest gets exactly what it would at 8am. The
+// DEMO_MODE middleware above already 403s this (POST), and the notifier
+// short-circuits in demo anyway.
+app.post("/api/digest/run", async (req, res) => {
+  try {
+    const dispatch = await scheduler.runDigest();
+    res.json({ ok: true, dispatch });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
 // v0.11.0 — notification channels. The /test endpoint lives in the next
 // step (needs the notifier module to actually dispatch).
 
