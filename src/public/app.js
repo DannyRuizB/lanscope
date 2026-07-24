@@ -2278,6 +2278,7 @@ const schedEls = {
   inputCidr: document.getElementById("sched-cidr"),
   inputCron: document.getElementById("sched-cron"),
   inputKeep: document.getElementById("sched-keep"),
+  inputLatency: document.getElementById("sched-latency"),
   cronPresets: Array.from(document.querySelectorAll(".cron-preset")),
   cronHint: document.getElementById("sched-cron-hint"),
 };
@@ -2348,7 +2349,7 @@ function renderScheduleRow(s) {
   return `
     <li class="${s.enabled ? "" : "disabled"}" data-id="${s.id}">
       <span class="schedule-name">${escapeHtml(s.name)}</span>
-      <span class="schedule-meta"><code>${escapeHtml(s.cidr)}</code> · ${escapeHtml(cronHumanLabel(s.cron_expr))}${s.keep_last ? ` · keeps last ${s.keep_last}` : ""}</span>
+      <span class="schedule-meta"><code>${escapeHtml(s.cidr)}</code> · ${escapeHtml(cronHumanLabel(s.cron_expr))}${s.keep_last ? ` · keeps last ${s.keep_last}` : ""}${s.latency_alert_ms != null ? (s.latency_alert_ms > 0 ? ` · latency ≥ ${s.latency_alert_ms} ms` : " · latency alerts off") : ""}</span>
       ${lastRunSummary(s)}
       <div class="schedule-controls">
         <button class="ghost small sched-run" data-act="run" data-id="${s.id}" title="Run this scan now">▶ Run now</button>
@@ -2607,6 +2608,7 @@ function openScheduleModal() {
   schedEls.inputCidr.value = els.cidr?.value?.trim() || "";
   schedEls.inputCron.value = "";
   schedEls.inputKeep.value = "";
+  schedEls.inputLatency.value = "";
   schedEls.inputCron.hidden = true;
   schedEls.cronPresets.forEach((b, i) => b.classList.toggle("active", i === 0));
   schedEls.cronHint.innerHTML = "Runs every 15 minutes (<code>*/15 * * * *</code>).";
@@ -2647,12 +2649,20 @@ async function submitScheduleModal() {
       return showSchedError("Retention must be a whole number between 1 and 10000.");
     }
   }
+  const latencyRaw = schedEls.inputLatency.value.trim();
+  let latencyAlertMs = null;
+  if (latencyRaw !== "") {
+    latencyAlertMs = Number(latencyRaw);
+    if (!Number.isInteger(latencyAlertMs) || latencyAlertMs < 0 || latencyAlertMs > 600000) {
+      return showSchedError("Latency alert must be a whole number between 0 and 600000 ms (0 = off).");
+    }
+  }
   try {
     schedEls.modalCreate.disabled = true;
     await fetchJson("/api/schedules", {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ name, cidr, cron_expr: cronExpr, enabled: true, keep_last: keepLast }),
+      body: JSON.stringify({ name, cidr, cron_expr: cronExpr, enabled: true, keep_last: keepLast, latency_alert_ms: latencyAlertMs }),
     });
     closeScheduleModal();
     await loadSchedules();

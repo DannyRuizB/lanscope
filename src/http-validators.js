@@ -37,6 +37,21 @@ function validateKeepLast(v) {
   return { value: v };
 }
 
+// v1.14.0 — per-schedule latency threshold. Three-valued on purpose:
+// null = inherit the global LATENCY_ALERT_MS, 0 = alerts explicitly OFF for
+// this schedule, N > 0 = own threshold. The cap matches sanity, not physics:
+// a 10-minute RTT is a typo.
+const LATENCY_ALERT_MAX_MS = 600000;
+function validateLatencyAlertMs(v) {
+  if (v === null || v === undefined) return { value: null };
+  if (!Number.isInteger(v) || v < 0 || v > LATENCY_ALERT_MAX_MS) {
+    return {
+      error: `latency_alert_ms must be an integer between 0 and ${LATENCY_ALERT_MAX_MS} (0 = off), or null to inherit the global threshold`,
+    };
+  }
+  return { value: v };
+}
+
 const ALLOWED_EVENTS = new Set([
   "scan_done",
   "scan_error",
@@ -147,6 +162,7 @@ module.exports = {
   validateScheduleName,
   validateCronExpr,
   validateKeepLast,
+  validateLatencyAlertMs,
   validateChannelName,
   validateChannelType,
   validateHttpUrl,

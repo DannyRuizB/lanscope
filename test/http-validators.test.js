@@ -114,3 +114,15 @@ test('validateKeepLast accepts positive integers up to 10000, null clears', () =
     assert.ok(V.validateKeepLast(bad).error, `should reject ${JSON.stringify(bad)}`);
   }
 });
+
+test('validateLatencyAlertMs: null inherits, 0 = off, range capped (v1.14.0)', () => {
+  assert.equal(V.validateLatencyAlertMs(null).value, null);
+  assert.equal(V.validateLatencyAlertMs(undefined).value, null);
+  assert.equal(V.validateLatencyAlertMs(0).value, 0);
+  assert.equal(V.validateLatencyAlertMs(50).value, 50);
+  assert.equal(V.validateLatencyAlertMs(600000).value, 600000);
+  assert.ok(V.validateLatencyAlertMs(-1).error);
+  assert.ok(V.validateLatencyAlertMs(600001).error);
+  assert.ok(V.validateLatencyAlertMs(2.5).error);
+  assert.ok(V.validateLatencyAlertMs('50').error);
+});

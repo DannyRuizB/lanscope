@@ -102,6 +102,13 @@ jobs:
             http://localhost:3030/api/schedules | grep -q '"keep_last":24'
           curl -fsS http://localhost:3030/api/schedules | grep -q '"keep_last":24'
 
+          echo "--- schedules latency_alert_ms (v1.14.0) ---"
+          # Per-schedule threshold round-trips; enabled=false, never ticks.
+          curl -fsS -X POST -H 'content-type: application/json' \
+            -d '{"name":"smoke latency","cidr":"192.168.0.0/24","cron_expr":"0 4 * * *","enabled":false,"latency_alert_ms":120}' \
+            http://localhost:3030/api/schedules | grep -q '"latency_alert_ms":120'
+          curl -fsS http://localhost:3030/api/schedules | grep -q '"latency_alert_ms":120'
+
           echo "--- notifications high_latency event (v1.13.0) ---"
           # The event must round-trip the allowlist; enabled=false, never fires.
           curl -fsS -X POST -H 'content-type: application/json' \

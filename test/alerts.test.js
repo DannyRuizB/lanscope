@@ -119,3 +119,60 @@ test('partitionAlerts tolerates empty and missing input', () => {
   assert.deepEqual(partitionAlerts(null), { drift: [], latency: [] });
   assert.deepEqual(partitionAlerts(undefined), { drift: [], latency: [] });
 });
+
+// --- per-schedule latency threshold (v1.14.0) -------------------------------
+
+function doneScheduledScan(scheduleId, hosts) {
+  const id = db.startScan(CIDR, scheduleId);
+  db.finishScan(id, hosts);
+  return id;
+}
+
+test('a schedule with its own latency_alert_ms fires without the global env', () => {
+  const sched = db.createSchedule({
+    name: `own-threshold-${n}`, cidr: CIDR, cron_expr: '0 3 * * *',
+    enabled: false, latency_alert_ms: 100,
+  });
+  const id = doneScheduledScan(sched.id, [
+    { ip: `10.50.${n}.1`, status: 'up', latency_ms: 150 },
+    { ip: `10.50.${n}.2`, status: 'up', latency_ms: 50 },
+  ]);
+  const alerts = detectAlertsForScan(id).filter((a) => a.type === 'high_latency');
+  assert.equal(alerts.length, 1, 'only the 150ms host crosses the schedule bar');
+  assert.equal(alerts[0].payload.threshold_ms, 100);
+});
+
+test('latency_alert_ms: 0 turns alerts OFF for that schedule even with the env set', () => {
+  process.env.LATENCY_ALERT_MS = '10';
+  const sched = db.createSchedule({
+    name: `muted-${n}`, cidr: CIDR, cron_expr: '0 3 * * *',
+    enabled: false, latency_alert_ms: 0,
+  });
+  const id = doneScheduledScan(sched.id, [{ ip: `10.50.${n}.1`, status: 'up', latency_ms: 500 }]);
+  assert.equal(detectAlertsForScan(id).filter((a) => a.type === 'high_latency').length, 0);
+});
+
+test('latency_alert_ms: null inherits the global env; manual scans always use it', () => {
+  process.env.LATENCY_ALERT_MS = '100';
+  const sched = db.createSchedule({
+    name: `inherit-${n}`, cidr: CIDR, cron_expr: '0 3 * * *',
+    enabled: false, latency_alert_ms: null,
+  });
+  const scheduled = doneScheduledScan(sched.id, [{ ip: `10.50.${n}.1`, status: 'up', latency_ms: 150 }]);
+  assert.equal(detectAlertsForScan(scheduled).filter((a) => a.type === 'high_latency').length, 1);
+  // Manual scan (no schedule) on the same CIDR: env applies too.
+  const manual = doneScan([{ ip: `10.50.${n}.2`, status: 'up', latency_ms: 150 }]);
+  assert.equal(detectAlertsForScan(manual).filter((a) => a.type === 'high_latency').length, 1);
+});
+
+test('a stricter schedule bar fires where the laxer global would not', () => {
+  process.env.LATENCY_ALERT_MS = '1000';
+  const sched = db.createSchedule({
+    name: `strict-${n}`, cidr: CIDR, cron_expr: '0 3 * * *',
+    enabled: false, latency_alert_ms: 50,
+  });
+  const id = doneScheduledScan(sched.id, [{ ip: `10.50.${n}.1`, status: 'up', latency_ms: 80 }]);
+  const alerts = detectAlertsForScan(id).filter((a) => a.type === 'high_latency');
+  assert.equal(alerts.length, 1);
+  assert.equal(alerts[0].payload.threshold_ms, 50);
+});

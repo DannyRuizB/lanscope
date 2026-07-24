@@ -16,6 +16,7 @@ const {
 const {
   validateScheduleName,
   validateKeepLast,
+  validateLatencyAlertMs,
   validateCronExpr,
   validateChannelName,
   validateChannelType,
@@ -395,6 +396,9 @@ app.post("/api/schedules", (req, res) => {
   const keepV = validateKeepLast(body.keep_last);
   if (keepV.error) return res.status(400).json({ error: keepV.error });
 
+  const latencyV = validateLatencyAlertMs(body.latency_alert_ms);
+  if (latencyV.error) return res.status(400).json({ error: latencyV.error });
+
   const schedule = db.createSchedule({
     name: nameV.value,
     cidr: body.cidr,
@@ -402,6 +406,7 @@ app.post("/api/schedules", (req, res) => {
     enabled: body.enabled !== false,
     scan_options: body.scan_options || null,
     keep_last: keepV.value,
+    latency_alert_ms: latencyV.value,
   });
   scheduler.reload();
   res.status(201).json({ schedule });
@@ -445,6 +450,11 @@ app.patch("/api/schedules/:id", (req, res) => {
     const v = validateKeepLast(body.keep_last);
     if (v.error) return res.status(400).json({ error: v.error });
     patch.keep_last = v.value;
+  }
+  if (Object.prototype.hasOwnProperty.call(body, "latency_alert_ms")) {
+    const v = validateLatencyAlertMs(body.latency_alert_ms);
+    if (v.error) return res.status(400).json({ error: v.error });
+    patch.latency_alert_ms = v.value;
   }
 
   const schedule = db.updateSchedule(id, patch);

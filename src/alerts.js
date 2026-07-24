@@ -49,11 +49,26 @@ function latencyThresholdMs() {
   return Number.isFinite(n) && n > 0 ? n : null;
 }
 
+// v1.14.0 — the threshold a given scan is judged against. A scheduled
+// scan's own latency_alert_ms wins over the global env: null inherits,
+// 0 means "explicitly off for this schedule" (the WiFi-heavy subnet stops
+// paging without silencing everyone else), N > 0 is its own bar. Manual
+// scans have no schedule and always use the env.
+function effectiveLatencyThreshold(scan) {
+  if (scan && scan.schedule_id != null) {
+    const schedule = db.getSchedule(scan.schedule_id);
+    if (schedule && schedule.latency_alert_ms != null) {
+      return schedule.latency_alert_ms > 0 ? schedule.latency_alert_ms : null;
+    }
+  }
+  return latencyThresholdMs();
+}
+
 // Unlike the drift detectors below, high latency is a statement about the
 // CURRENT scan's health, not about divergence from a declared inventory —
 // so it deliberately needs no baseline and fires on any done scan.
 function pushLatencySpecs(scan, specs, spec) {
-  const threshold = latencyThresholdMs();
+  const threshold = effectiveLatencyThreshold(scan);
   if (threshold === null) return;
   for (const h of scan.hosts || []) {
     if (h.status !== "up") continue;
@@ -203,4 +218,5 @@ module.exports = {
   summarizeAlerts,
   partitionAlerts,
   latencyThresholdMs,
+  effectiveLatencyThreshold,
 };
