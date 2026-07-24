@@ -173,6 +173,15 @@ if (!columnExists("scans", "schedule_id")) {
 if (!columnExists("scheduled_scans", "keep_last")) {
   db.exec(`ALTER TABLE scheduled_scans ADD COLUMN keep_last INTEGER`);
 }
+
+// v1.14.0 — per-schedule latency threshold. null = inherit the global
+// LATENCY_ALERT_MS env; 0 = alerts explicitly OFF for this schedule;
+// N > 0 = this schedule's own threshold in ms. Nullable, no CHECK — the
+// validator owns the range, and no CHECK means no table rebuild (the
+// v1.12 alerts lesson).
+if (!columnExists("scheduled_scans", "latency_alert_ms")) {
+  db.exec(`ALTER TABLE scheduled_scans ADD COLUMN latency_alert_ms INTEGER`);
+}
 // v1.12.0 — the alerts.type CHECK predates high_latency, and SQLite cannot
 // alter a CHECK in place: an existing DB gets the table rebuilt once (same
 // columns, ids and data preserved; nothing references alerts, so the drop is
@@ -330,22 +339,22 @@ const stmts = {
   // v0.10.0 — scheduled scans. scan_options stored as JSON text; parsed on read.
   listSchedulesStmt: db.prepare(
     `SELECT id, name, cidr, cron_expr, enabled, scan_options,
-            last_run_at, last_scan_id, last_status, last_error, created_at, keep_last
+            last_run_at, last_scan_id, last_status, last_error, created_at, keep_last, latency_alert_ms
        FROM scheduled_scans ORDER BY created_at DESC`,
   ),
   listEnabledSchedulesStmt: db.prepare(
     `SELECT id, name, cidr, cron_expr, enabled, scan_options,
-            last_run_at, last_scan_id, last_status, last_error, created_at, keep_last
+            last_run_at, last_scan_id, last_status, last_error, created_at, keep_last, latency_alert_ms
        FROM scheduled_scans WHERE enabled = 1 ORDER BY id`,
   ),
   getScheduleStmt: db.prepare(
     `SELECT id, name, cidr, cron_expr, enabled, scan_options,
-            last_run_at, last_scan_id, last_status, last_error, created_at, keep_last
+            last_run_at, last_scan_id, last_status, last_error, created_at, keep_last, latency_alert_ms
        FROM scheduled_scans WHERE id = ?`,
   ),
   insertScheduleStmt: db.prepare(
-    `INSERT INTO scheduled_scans (name, cidr, cron_expr, enabled, scan_options, keep_last, created_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?) RETURNING id`,
+    `INSERT INTO scheduled_scans (name, cidr, cron_expr, enabled, scan_options, keep_last, latency_alert_ms, created_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?) RETURNING id`,
   ),
   deleteScheduleStmt: db.prepare(`DELETE FROM scheduled_scans WHERE id = ?`),
   // v1.8.0 — retention. Deletes this schedule's scans beyond the newest
@@ -688,6 +697,7 @@ function parseScheduleRow(row) {
     last_error: row.last_error,
     created_at: row.created_at,
     keep_last: row.keep_last,
+    latency_alert_ms: row.latency_alert_ms,
   };
 }
 
@@ -710,6 +720,7 @@ function createSchedule({
   enabled = true,
   scan_options = null,
   keep_last = null,
+  latency_alert_ms = null,
 }) {
   const optsJson = scan_options ? JSON.stringify(scan_options) : null;
   const row = stmts.insertScheduleStmt.get(
@@ -719,6 +730,7 @@ function createSchedule({
     enabled ? 1 : 0,
     optsJson,
     keep_last,
+    latency_alert_ms,
     Date.now(),
   );
   return getSchedule(row.id);
@@ -754,6 +766,10 @@ function updateSchedule(id, patch) {
   if (Object.prototype.hasOwnProperty.call(patch, "keep_last")) {
     sets.push("keep_last = ?");
     args.push(patch.keep_last);
+  }
+  if (Object.prototype.hasOwnProperty.call(patch, "latency_alert_ms")) {
+    sets.push("latency_alert_ms = ?");
+    args.push(patch.latency_alert_ms);
   }
   if (sets.length === 0) return parseScheduleRow(current);
   args.push(id);

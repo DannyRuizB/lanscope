@@ -361,6 +361,9 @@ function seedSchedules(rawDb, { scan2Id, scan2EndedAt, scan3Id, scan3EndedAt }) 
     cron_expr: "0 3 * * *",
     enabled: true,
     scan_options: null,
+    // v1.14.0 — per-schedule threshold on show: laxer than the demo's global
+    // LATENCY_ALERT_MS=50, so the row wears the "· latency ≥ 200 ms" chip.
+    latency_alert_ms: 200,
   });
   const debug = db.createSchedule({
     name: "Aggressive watch (debug)",

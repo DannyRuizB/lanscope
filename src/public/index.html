@@ -476,6 +476,11 @@
             <input id="sched-keep" type="number" min="1" max="10000" step="1" placeholder="keep every scan" />
             <span class="form-hint">Keep only the last N scans of this schedule — older ones are pruned after each run. The ★ baseline and scans with pending alerts are never deleted. Leave empty to keep everything.</span>
           </label>
+          <label class="form-field">
+            <span class="form-label">Latency alert (ms)</span>
+            <input id="sched-latency" type="number" min="0" max="600000" step="1" placeholder="inherit global" />
+            <span class="form-hint">Threshold for <code>high_latency</code> alerts on this schedule's scans. Empty inherits the global <code>LATENCY_ALERT_MS</code>; <code>0</code> turns alerts off for this schedule only.</span>
+          </label>
         </form>
         <div class="modal-actions">
           <button type="button" class="ghost" data-modal-close>Cancel</button>
