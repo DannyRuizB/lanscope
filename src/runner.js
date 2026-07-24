@@ -8,7 +8,7 @@
 
 const db = require("./db");
 const { runPingSweep } = require("./scanner");
-const { detectAlertsForScan, summarizeAlerts } = require("./alerts");
+const { detectAlertsForScan, summarizeAlerts, partitionAlerts } = require("./alerts");
 const notifier = require("./notifier");
 
 let scanInFlight = false;
@@ -35,23 +35,47 @@ async function executeCidrScan(cidr, { discoveryArgs = [], scheduleId = null } =
     const scan = db.getScan(scanId);
     // v0.13.0 — fire baseline_diff once with aggregated counts. Fire-and-forget
     // so a slow webhook never blocks the scan response. Only when the diff
-    // actually produced alerts.
-    if (alerts.length > 0) {
+    // actually produced alerts. Since v1.13.0 high_latency alerts get their
+    // own event below instead of riding in the divergence digest — they carry
+    // no baseline claim, and splitting them lets a channel subscribe to one
+    // without the other.
+    const { drift, latency } = partitionAlerts(alerts);
+    const scanCtx = {
+      id: scan.id,
+      cidr: scan.cidr,
+      host_count: scan.host_count,
+      started_at: scan.started_at,
+    };
+    if (drift.length > 0) {
       const baseline = db.getBaselineByCidr(scan.cidr);
-      const { total, counts } = summarizeAlerts(alerts);
+      const { total, counts } = summarizeAlerts(drift);
       notifier
         .dispatch("baseline_diff", {
-          scan: {
-            id: scan.id,
-            cidr: scan.cidr,
-            host_count: scan.host_count,
-            started_at: scan.started_at,
-          },
+          scan: scanCtx,
           baseline: baseline ? { scan_id: baseline.scan_id, set_at: baseline.set_at } : null,
           total,
           counts,
         })
         .catch((e) => console.error(`[runner] dispatch baseline_diff failed: ${e.message}`));
+    }
+    if (latency.length > 0) {
+      // Worst offenders first; cap the list so a /16 with a bad uplink doesn't
+      // turn the notification into a phone book (total still says how many).
+      const slow = latency
+        .map((a) => a.payload || {})
+        .sort((x, y) => (y.latency_ms ?? 0) - (x.latency_ms ?? 0));
+      notifier
+        .dispatch("high_latency", {
+          scan: scanCtx,
+          total: latency.length,
+          threshold_ms: slow[0]?.threshold_ms ?? null,
+          slow_hosts: slow.slice(0, 5).map((p) => ({
+            ip: p.ip ?? null,
+            hostname: p.hostname ?? null,
+            latency_ms: p.latency_ms ?? null,
+          })),
+        })
+        .catch((e) => console.error(`[runner] dispatch high_latency failed: ${e.message}`));
     }
     return { busy: false, scanId, scan, alerts, error: null };
   } catch (e) {

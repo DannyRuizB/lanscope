@@ -14,7 +14,7 @@ process.env.DB_PATH = path.join(
 const { test, beforeEach } = require('node:test');
 const assert = require('node:assert/strict');
 const db = require('../src/db');
-const { detectAlertsForScan, latencyThresholdMs } = require('../src/alerts');
+const { detectAlertsForScan, latencyThresholdMs, partitionAlerts } = require('../src/alerts');
 
 // Each test gets its own CIDR so scans/baselines never bleed across tests.
 let n = 0;
@@ -100,4 +100,22 @@ test('drift alerts and latency alerts fire together against a baseline', () => {
   ]);
   const types = detectAlertsForScan(id).map((a) => a.type).sort();
   assert.equal(JSON.stringify(types), JSON.stringify(['appeared', 'high_latency']));
+});
+
+// --- partitionAlerts (v1.13.0) --------------------------------------------
+
+test('partitionAlerts splits high_latency from drift preserving order', () => {
+  const a = { type: 'appeared' };
+  const b = { type: 'high_latency' };
+  const c = { type: 'changed_ports' };
+  const d = { type: 'high_latency' };
+  const { drift, latency } = partitionAlerts([a, b, c, d]);
+  assert.deepEqual(drift, [a, c]);
+  assert.deepEqual(latency, [b, d]);
+});
+
+test('partitionAlerts tolerates empty and missing input', () => {
+  assert.deepEqual(partitionAlerts([]), { drift: [], latency: [] });
+  assert.deepEqual(partitionAlerts(null), { drift: [], latency: [] });
+  assert.deepEqual(partitionAlerts(undefined), { drift: [], latency: [] });
 });

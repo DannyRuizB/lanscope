@@ -4,6 +4,10 @@
 //   scan_done / scan_error / scan_skipped — emitted by the scheduler.
 //   baseline_diff (v0.13.0) — emitted by the runner after a successful scan
 //     when the diff against the declared baseline produced at least one alert.
+//   high_latency (v1.13.0) — emitted by the runner when LATENCY_ALERT_MS
+//     flagged at least one host in the scan. Its own event (not part of the
+//     baseline_diff digest): it makes no baseline claim, and a latency page
+//     usually wants a different channel than an inventory-drift alarm.
 //
 // Channel types: webhook (with generic / Discord / Slack payload formats)
 // and ntfy.sh.
@@ -55,6 +59,14 @@ const EVENT_META = {
     ntfyTag: "warning",
     ntfyPriority: "high",
   },
+  high_latency: {
+    title: "High latency detected",
+    color: 0x6366f1, // indigo — matches the alert chip in the UI
+    icon: "⏱",
+    slackEmoji: ":hourglass:",
+    ntfyTag: "hourglass",
+    ntfyPriority: "default",
+  },
 };
 
 const FALLBACK_META = {
@@ -95,6 +107,13 @@ function summaryFor(event, context) {
     const detail = parts.length ? ` — ${parts.join(", ")}` : "";
     return `Baseline divergence on ${cidr}: ${total} change${total === 1 ? "" : "s"}${detail}`;
   }
+  if (event === "high_latency") {
+    const n = context.total ?? 0;
+    const t = context.threshold_ms;
+    const worst = (context.slow_hosts || [])[0];
+    const worstTxt = worst ? ` (worst: ${worst.ip} at ${worst.latency_ms} ms)` : "";
+    return `High latency on ${cidr}: ${n} host${n === 1 ? "" : "s"} at or above ${t} ms${worstTxt}`;
+  }
   return `LanScope event: ${event}`;
 }
 
@@ -128,6 +147,10 @@ function buildWebhookGeneric(event, context) {
       total: context.total ?? null,
       counts: context.counts ?? null,
       baseline: context.baseline ?? null,
+      // v1.13.0 — high_latency fields, same stable-shape rule. slow_hosts is
+      // capped at the 5 worst offenders; total says how many there really are.
+      threshold_ms: context.threshold_ms ?? null,
+      slow_hosts: context.slow_hosts ?? null,
     }),
     headers: { "content-type": "application/json" },
   };
