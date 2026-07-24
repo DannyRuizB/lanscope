@@ -2715,6 +2715,7 @@ const chanEls = {
   list: document.getElementById("channel-list"),
   newBtn: document.getElementById("new-channel-btn"),
   refreshBtn: document.getElementById("refresh-channels"),
+  digestBtn: document.getElementById("send-digest-btn"),
   modal: document.getElementById("modal-channel"),
   modalForm: document.getElementById("chan-modal-form"),
   modalError: document.getElementById("chan-modal-error"),
@@ -2952,6 +2953,23 @@ async function submitChannelModal() {
 
 chanEls.newBtn?.addEventListener("click", openChannelModal);
 chanEls.refreshBtn?.addEventListener("click", loadChannels);
+chanEls.digestBtn?.addEventListener("click", async () => {
+  try {
+    chanEls.digestBtn.disabled = true;
+    setStatus("Sending daily digest…");
+    const r = await fetchJson("/api/digest/run", { method: "POST" });
+    const n = r?.dispatch?.sent ?? 0;
+    setStatus(
+      n > 0
+        ? `Daily digest sent to ${n} channel${n === 1 ? "" : "s"}.`
+        : "Daily digest ready — no channel is subscribed to it.",
+    );
+  } catch (e) {
+    setStatus(`Digest failed: ${e.message}`, true);
+  } finally {
+    chanEls.digestBtn.disabled = false;
+  }
+});
 chanEls.modalCreate?.addEventListener("click", submitChannelModal);
 
 chanEls.modalForm?.addEventListener("submit", (e) => {
