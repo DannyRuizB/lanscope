@@ -102,6 +102,13 @@ jobs:
             http://localhost:3030/api/schedules | grep -q '"keep_last":24'
           curl -fsS http://localhost:3030/api/schedules | grep -q '"keep_last":24'
 
+          echo "--- notifications high_latency event (v1.13.0) ---"
+          # The event must round-trip the allowlist; enabled=false, never fires.
+          curl -fsS -X POST -H 'content-type: application/json' \
+            -d '{"name":"smoke latency","type":"webhook","config":{"url":"https://example.invalid/hook"},"events":["high_latency"],"enabled":false}' \
+            http://localhost:3030/api/notifications | grep -q '"high_latency"'
+          curl -fsS http://localhost:3030/api/notifications | grep -q '"high_latency"'
+
           echo "--- GET / ---"
           curl -fsS -o /tmp/index.html -w "code=%{http_code}\n" http://localhost:3030/
           grep -q '<title>LanScope' /tmp/index.html

@@ -73,6 +73,14 @@ test('validateChannelEvents allowlists and de-dupes preserving order', () => {
   assert.ok(V.validateChannelEvents(['scan_done', 'nope']).error);
 });
 
+test('validateChannelEvents accepts high_latency as its own event (v1.13.0)', () => {
+  assert.deepEqual(V.validateChannelEvents(['high_latency']).value, ['high_latency']);
+  assert.deepEqual(
+    V.validateChannelEvents(['baseline_diff', 'high_latency']).value,
+    ['baseline_diff', 'high_latency'],
+  );
+});
+
 // --- host labels (v1.3.0) ------------------------------------------------
 
 test('validateLabelText trims, caps at 64 and treats empty as null', () => {

@@ -183,4 +183,24 @@ function summarizeAlerts(alerts) {
   return { total: alerts.length, counts };
 }
 
-module.exports = { detectAlertsForScan, osBucket, summarizeAlerts, latencyThresholdMs };
+// v1.13.0 — the notifier tells the two alert families apart: high_latency is
+// a statement about the current scan's health, baseline drift is a statement
+// about divergence from the declared inventory. Lumping both into one
+// "baseline divergence" notification (as v1.12.0 did) mislabels the former
+// and makes it impossible to route them to different channels.
+function partitionAlerts(alerts) {
+  const drift = [];
+  const latency = [];
+  for (const a of alerts || []) {
+    (a.type === "high_latency" ? latency : drift).push(a);
+  }
+  return { drift, latency };
+}
+
+module.exports = {
+  detectAlertsForScan,
+  osBucket,
+  summarizeAlerts,
+  partitionAlerts,
+  latencyThresholdMs,
+};

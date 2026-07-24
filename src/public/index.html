@@ -402,8 +402,12 @@
                 <input type="checkbox" id="chan-evt-baseline" />
                 <span>baseline_diff</span>
               </label>
+              <label class="adv-check">
+                <input type="checkbox" id="chan-evt-latency" />
+                <span>high_latency</span>
+              </label>
             </div>
-            <span class="form-hint"><code>scan_*</code> fire on scheduled runs (or a manual Run now). <code>baseline_diff</code> fires after any successful scan whose diff vs the declared baseline produced at least one alert.</span>
+            <span class="form-hint"><code>scan_*</code> fire on scheduled runs (or a manual Run now). <code>baseline_diff</code> fires after any successful scan whose diff vs the declared baseline produced at least one alert. <code>high_latency</code> fires when a scan times hosts at or above <code>LATENCY_ALERT_MS</code> (off unless that env var is set).</span>
           </div>
         </form>
         <div class="modal-actions">
