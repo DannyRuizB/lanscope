@@ -2732,6 +2732,7 @@ const chanEls = {
   evtSkipped: document.getElementById("chan-evt-skipped"),
   evtBaseline: document.getElementById("chan-evt-baseline"),
   evtLatency: document.getElementById("chan-evt-latency"),
+  evtDigest: document.getElementById("chan-evt-digest"),
 };
 
 let channels = [];
@@ -2872,6 +2873,7 @@ function selectedChannelEvents() {
   if (chanEls.evtSkipped?.checked) out.push("scan_skipped");
   if (chanEls.evtBaseline?.checked) out.push("baseline_diff");
   if (chanEls.evtLatency?.checked) out.push("high_latency");
+  if (chanEls.evtDigest?.checked) out.push("daily_digest");
   return out;
 }
 
@@ -2891,6 +2893,7 @@ function openChannelModal() {
   chanEls.evtSkipped.checked = false;
   chanEls.evtBaseline.checked = false;
   chanEls.evtLatency.checked = false;
+  chanEls.evtDigest.checked = false;
   chanEls.typePresets.forEach((b, i) => b.classList.toggle("active", i === 0));
   chanEls.formatPresets.forEach((b, i) => b.classList.toggle("active", i === 0));
   syncChannelTypeUI();

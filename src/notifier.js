@@ -8,6 +8,10 @@
 //     flagged at least one host in the scan. Its own event (not part of the
 //     baseline_diff digest): it makes no baseline claim, and a latency page
 //     usually wants a different channel than an inventory-drift alarm.
+//   daily_digest (v1.15.0) — emitted by the scheduler's digest cron (opt-in
+//     via DIGEST_CRON): a once-a-day roll-up per CIDR of scans run, new
+//     alerts and the pending backlog. The low-priority counterpart to the
+//     per-event alerts — a morning summary, not a page.
 //
 // Channel types: webhook (with generic / Discord / Slack payload formats)
 // and ntfy.sh.
@@ -67,6 +71,14 @@ const EVENT_META = {
     ntfyTag: "hourglass",
     ntfyPriority: "default",
   },
+  daily_digest: {
+    title: "LanScope daily digest",
+    color: 0x3498db,
+    icon: "📊",
+    slackEmoji: ":bar_chart:",
+    ntfyTag: "bar_chart",
+    ntfyPriority: "low",
+  },
 };
 
 const FALLBACK_META = {
@@ -114,6 +126,20 @@ function summaryFor(event, context) {
     const worstTxt = worst ? ` (worst: ${worst.ip} at ${worst.latency_ms} ms)` : "";
     return `High latency on ${cidr}: ${n} host${n === 1 ? "" : "s"} at or above ${t} ms${worstTxt}`;
   }
+  if (event === "daily_digest") {
+    const d = context.digest || {};
+    const t = d.totals || {};
+    const hours = context.window_hours ?? 24;
+    if (!t.networks) {
+      return `LanScope daily digest: no scans in the last ${hours}h`;
+    }
+    return (
+      `LanScope daily digest (last ${hours}h): ${t.scans} scan${t.scans === 1 ? "" : "s"} ` +
+      `across ${t.networks} network${t.networks === 1 ? "" : "s"}, ` +
+      `${t.alerts_new} new alert${t.alerts_new === 1 ? "" : "s"}, ` +
+      `${t.alerts_pending} still pending`
+    );
+  }
   return `LanScope event: ${event}`;
 }
 
@@ -151,6 +177,10 @@ function buildWebhookGeneric(event, context) {
       // capped at the 5 worst offenders; total says how many there really are.
       threshold_ms: context.threshold_ms ?? null,
       slow_hosts: context.slow_hosts ?? null,
+      // v1.15.0 — daily_digest roll-up (window + per-CIDR breakdown), null on
+      // every other event so consumers keep a stable shape.
+      window_hours: context.window_hours ?? null,
+      digest: context.digest ?? null,
     }),
     headers: { "content-type": "application/json" },
   };

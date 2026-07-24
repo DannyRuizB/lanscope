@@ -406,8 +406,12 @@
                 <input type="checkbox" id="chan-evt-latency" />
                 <span>high_latency</span>
               </label>
+              <label class="adv-check">
+                <input type="checkbox" id="chan-evt-digest" />
+                <span>daily_digest</span>
+              </label>
             </div>
-            <span class="form-hint"><code>scan_*</code> fire on scheduled runs (or a manual Run now). <code>baseline_diff</code> fires after any successful scan whose diff vs the declared baseline produced at least one alert. <code>high_latency</code> fires when a scan times hosts at or above <code>LATENCY_ALERT_MS</code> (off unless that env var is set).</span>
+            <span class="form-hint"><code>scan_*</code> fire on scheduled runs (or a manual Run now). <code>baseline_diff</code> fires after any successful scan whose diff vs the declared baseline produced at least one alert. <code>high_latency</code> fires when a scan times hosts at or above <code>LATENCY_ALERT_MS</code> (off unless that env var is set). <code>daily_digest</code> is a once-a-day roll-up per network — set <code>DIGEST_CRON</code> to enable it.</span>
           </div>
         </form>
         <div class="modal-actions">
