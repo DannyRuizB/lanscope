@@ -176,3 +176,37 @@ test('a stricter schedule bar fires where the laxer global would not', () => {
   assert.equal(alerts.length, 1);
   assert.equal(alerts[0].payload.threshold_ms, 50);
 });
+
+// --- getDigest (v1.15.0) ----------------------------------------------------
+
+test('getDigest rolls up scans, new alerts and pending backlog by CIDR', () => {
+  const other = `10.90.${n}.0/24`;
+  const a = doneScan([{ ip: `10.50.${n}.1`, status: 'up' }]);
+  doneScan([{ ip: `10.50.${n}.1`, status: 'up' }]); // second scan, same CIDR
+  const c = db.startScan(other); db.finishScan(c, [{ ip: `10.90.${n}.1`, status: 'up' }]);
+  db.createAlerts([
+    { scan_id: a, host_id: null, cidr: CIDR, type: 'appeared', payload: {} },
+    { scan_id: a, host_id: null, cidr: CIDR, type: 'appeared', payload: {} },
+    { scan_id: a, host_id: null, cidr: CIDR, type: 'changed_ports', payload: {} },
+  ]);
+  const d = db.getDigest(0);
+  const mine = d.cidrs.find((x) => x.cidr === CIDR);
+  assert.equal(mine.scans, 2);
+  assert.equal(mine.alerts_new.appeared, 2);
+  assert.equal(mine.alerts_new.changed_ports, 1);
+  assert.equal(mine.alerts_new_total, 3);
+  assert.equal(mine.alerts_pending, 3); // all unacked
+  const theirs = d.cidrs.find((x) => x.cidr === other);
+  assert.equal(theirs.scans, 1);
+  assert.equal(theirs.alerts_new_total, 0);
+});
+
+test('getDigest excludes CIDRs with no activity in the window', () => {
+  // A scan far in the past: with a recent `since`, its CIDR must not appear.
+  const old = db.startScan(`10.91.${n}.0/24`);
+  db.finishScan(old, [{ ip: `10.91.${n}.1`, status: 'up' }]);
+  const future = Date.now() + 3600 * 1000;
+  const d = db.getDigest(future);
+  assert.equal(d.cidrs.length, 0);
+  assert.equal(d.totals.scans, 0);
+});

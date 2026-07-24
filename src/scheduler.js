@@ -14,6 +14,25 @@ const { executeCidrScan } = require("./runner");
 const notifier = require("./notifier");
 
 const tasks = new Map(); // schedule.id -> cron task
+let digestTask = null; // the daily-digest cron task (v1.15.0), if enabled
+
+// v1.15.0 — how many hours back the digest rolls up. Strict parse: a bad or
+// non-positive value falls back to 24 rather than a window that captures
+// nothing (or everything).
+function digestWindowHours() {
+  const raw = (process.env.DIGEST_WINDOW_HOURS || "").trim();
+  const n = Number(raw);
+  return Number.isFinite(n) && n > 0 ? n : 24;
+}
+
+// Build the roll-up and fire one daily_digest event. Exported so a test (and
+// a future "send now" button) can trigger it without waiting for the cron.
+async function runDigest() {
+  const hours = digestWindowHours();
+  const since = Date.now() - hours * 3600 * 1000;
+  const digest = db.getDigest(since);
+  return notifier.dispatch("daily_digest", { window_hours: hours, digest });
+}
 
 // Same shape as validateDiscovery() exposes, but scoped to the persisted
 // `scan_options` blob. Today only `discovery` is honoured. Lives here so
@@ -104,6 +123,30 @@ function clearTasks() {
     }
   }
   tasks.clear();
+  if (digestTask) {
+    try {
+      digestTask.stop();
+    } catch {
+      // idempotent
+    }
+    digestTask = null;
+  }
+}
+
+// Register the daily-digest cron if DIGEST_CRON is set (opt-in, like
+// LATENCY_ALERT_MS). Separate from the per-scan schedules: it reports, it
+// doesn't scan. An invalid expression is a loud no-op, not a crash.
+function registerDigest() {
+  const expr = (process.env.DIGEST_CRON || "").trim();
+  if (!expr) return;
+  if (!cron.validate(expr)) {
+    console.error(`[scheduler] DIGEST_CRON is not a valid cron expression, digest disabled: ${expr}`);
+    return;
+  }
+  digestTask = cron.schedule(expr, () => {
+    runDigest().catch((e) => console.error(`[scheduler] daily digest failed: ${e.message}`));
+  });
+  console.log(`[scheduler] daily digest active (DIGEST_CRON=${expr})`);
 }
 
 // Stop everything, then re-register from the DB. Cheap enough (we deal in
@@ -126,6 +169,7 @@ function reload() {
     });
     tasks.set(sched.id, task);
   }
+  registerDigest();
   console.log(`[scheduler] ${tasks.size} schedule(s) active`);
 }
 
@@ -154,6 +198,7 @@ module.exports = {
   reload,
   stop,
   runScheduled,
+  runDigest,
   validateScheduleScanOptions,
   activeIds,
 };

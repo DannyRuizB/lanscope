@@ -1115,6 +1115,50 @@ function countUnackedAlerts({ cidr = null } = {}) {
   return row?.n || 0;
 }
 
+// v1.15.0 — one roll-up for the daily digest notifier event. Groups the
+// activity since `sinceMs` by CIDR: how many scans ran, how many alerts were
+// raised (by type), and how many are still pending (unacked, any age — the
+// backlog you'd want a nudge about). A CIDR appears if it saw a scan OR a new
+// alert in the window; a quiet network isn't noise in the digest.
+function getDigest(sinceMs) {
+  const byCidr = new Map();
+  const row = (cidr) => {
+    if (!byCidr.has(cidr)) {
+      byCidr.set(cidr, { cidr, scans: 0, alerts_new: {}, alerts_new_total: 0, alerts_pending: 0 });
+    }
+    return byCidr.get(cidr);
+  };
+  for (const r of db
+    .prepare(`SELECT cidr, COUNT(*) AS n FROM scans WHERE started_at >= ? GROUP BY cidr`)
+    .all(sinceMs)) {
+    row(r.cidr).scans = r.n;
+  }
+  for (const r of db
+    .prepare(
+      `SELECT cidr, type, COUNT(*) AS n FROM alerts WHERE created_at >= ? GROUP BY cidr, type`,
+    )
+    .all(sinceMs)) {
+    const rec = row(r.cidr);
+    rec.alerts_new[r.type] = r.n;
+    rec.alerts_new_total += r.n;
+  }
+  // Pending backlog only for CIDRs already in the window (don't resurrect a
+  // network that's been silent for days just because an old alert lingers).
+  for (const rec of byCidr.values()) {
+    rec.alerts_pending = countUnackedAlerts({ cidr: rec.cidr });
+  }
+  const cidrs = Array.from(byCidr.values()).sort((a, b) => a.cidr.localeCompare(b.cidr));
+  return {
+    cidrs,
+    totals: {
+      networks: cidrs.length,
+      scans: cidrs.reduce((s, c) => s + c.scans, 0),
+      alerts_new: cidrs.reduce((s, c) => s + c.alerts_new_total, 0),
+      alerts_pending: cidrs.reduce((s, c) => s + c.alerts_pending, 0),
+    },
+  };
+}
+
 // Returns the alert in its current state. The caller distinguishes 404 (null)
 // from "already ack'd" (acknowledged_at !== null on first call) if it cares.
 function ackAlert(id) {
@@ -1197,6 +1241,7 @@ module.exports = {
   listAlerts,
   listAlertsByScan,
   countUnackedAlerts,
+  getDigest,
   ackAlert,
   deleteAlert,
   listLabels,

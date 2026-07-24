@@ -113,3 +113,55 @@ test('baseline_diff payload keeps the stable shape (latency fields null)', async
   assert.equal(body.slow_hosts, null);
   assert.match(body.summary, /Baseline divergence on 10\.0\.0\.0\/24: 3 changes/);
 });
+
+// --- daily_digest (v1.15.0) -------------------------------------------------
+
+const DIGEST_CTX = {
+  window_hours: 24,
+  digest: {
+    cidrs: [
+      { cidr: '10.0.0.0/24', scans: 3, alerts_new: { appeared: 2 }, alerts_new_total: 2, alerts_pending: 4 },
+      { cidr: '192.168.1.0/24', scans: 1, alerts_new: {}, alerts_new_total: 0, alerts_pending: 0 },
+    ],
+    totals: { networks: 2, scans: 4, alerts_new: 2, alerts_pending: 4 },
+  },
+};
+
+test('daily_digest generic webhook carries the roll-up and a summary', async () => {
+  await sendToChannel(
+    { type: 'webhook', config: { url: `${baseUrl}/hook`, format: 'generic' } },
+    'daily_digest',
+    DIGEST_CTX,
+  );
+  const body = JSON.parse(last.body);
+  assert.equal(body.event, 'daily_digest');
+  assert.equal(
+    body.summary,
+    'LanScope daily digest (last 24h): 4 scans across 2 networks, 2 new alerts, 4 still pending',
+  );
+  assert.equal(body.window_hours, 24);
+  assert.equal(body.digest.totals.networks, 2);
+  // Not a per-scan event: those fields stay null.
+  assert.equal(body.scan, null);
+  assert.equal(body.threshold_ms, null);
+});
+
+test('daily_digest says so plainly when nothing happened', async () => {
+  await sendToChannel(
+    { type: 'webhook', config: { url: `${baseUrl}/hook` } },
+    'daily_digest',
+    { window_hours: 12, digest: { cidrs: [], totals: { networks: 0, scans: 0, alerts_new: 0, alerts_pending: 0 } } },
+  );
+  assert.match(JSON.parse(last.body).summary, /no scans in the last 12h/);
+});
+
+test('daily_digest ntfy delivery is low-priority with its own tag', async () => {
+  await sendToChannel(
+    { type: 'ntfy', config: { topic: 'lanscope-test', server: baseUrl } },
+    'daily_digest',
+    DIGEST_CTX,
+  );
+  assert.equal(last.headers.title, 'LanScope daily digest');
+  assert.equal(last.headers.tags, 'bar_chart');
+  assert.equal(last.headers.priority, 'low');
+});

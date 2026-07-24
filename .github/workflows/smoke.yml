@@ -109,6 +109,12 @@ jobs:
             http://localhost:3030/api/schedules | grep -q '"latency_alert_ms":120'
           curl -fsS http://localhost:3030/api/schedules | grep -q '"latency_alert_ms":120'
 
+          echo "--- notifications daily_digest event (v1.15.0) ---"
+          curl -fsS -X POST -H 'content-type: application/json' \
+            -d '{"name":"smoke digest","type":"webhook","config":{"url":"https://example.invalid/hook"},"events":["daily_digest"],"enabled":false}' \
+            http://localhost:3030/api/notifications | grep -q '"daily_digest"'
+          curl -fsS http://localhost:3030/api/notifications | grep -q '"daily_digest"'
+
           echo "--- notifications high_latency event (v1.13.0) ---"
           # The event must round-trip the allowlist; enabled=false, never fires.
           curl -fsS -X POST -H 'content-type: application/json' \

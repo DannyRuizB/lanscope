@@ -58,6 +58,7 @@ const ALLOWED_EVENTS = new Set([
   "scan_skipped",
   "baseline_diff", // v0.13.0
   "high_latency", // v1.13.0
+  "daily_digest", // v1.15.0
 ]);
 const ALLOWED_CHANNEL_TYPES = new Set(["webhook", "ntfy"]);
 const ALLOWED_WEBHOOK_FORMATS = new Set(["generic", "discord", "slack"]);

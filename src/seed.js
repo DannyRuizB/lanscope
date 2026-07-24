@@ -443,7 +443,7 @@ function seedChannels(rawDb, { createdAtBase }) {
       url: "https://discord.com/api/webhooks/XXXXXX/your-token-here",
       format: "discord",
     },
-    events: ["scan_done", "scan_error", "baseline_diff"],
+    events: ["scan_done", "scan_error", "baseline_diff", "daily_digest"],
     enabled: false,
   });
   const ntfy = db.createChannel({
