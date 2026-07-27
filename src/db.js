@@ -454,6 +454,13 @@ const stmts = {
     `UPDATE alerts SET acknowledged_at = ? WHERE id = ? AND acknowledged_at IS NULL`,
   ),
   deleteAlertStmt: db.prepare(`DELETE FROM alerts WHERE id = ?`),
+  // v1.17.0 — alert retention. Only acknowledged alerts are candidates, and
+  // the clock runs from acknowledged_at, not created_at: retention starts
+  // when a human closed the finding, not when it fired. Pending alerts are
+  // excluded by construction (no acknowledged_at to compare).
+  pruneAckedAlertsStmt: db.prepare(
+    `DELETE FROM alerts WHERE acknowledged_at IS NOT NULL AND acknowledged_at < ?`,
+  ),
 };
 
 const insertHostsTx = db.transaction((scanId, hosts) => {
@@ -1170,6 +1177,12 @@ function deleteAlert(id) {
   return stmts.deleteAlertStmt.run(id).changes > 0;
 }
 
+// v1.17.0 — delete acknowledged alerts acked before the cutoff. The caller
+// owns the clock (cutoff in epoch ms); returns how many rows went.
+function pruneAckedAlerts(cutoffMs) {
+  return stmts.pruneAckedAlertsStmt.run(cutoffMs).changes;
+}
+
 // ----- Host labels (v1.3.0): user-assigned friendly name + notes ----------
 // Keyed by (cidr, ip), NOT by host row: a label follows the device across
 // every scan of that network, past and future.
@@ -1244,6 +1257,7 @@ module.exports = {
   getDigest,
   ackAlert,
   deleteAlert,
+  pruneAckedAlerts,
   listLabels,
   upsertLabel,
 };

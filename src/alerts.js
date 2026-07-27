@@ -49,6 +49,18 @@ function latencyThresholdMs() {
   return Number.isFinite(n) && n > 0 ? n : null;
 }
 
+// v1.17.0 — alert retention. ALERT_RETENTION_DAYS is opt-in like the other
+// knobs (unset = keep everything forever, the previous behaviour): acked
+// alerts age out N days after they were acknowledged. Same strict parse as
+// latencyThresholdMs — zero, negatives and garbage mean "off", never a
+// retention window that silently swallows the whole history.
+function alertRetentionDays() {
+  const raw = (process.env.ALERT_RETENTION_DAYS || "").trim();
+  if (!raw) return null;
+  const n = Number(raw);
+  return Number.isFinite(n) && n > 0 ? n : null;
+}
+
 // v1.14.0 — the threshold a given scan is judged against. A scheduled
 // scan's own latency_alert_ms wins over the global env: null inherits,
 // 0 means "explicitly off for this schedule" (the WiFi-heavy subnet stops
@@ -219,4 +231,5 @@ module.exports = {
   partitionAlerts,
   latencyThresholdMs,
   effectiveLatencyThreshold,
+  alertRetentionDays,
 };
