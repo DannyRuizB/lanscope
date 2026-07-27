@@ -9,6 +9,7 @@
 
 const cron = require("node-cron");
 const db = require("./db");
+const alerts = require("./alerts");
 const { validateDiscovery } = require("./scanner");
 const { executeCidrScan } = require("./runner");
 const notifier = require("./notifier");
@@ -108,6 +109,7 @@ async function runScheduled(schedule) {
       console.error(`[scheduler] schedule ${schedule.id}: prune failed: ${e.message}`);
     }
   }
+  purgeAckedAlerts();
   notifier
     .dispatch("scan_done", { schedule, scan: result.scan })
     .catch((e) => console.error(`[scheduler] notify scan_done failed: ${e.message}`));
@@ -173,15 +175,42 @@ function reload() {
   console.log(`[scheduler] ${tasks.size} schedule(s) active`);
 }
 
+// v1.17.0 — alert retention (ALERT_RETENTION_DAYS, opt-in): acknowledged
+// alerts age out N days after they were acked. Global on purpose, unlike
+// scan retention's per-schedule knob — an acked alert is closed bookkeeping
+// wherever it came from; pending alerts are untouchable by construction.
+// Runs at boot and after every completed scheduled scan; same failure rule
+// as scan retention — a purge failure never taints anything, log and go on.
+function purgeAckedAlerts() {
+  const days = alerts.alertRetentionDays();
+  if (!days) return 0;
+  try {
+    const purged = db.pruneAckedAlerts(Date.now() - days * 24 * 60 * 60 * 1000);
+    if (purged > 0) {
+      console.log(
+        `[scheduler] purged ${purged} acknowledged alert(s) older than ${days} day(s)`,
+      );
+    }
+    return purged;
+  } catch (e) {
+    console.error(`[scheduler] alert purge failed: ${e.message}`);
+    return 0;
+  }
+}
+
 function init() {
   // DEMO_MODE: the HTTP middleware blocks user-facing scan triggers, but the
   // cron timer would happily run nmap against whatever network the demo
   // container is sitting on. Don't register any tasks — the seeded schedules
-  // are visual fixtures, not live jobs.
+  // are visual fixtures, not live jobs. (This also skips the boot purge:
+  // the seeded demo alerts are fixtures, not history to age out.)
   if (process.env.DEMO_MODE === "true") {
     console.log("[scheduler] DEMO_MODE — schedules loaded as fixtures, no ticks scheduled.");
     return;
   }
+  // Boot-time purge, so a manual-scans-only install still ages alerts out
+  // instead of waiting for a scheduled run that never comes.
+  purgeAckedAlerts();
   reload();
 }
 
@@ -199,6 +228,7 @@ module.exports = {
   stop,
   runScheduled,
   runDigest,
+  purgeAckedAlerts,
   validateScheduleScanOptions,
   activeIds,
 };

@@ -15,6 +15,9 @@ services:
       # (LanScope refuses to start with only one of them set):
       # AUTH_USER: ops
       # AUTH_PASS: change-me
+      # Optional housekeeping — purge ACKNOWLEDGED alerts N days after the
+      # ack (pending alerts are never touched; unset = keep everything):
+      # ALERT_RETENTION_DAYS: 30
     volumes:
       - lanscope-data:/var/lib/lanscope
 
