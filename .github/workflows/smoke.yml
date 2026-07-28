@@ -71,6 +71,18 @@ jobs:
           echo
           grep -q '"count":0' /tmp/alerts.json
 
+          echo "--- /api/alerts/export (v1.19.0) ---"
+          # An empty install exports just the header row — and must say so with
+          # the CSV content type and an attachment filename, not a JSON 200.
+          curl -fsS -D /tmp/alerts-export.h "http://localhost:3030/api/alerts/export?format=csv" -o /tmp/alerts-export.csv
+          grep -qi 'content-type: text/csv' /tmp/alerts-export.h
+          grep -qi 'filename="lanscope_alerts_all.csv"' /tmp/alerts-export.h
+          grep -q 'id,created_at,acknowledged_at,status,type' /tmp/alerts-export.csv
+          curl -fsS "http://localhost:3030/api/alerts/export?format=json" | grep -q '"alerts":\[\]'
+          # A bad format must be refused, not silently defaulted.
+          code=$(curl -s -o /dev/null -w '%{http_code}' "http://localhost:3030/api/alerts/export?format=xml")
+          [ "$code" = "400" ] || { echo "::error::bad format should 400, got $code"; exit 1; }
+
           echo "--- /api/schedules ---"
           curl -fsS http://localhost:3030/api/schedules | grep -q '"schedules":'
 

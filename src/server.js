@@ -25,7 +25,9 @@ const {
   validateLabelText,
   validateNotesText,
 } = require("./http-validators");
-const { scanToCsv, exportFilename, historyToCsv, historyFilename } = require("./export");
+const {
+  scanToCsv, exportFilename, historyToCsv, historyFilename, alertsToCsv, alertsFilename,
+} = require("./export");
 const { sendWake } = require("./wol");
 const { executeCidrScan } = require("./runner");
 const { detectSensitivePortsForHost } = require("./alerts");
@@ -677,6 +679,36 @@ app.get("/api/alerts", (req, res) => {
     filters.limit = n;
   }
   res.json({ alerts: db.listAlerts(filters) });
+});
+
+// v1.19.0 — export the alert list, completing the export trio (scans v1.1.0,
+// host history v1.10.0, alerts here). A GET like the other two, so it works on
+// the read-only public demo, and it takes the SAME filters as /api/alerts:
+// what you exported is what the sidebar was showing, filter chips included —
+// an export that silently ignored the active filter would be worse than none.
+// No `limit` on purpose: a report is the whole set, not a page of it.
+app.get("/api/alerts/export", (req, res) => {
+  const cidrV = parseCidrQuery(req.query.cidr);
+  if (cidrV.error) return res.status(400).json({ error: cidrV.error });
+  const typesV = parseAlertTypesQuery(req.query.types);
+  if (typesV.error) return res.status(400).json({ error: typesV.error });
+  const format = req.query.format || "csv";
+  if (format !== "csv" && format !== "json") {
+    return res.status(400).json({ error: "invalid format, use csv|json" });
+  }
+  const filters = {};
+  if (cidrV.value) filters.cidr = cidrV.value;
+  if (req.query.unackOnly === "true") filters.unackOnly = true;
+  if (typesV.value) filters.types = typesV.value;
+  const alerts = db.listAlerts(filters);
+  res.setHeader(
+    "Content-Disposition",
+    `attachment; filename="${alertsFilename(filters, format)}"`,
+  );
+  if (format === "json") {
+    return res.json({ filters, count: alerts.length, alerts });
+  }
+  res.type("text/csv; charset=utf-8").send(alertsToCsv(alerts));
 });
 
 app.get("/api/alerts/count", (req, res) => {

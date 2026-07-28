@@ -450,6 +450,10 @@
           <li class="muted">Loading…</li>
         </ul>
         <div class="modal-actions">
+          <!-- v1.19.0 — plain anchors, kept in sync with the filters above so
+               what you download is what you are looking at. -->
+          <a id="alerts-export-csv" class="ghost" href="/api/alerts/export?format=csv" download>⬇ CSV</a>
+          <a id="alerts-export-json" class="ghost" href="/api/alerts/export?format=json" download>⬇ JSON</a>
           <button type="button" class="ghost" data-modal-close>Close</button>
         </div>
       </div>
@@ -538,7 +542,7 @@
     </div>
 
     <footer class="bottombar">
-      <span>v1.18.0</span>
+      <span>v1.19.0</span>
       <span>·</span>
       <span>MIT</span>
       <span>·</span>

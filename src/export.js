@@ -110,6 +110,108 @@ function historyFilename(history, format) {
   return `lanscope_host-history_${ip}_${cidr}.${format}`;
 }
 
+// v1.19.0 — alert export. The payload is a different shape per alert type
+// (a latency finding carries latency_ms, an exposure one a port list), so the
+// CSV cannot have a column per field without a column per type. Two columns
+// carry it instead: `detail`, the same human sentence the UI's alert row
+// shows — that's the one you paste into a ticket — and `payload_json`, the
+// raw object for whoever wants to parse it. JSON export needs neither: it
+// hands back the alerts exactly as the API does.
+const ALERT_COLUMNS = [
+  "id",
+  "created_at",
+  "acknowledged_at",
+  "status",
+  "type",
+  "cidr",
+  "scan_id",
+  "ip",
+  "hostname",
+  "detail",
+  "payload_json",
+];
+
+// The same sentences the sidebar renders (fmtAlertDetail in src/public/app.js),
+// so an exported report and the screen agree word for word. Deliberately
+// duplicated rather than shared: app.js is a DOM script, not a module this can
+// require. The payload field names differ per type and are NOT guessable —
+// `before`/`after` for the changed_* family, `added`/`removed` for ports,
+// `last_seen_hostname` for a host that vanished — so a test pins one line per
+// alert type against real payloads; a silent divergence would otherwise ship
+// an export full of "?" that looks fine in review.
+function alertDetail(alert) {
+  const p = alert.payload || {};
+  const ip = p.ip || "?";
+  switch (alert.type) {
+    case "appeared": {
+      const parts = [ip];
+      if (p.hostname) parts.push(p.hostname);
+      if (p.mac) parts.push(p.mac);
+      return `New host: ${parts.join(" · ")}`;
+    }
+    case "disappeared": {
+      const parts = [ip];
+      if (p.last_seen_hostname) parts.push(p.last_seen_hostname);
+      return `Host gone: ${parts.join(" · ")}`;
+    }
+    case "changed_mac":
+      return `${ip}: MAC ${p.before || "?"} → ${p.after || "?"}`;
+    case "changed_hostname":
+      return `${ip}: hostname ${p.before || "?"} → ${p.after || "?"}`;
+    case "changed_os":
+      return `${ip}: OS ${p.before || "?"} → ${p.after || "?"}`;
+    case "changed_ports": {
+      const added = (p.added || []).join(", ") || "—";
+      const removed = (p.removed || []).join(", ") || "—";
+      return `${ip}: ports added [${added}], removed [${removed}]`;
+    }
+    case "high_latency": {
+      const who = p.hostname ? `${ip} (${p.hostname})` : ip;
+      return `${who}: latency ${p.latency_ms} ms ≥ threshold ${p.threshold_ms} ms`;
+    }
+    case "sensitive_port": {
+      const who = p.hostname ? `${ip} (${p.hostname})` : ip;
+      const list = (p.ports || [])
+        .map((x) => (x.service ? `${x.port}/${x.service}` : String(x.port)))
+        .join(", ");
+      return `${who}: watched port${(p.ports || []).length === 1 ? "" : "s"} open — ${list}`;
+    }
+    default:
+      return ip;
+  }
+}
+
+function alertsToCsv(alerts) {
+  const lines = [ALERT_COLUMNS.join(",")];
+  for (const a of alerts || []) {
+    const p = a.payload || {};
+    lines.push([
+      a.id,
+      a.created_at ? new Date(a.created_at).toISOString() : "",
+      a.acknowledged_at ? new Date(a.acknowledged_at).toISOString() : "",
+      a.acknowledged_at ? "acknowledged" : "pending",
+      a.type,
+      a.cidr ?? "",
+      a.scan_id ?? "",
+      p.ip ?? "",
+      p.hostname ?? "",
+      alertDetail(a),
+      JSON.stringify(a.payload ?? {}),
+    ].map(csvField).join(","));
+  }
+  return "﻿" + lines.join("\r\n") + "\r\n";
+}
+
+// lanscope_alerts_192-168-1-0_24.csv, or lanscope_alerts_all.csv with no
+// CIDR filter — the filename says what the file actually contains.
+function alertsFilename(filters, format) {
+  const scope = filters && filters.cidr
+    ? String(filters.cidr).replace(/[^A-Za-z0-9_-]+/g, "-")
+    : "all";
+  return `lanscope_alerts_${scope}.${format}`;
+}
+
 module.exports = {
   scanToCsv, exportFilename, csvField, historyToCsv, historyFilename,
+  alertsToCsv, alertsFilename, alertDetail,
 };

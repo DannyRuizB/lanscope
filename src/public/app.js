@@ -3308,6 +3308,8 @@ const alertsEls = {
   list: $("#alerts-list"),
   scopeBtns: document.querySelectorAll("#modal-alerts [data-alert-scope]"),
   typeChecks: document.querySelectorAll("#modal-alerts .alerts-type-filters input[type=checkbox]"),
+  exportCsv: $("#alerts-export-csv"),
+  exportJson: $("#alerts-export-json"),
 };
 
 const alertsState = {
@@ -3376,12 +3378,22 @@ async function refreshAlertBadge() {
   }
 }
 
+// v1.19.0 — the export anchors carry the SAME filters as the list, minus the
+// limit: the on-screen list is capped at 500 rows, a report is the whole set.
+function syncAlertExportLinks(params) {
+  const q = params.toString();
+  const base = q ? `${q}&` : "";
+  if (alertsEls.exportCsv) alertsEls.exportCsv.href = `/api/alerts/export?${base}format=csv`;
+  if (alertsEls.exportJson) alertsEls.exportJson.href = `/api/alerts/export?${base}format=json`;
+}
+
 async function loadAlerts() {
   if (!alertsEls.list) return;
   alertsEls.list.innerHTML = `<li class="muted">Loading…</li>`;
   const params = new URLSearchParams();
   if (alertsState.scope === "unacked") params.set("unackOnly", "true");
   if (alertsState.types.size > 0) params.set("types", [...alertsState.types].join(","));
+  syncAlertExportLinks(params);
   params.set("limit", "500");
   try {
     const res = await fetchJson(`/api/alerts?${params.toString()}`);
