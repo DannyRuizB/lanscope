@@ -63,6 +63,14 @@ const EVENT_META = {
     ntfyTag: "warning",
     ntfyPriority: "high",
   },
+  sensitive_port: {
+    title: "Sensitive port exposed",
+    color: 0xdc2626, // red — the most actionable of the alert families
+    icon: "🔓",
+    slackEmoji: ":unlock:",
+    ntfyTag: "unlock",
+    ntfyPriority: "high",
+  },
   high_latency: {
     title: "High latency detected",
     color: 0x6366f1, // indigo — matches the alert chip in the UI
@@ -118,6 +126,14 @@ function summaryFor(event, context) {
     }
     const detail = parts.length ? ` — ${parts.join(", ")}` : "";
     return `Baseline divergence on ${cidr}: ${total} change${total === 1 ? "" : "s"}${detail}`;
+  }
+  if (event === "sensitive_port") {
+    const n = context.total ?? 0;
+    const first = (context.exposed_hosts || [])[0];
+    const firstTxt = first
+      ? ` (e.g. ${first.ip}: ${(first.ports || []).map((p) => p.port).join(", ")})`
+      : "";
+    return `Sensitive ports open on ${cidr}: ${n} host${n === 1 ? "" : "s"}${firstTxt}`;
   }
   if (event === "high_latency") {
     const n = context.total ?? 0;
@@ -177,6 +193,10 @@ function buildWebhookGeneric(event, context) {
       // capped at the 5 worst offenders; total says how many there really are.
       threshold_ms: context.threshold_ms ?? null,
       slow_hosts: context.slow_hosts ?? null,
+      // v1.18.0 — sensitive_port fields, same stable-shape rule: the watchlist
+      // that judged the scan and up to 5 exposed hosts (total says how many).
+      watchlist: context.watchlist ?? null,
+      exposed_hosts: context.exposed_hosts ?? null,
       // v1.15.0 — daily_digest roll-up (window + per-CIDR breakdown), null on
       // every other event so consumers keep a stable shape.
       window_hours: context.window_hours ?? null,

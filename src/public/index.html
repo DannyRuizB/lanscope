@@ -408,11 +408,15 @@
                 <span>high_latency</span>
               </label>
               <label class="adv-check">
+                <input type="checkbox" id="chan-evt-sensitive" />
+                <span>sensitive_port</span>
+              </label>
+              <label class="adv-check">
                 <input type="checkbox" id="chan-evt-digest" />
                 <span>daily_digest</span>
               </label>
             </div>
-            <span class="form-hint"><code>scan_*</code> fire on scheduled runs (or a manual Run now). <code>baseline_diff</code> fires after any successful scan whose diff vs the declared baseline produced at least one alert. <code>high_latency</code> fires when a scan times hosts at or above <code>LATENCY_ALERT_MS</code> (off unless that env var is set). <code>daily_digest</code> is a once-a-day roll-up per network — set <code>DIGEST_CRON</code> to enable it.</span>
+            <span class="form-hint"><code>scan_*</code> fire on scheduled runs (or a manual Run now). <code>baseline_diff</code> fires after any successful scan whose diff vs the declared baseline produced at least one alert. <code>high_latency</code> fires when a scan times hosts at or above <code>LATENCY_ALERT_MS</code> (off unless that env var is set). <code>sensitive_port</code> fires when a scan finds a watched TCP port open on a host — set <code>SENSITIVE_PORTS</code> (e.g. <code>23,445,3389</code>) to enable it. <code>daily_digest</code> is a once-a-day roll-up per network — set <code>DIGEST_CRON</code> to enable it.</span>
           </div>
         </form>
         <div class="modal-actions">
@@ -439,6 +443,7 @@
             <label class="adv-check"><input type="checkbox" value="changed_os" /><span>changed_os</span></label>
             <label class="adv-check"><input type="checkbox" value="changed_ports" /><span>changed_ports</span></label>
             <label class="adv-check"><input type="checkbox" value="high_latency" /><span>high_latency</span></label>
+            <label class="adv-check"><input type="checkbox" value="sensitive_port" /><span>sensitive_port</span></label>
           </div>
         </div>
         <ul id="alerts-list" class="alerts-list">
@@ -533,7 +538,7 @@
     </div>
 
     <footer class="bottombar">
-      <span>v1.17.0</span>
+      <span>v1.18.0</span>
       <span>·</span>
       <span>MIT</span>
       <span>·</span>

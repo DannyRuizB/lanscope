@@ -96,7 +96,56 @@ test('high_latency ntfy delivery sets its own title, tag and priority', async ()
   assert.match(last.body, /^High latency on 10\.0\.0\.0\/24: 2 hosts/);
 });
 
-test('baseline_diff payload keeps the stable shape (latency fields null)', async () => {
+// --- sensitive_port (v1.18.0) ------------------------------------------------
+
+const SENSITIVE_PORT_CTX = {
+  scan: { id: 43, cidr: '10.0.0.0/24', host_count: 13, started_at: 1700000000000 },
+  total: 2,
+  watchlist: [23, 445, 3389],
+  exposed_hosts: [
+    {
+      ip: '10.0.0.8',
+      hostname: 'legacy.lan',
+      ports: [
+        { port: 23, service: 'telnet' },
+        { port: 445, service: 'microsoft-ds' },
+      ],
+    },
+  ],
+};
+
+test('sensitive_port generic webhook carries watchlist, exposed hosts and summary', async () => {
+  await sendToChannel(
+    { type: 'webhook', config: { url: `${baseUrl}/hook`, format: 'generic' } },
+    'sensitive_port',
+    SENSITIVE_PORT_CTX,
+  );
+  const body = JSON.parse(last.body);
+  assert.equal(body.event, 'sensitive_port');
+  assert.equal(body.summary, 'Sensitive ports open on 10.0.0.0/24: 2 hosts (e.g. 10.0.0.8: 23, 445)');
+  assert.equal(body.total, 2);
+  assert.deepEqual(body.watchlist, [23, 445, 3389]);
+  assert.deepEqual(body.exposed_hosts, SENSITIVE_PORT_CTX.exposed_hosts);
+  // Neither drift nor latency: those families' fields stay null, not absent.
+  assert.equal(body.counts, null);
+  assert.equal(body.baseline, null);
+  assert.equal(body.threshold_ms, null);
+  assert.equal(body.slow_hosts, null);
+});
+
+test('sensitive_port ntfy delivery is high-priority with its own title and tag', async () => {
+  await sendToChannel(
+    { type: 'ntfy', config: { topic: 'lanscope-test', server: baseUrl } },
+    'sensitive_port',
+    SENSITIVE_PORT_CTX,
+  );
+  assert.equal(last.headers.title, 'Sensitive port exposed');
+  assert.equal(last.headers.tags, 'unlock');
+  assert.equal(last.headers.priority, 'high');
+  assert.match(last.body, /^Sensitive ports open on 10\.0\.0\.0\/24: 2 hosts/);
+});
+
+test('baseline_diff payload keeps the stable shape (latency and exposure fields null)', async () => {
   await sendToChannel(
     { type: 'webhook', config: { url: `${baseUrl}/hook` } },
     'baseline_diff',
@@ -111,6 +160,8 @@ test('baseline_diff payload keeps the stable shape (latency fields null)', async
   assert.equal(body.event, 'baseline_diff');
   assert.equal(body.threshold_ms, null);
   assert.equal(body.slow_hosts, null);
+  assert.equal(body.watchlist, null);
+  assert.equal(body.exposed_hosts, null);
   assert.match(body.summary, /Baseline divergence on 10\.0\.0\.0\/24: 3 changes/);
 });
 

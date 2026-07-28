@@ -28,6 +28,7 @@ const {
 const { scanToCsv, exportFilename, historyToCsv, historyFilename } = require("./export");
 const { sendWake } = require("./wol");
 const { executeCidrScan } = require("./runner");
+const { detectSensitivePortsForHost } = require("./alerts");
 const scheduler = require("./scheduler");
 const notifier = require("./notifier");
 const { basicAuth } = require("./auth");
@@ -232,12 +233,34 @@ app.post("/api/hosts/:id/portscan", async (req, res) => {
     });
     const saved = db.saveHostPorts(id, result.ports, result.host_scripts);
     const refreshed = db.getHost(id);
+    // v1.18.0 — the watchlist is checked HERE, right after the ports land:
+    // a discovery sweep only pings, so this is the first moment anything
+    // knows which ports a host exposes. Never lets a detector or webhook
+    // failure spoil a successful port scan.
+    let exposure = [];
+    try {
+      exposure = detectSensitivePortsForHost(id);
+    } catch (e) {
+      console.error(`[alerts] sensitive-port detect failed for host ${id}: ${e.message}`);
+    }
+    if (exposure.length > 0) {
+      const p = exposure[0].payload || {};
+      notifier
+        .dispatch("sensitive_port", {
+          scan: { id: refreshed.scan_id, cidr: db.getScan(refreshed.scan_id)?.cidr ?? null },
+          total: exposure.length,
+          watchlist: p.watchlist ?? null,
+          exposed_hosts: [{ ip: p.ip ?? null, hostname: p.hostname ?? null, ports: p.ports || [] }],
+        })
+        .catch((e) => console.error(`[server] dispatch sensitive_port failed: ${e.message}`));
+    }
     res.json({
       host_id: id,
       ip: host.ip,
       portscanned_at: refreshed.portscanned_at,
       ports: saved.ports,
       host_scripts: saved.host_scripts,
+      sensitive_port_alerts: exposure.length,
     });
   } catch (e) {
     res.status(500).json({ error: e.message });

@@ -38,7 +38,9 @@ async function executeCidrScan(cidr, { discoveryArgs = [], scheduleId = null } =
     // actually produced alerts. Since v1.13.0 high_latency alerts get their
     // own event below instead of riding in the divergence digest — they carry
     // no baseline claim, and splitting them lets a channel subscribe to one
-    // without the other.
+    // without the other. The third family (sensitive_port, v1.18.0) is never
+    // dispatched from here: a sweep records no ports, so a live scan cannot
+    // produce exposure alerts — the portscan endpoint owns that dispatch.
     const { drift, latency } = partitionAlerts(alerts);
     const scanCtx = {
       id: scan.id,
