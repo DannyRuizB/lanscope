@@ -16,6 +16,7 @@ const assert = require('node:assert/strict');
 const db = require('../src/db');
 const {
   detectAlertsForScan,
+  detectSensitivePortsForHost,
   latencyThresholdMs,
   partitionAlerts,
   sensitivePorts,
@@ -284,6 +285,44 @@ test('closed/filtered watched ports, unscanned hosts and down hosts stay quiet',
     { ip: `10.50.${n}.4`, status: 'down', ports: [{ port: 23, protocol: 'tcp', state: 'open' }] },
   ]);
   assert.equal(detectAlertsForScan(id).filter((a) => a.type === 'sensitive_port').length, 0);
+  delete process.env.SENSITIVE_PORTS;
+});
+
+// The LIVE hook — what the portscan endpoint calls the moment ports land.
+// The scan-level tests above can't exercise the dedupe guard: they judge a
+// scan exactly once, while a host can be port-scanned again and again.
+test('live hook: fires once ports land, dedupes while pending, re-fires after an ack', () => {
+  process.env.SENSITIVE_PORTS = '23';
+  const id = doneScan([{ ip: `10.50.${n}.1`, status: 'up', hostname: 'legacy.lan' }]);
+  const host = db.getScan(id).hosts[0];
+  // Before any port scan the host says nothing about its ports.
+  assert.equal(detectSensitivePortsForHost(host.id).length, 0);
+  db.saveHostPorts(host.id, [{ port: 23, protocol: 'tcp', state: 'open', service: 'telnet' }], []);
+  const first = detectSensitivePortsForHost(host.id);
+  assert.equal(first.length, 1);
+  assert.equal(first[0].type, 'sensitive_port');
+  assert.deepEqual(first[0].payload.ports.map((p) => p.port), [23]);
+  // A re-scan while the finding is untriaged must not pile up duplicates…
+  assert.equal(detectSensitivePortsForHost(host.id).length, 0);
+  // …but an acknowledged one does not block fresh news.
+  db.ackAlert(first[0].id);
+  assert.equal(detectSensitivePortsForHost(host.id).length, 1);
+  delete process.env.SENSITIVE_PORTS;
+});
+
+test('live hook stays quiet: watchlist off, host down, or nothing watched open', () => {
+  const id = doneScan([
+    { ip: `10.50.${n}.1`, status: 'up' },
+    { ip: `10.50.${n}.2`, status: 'down' },
+  ]);
+  const [up, down] = db.getScan(id).hosts;
+  db.saveHostPorts(up.id, [{ port: 23, protocol: 'tcp', state: 'open', service: 'telnet' }], []);
+  db.saveHostPorts(down.id, [{ port: 23, protocol: 'tcp', state: 'open', service: 'telnet' }], []);
+  assert.equal(detectSensitivePortsForHost(up.id).length, 0, 'no watchlist set');
+  process.env.SENSITIVE_PORTS = '23';
+  assert.equal(detectSensitivePortsForHost(down.id).length, 0, 'down host');
+  process.env.SENSITIVE_PORTS = '3389';
+  assert.equal(detectSensitivePortsForHost(up.id).length, 0, 'open port not on the watchlist');
   delete process.env.SENSITIVE_PORTS;
 });
 
