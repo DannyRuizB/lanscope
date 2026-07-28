@@ -16,7 +16,11 @@ RUN apk add --no-cache nmap nmap-scripts libcap \
 WORKDIR /app
 
 COPY package.json ./
-RUN npm install --omit=dev
+# --ignore-scripts: better-sqlite3 >= 13 bundles a linuxmusl-x64 prebuild in
+# the tarball, but npm's implicit `node-gyp rebuild` still wants python3/make
+# even when there is nothing to compile — skipping scripts keeps the image
+# free of build tools. No other dependency has an install script.
+RUN npm install --omit=dev --ignore-scripts
 
 COPY src/ ./src/
 
