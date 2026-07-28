@@ -450,9 +450,10 @@ function seedChannels(rawDb, { createdAtBase }) {
     name: "ntfy mobile push",
     type: "ntfy",
     config: { topic: "lanscope-demo", server: "https://ntfy.sh" },
-    // high_latency (v1.13.0): the demo sets LATENCY_ALERT_MS, so this fixture
-    // shows the event is a first-class subscription, not part of the digest.
-    events: ["scan_error", "baseline_diff", "high_latency"],
+    // high_latency (v1.13.0) and sensitive_port (v1.18.0): the demo sets both
+    // LATENCY_ALERT_MS and SENSITIVE_PORTS, so these fixtures show the events
+    // are first-class subscriptions, not part of the digest.
+    events: ["scan_error", "baseline_diff", "high_latency", "sensitive_port"],
     enabled: false,
   });
 

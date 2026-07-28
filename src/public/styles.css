@@ -1882,6 +1882,9 @@ li.is-baseline .scan-cidr {
 /* v1.12.0 — health finding, not inventory drift: its own hue (indigo) so it
    reads apart from the green/red/amber baseline chips. */
 .alert-type-chip.high_latency { background: #4338ca; }
+/* v1.18.0 — exposure finding: red, the most actionable family of the three
+   (a telnet box is worth acting on today). */
+.alert-type-chip.sensitive_port { background: #b91c1c; }
 .alert-detail {
   grid-area: detail;
   color: var(--text-strong);

@@ -18,6 +18,9 @@ services:
       # Optional housekeeping — purge ACKNOWLEDGED alerts N days after the
       # ack (pending alerts are never touched; unset = keep everything):
       # ALERT_RETENTION_DAYS: 30
+      # Optional watchlist — raise an alert when any of these TCP ports is
+      # found OPEN on a host (unset = off):
+      # SENSITIVE_PORTS: "23,445,3389,5900"
     volumes:
       - lanscope-data:/var/lib/lanscope
 

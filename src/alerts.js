@@ -61,6 +61,22 @@ function alertRetentionDays() {
   return Number.isFinite(n) && n > 0 ? n : null;
 }
 
+// v1.18.0 — sensitive ports. SENSITIVE_PORTS is an opt-in list (unset =
+// feature off, the default): any host found with one of these TCP ports OPEN
+// raises a sensitive_port alert. Same strict parse discipline as the latency
+// knob — non-numeric or out-of-range entries are dropped rather than silently
+// widening or narrowing the watchlist, and an all-garbage list means "off".
+function sensitivePorts() {
+  const raw = (process.env.SENSITIVE_PORTS || "").trim();
+  if (!raw) return null;
+  const ports = [];
+  for (const part of raw.split(",")) {
+    const n = Number(part.trim());
+    if (Number.isInteger(n) && n >= 1 && n <= 65535 && !ports.includes(n)) ports.push(n);
+  }
+  return ports.length ? ports.sort((a, b) => a - b) : null;
+}
+
 // v1.14.0 — the threshold a given scan is judged against. A scheduled
 // scan's own latency_alert_ms wins over the global env: null inherits,
 // 0 means "explicitly off for this schedule" (the WiFi-heavy subnet stops
@@ -97,10 +113,84 @@ function pushLatencySpecs(scan, specs, spec) {
   }
 }
 
+// v1.18.0 — the watched ports a host actually EXPOSES. Only `open` counts:
+// closed/filtered are exactly what you want to see, and a host nobody
+// port-scanned says nothing about its ports (the same "not measured" honesty
+// rule latency follows). TCP only, deliberately: the watchlist names TCP
+// services (telnet, SMB, RDP), and the UDP scan is a separate, rarely-run
+// action.
+function openWatchedPorts(ports, watch) {
+  return (ports || [])
+    .filter((p) => p.state === "open" && watch.includes(p.port))
+    .map((p) => ({ port: p.port, service: p.service || null }))
+    .sort((a, b) => a.port - b.port);
+}
+
+// v1.18.0 — like high_latency, sensitive_port is a statement about the
+// CURRENT scan (what a device exposes, not how it drifted), so it needs no
+// baseline. On a live sweep this pass is a quiet no-op — discovery only
+// pings, so no ports are recorded yet — but hosts that DO carry ports at
+// detection time (the seed's fixtures, a scan re-judged after port scans)
+// are held to the same watchlist the live path uses.
+//
+// ONE alert per host listing every watched port found open on it (not one per
+// port): the finding is "this device exposes telnet AND SMB", and a box with
+// five watched ports open shouldn't drown the sidebar.
+function pushSensitivePortSpecs(scan, specs, spec) {
+  const watch = sensitivePorts();
+  if (watch === null) return;
+  for (const h of scan.hosts || []) {
+    if (h.status !== "up") continue;
+    const open = openWatchedPorts(h.ports, watch);
+    if (!open.length) continue;
+    specs.push(
+      spec("sensitive_port", h.id, {
+        ip: h.ip,
+        hostname: h.hostname || null,
+        ports: open,
+        watchlist: watch,
+      }),
+    );
+  }
+}
+
+// v1.18.0 — the LIVE hook: a sweep only pings, so in the real flow ports
+// arrive per host through POST /api/hosts/:id/portscan, long after the
+// scan-level detectors ran. The endpoint calls this the moment the ports
+// land — same watchlist, same one-alert-per-host shape as the scan pass.
+//
+// Re-scanning a host does not pile up duplicates: if that host already has an
+// UNACKNOWLEDGED sensitive_port alert for this scan, the finding is already in
+// the tray. An acknowledged one does not block a fresh alert — you triaged the
+// old exposure, this is news again.
+function detectSensitivePortsForHost(hostId) {
+  const watch = sensitivePorts();
+  if (watch === null) return [];
+  const host = db.getHost(hostId);
+  if (!host || host.status !== "up") return [];
+  const open = openWatchedPorts(db.listTcpPortsByHost(hostId), watch);
+  if (!open.length) return [];
+  if (db.hasPendingAlertForHost(host.scan_id, hostId, "sensitive_port")) return [];
+  return db.createAlerts([
+    {
+      scan_id: host.scan_id,
+      host_id: hostId,
+      cidr: db.getScan(host.scan_id)?.cidr,
+      type: "sensitive_port",
+      payload: {
+        ip: host.ip,
+        hostname: host.hostname || null,
+        ports: open,
+        watchlist: watch,
+      },
+    },
+  ]);
+}
+
 // Wrap callers in try/catch — a detection failure should never break the
 // scan flow. Returns [] when the scan isn't done. The baseline-drift
 // detectors additionally need a declared baseline that isn't this very scan
-// (self-compare); high_latency runs regardless.
+// (self-compare); high_latency and sensitive_port run regardless.
 function detectAlertsForScan(scanId) {
   const scan = db.getScan(scanId);
   if (!scan || scan.status !== "done") return [];
@@ -115,6 +205,7 @@ function detectAlertsForScan(scanId) {
   });
 
   pushLatencySpecs(scan, specs, spec);
+  pushSensitivePortSpecs(scan, specs, spec);
 
   const baseline = db.getBaselineByCidr(scan.cidr);
   if (!baseline || baseline.scan_id === scanId) {
@@ -215,13 +306,19 @@ function summarizeAlerts(alerts) {
 // about divergence from the declared inventory. Lumping both into one
 // "baseline divergence" notification (as v1.12.0 did) mislabels the former
 // and makes it impossible to route them to different channels.
+// v1.18.0 splits a third family out: sensitive_port is a statement about what
+// a device EXPOSES — neither scan health nor baseline drift — and deserves its
+// own routing (a telnet box is worth waking someone up for; a slow one isn't).
 function partitionAlerts(alerts) {
   const drift = [];
   const latency = [];
+  const exposure = [];
   for (const a of alerts || []) {
-    (a.type === "high_latency" ? latency : drift).push(a);
+    if (a.type === "high_latency") latency.push(a);
+    else if (a.type === "sensitive_port") exposure.push(a);
+    else drift.push(a);
   }
-  return { drift, latency };
+  return { drift, latency, exposure };
 }
 
 module.exports = {
@@ -232,4 +329,6 @@ module.exports = {
   latencyThresholdMs,
   effectiveLatencyThreshold,
   alertRetentionDays,
+  sensitivePorts,
+  detectSensitivePortsForHost,
 };
