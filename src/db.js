@@ -109,7 +109,7 @@ db.exec(`
                       'appeared','disappeared',
                       'changed_mac','changed_hostname',
                       'changed_os','changed_ports',
-                      'high_latency')),
+                      'high_latency','sensitive_port')),
     payload         TEXT    NOT NULL,
     created_at      INTEGER NOT NULL,
     acknowledged_at INTEGER
@@ -182,16 +182,18 @@ if (!columnExists("scheduled_scans", "keep_last")) {
 if (!columnExists("scheduled_scans", "latency_alert_ms")) {
   db.exec(`ALTER TABLE scheduled_scans ADD COLUMN latency_alert_ms INTEGER`);
 }
-// v1.12.0 — the alerts.type CHECK predates high_latency, and SQLite cannot
-// alter a CHECK in place: an existing DB gets the table rebuilt once (same
-// columns, ids and data preserved; nothing references alerts, so the drop is
-// safe even with foreign_keys ON). The indexes fall with the old table and
-// are recreated after the rename.
+// v1.12.0 (extended in v1.18.0) — the alerts.type CHECK cannot be altered in
+// place in SQLite, so a DB whose CHECK predates a new alert type gets the
+// table rebuilt once (same columns, ids and data preserved; nothing
+// references alerts, so the drop is safe even with foreign_keys ON). The
+// indexes fall with the old table and are recreated after the rename.
+// Guarded on the newest type rather than a version number: a DB from any
+// earlier release lands here exactly once, whichever release it came from.
 const alertsDdl =
   db
     .prepare(`SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'alerts'`)
     .get()?.sql || "";
-if (!alertsDdl.includes("high_latency")) {
+if (!alertsDdl.includes("sensitive_port")) {
   db.exec(`
     BEGIN;
     CREATE TABLE alerts_new (
@@ -203,7 +205,7 @@ if (!alertsDdl.includes("high_latency")) {
                         'appeared','disappeared',
                         'changed_mac','changed_hostname',
                         'changed_os','changed_ports',
-                        'high_latency')),
+                        'high_latency','sensitive_port')),
       payload         TEXT    NOT NULL,
       created_at      INTEGER NOT NULL,
       acknowledged_at INTEGER
@@ -458,6 +460,14 @@ const stmts = {
   // the clock runs from acknowledged_at, not created_at: retention starts
   // when a human closed the finding, not when it fired. Pending alerts are
   // excluded by construction (no acknowledged_at to compare).
+  // v1.18.0 — dedupe guard: a re-scan of the same host must not pile up
+  // identical findings while the first one is still untriaged. An ACKED one
+  // does not block a fresh alert (you closed that exposure; this is news).
+  pendingAlertForHostStmt: db.prepare(
+    `SELECT 1 FROM alerts
+      WHERE scan_id = ? AND host_id = ? AND type = ? AND acknowledged_at IS NULL
+      LIMIT 1`,
+  ),
   pruneAckedAlertsStmt: db.prepare(
     `DELETE FROM alerts WHERE acknowledged_at IS NOT NULL AND acknowledged_at < ?`,
   ),
@@ -625,6 +635,12 @@ function deleteScan(id) {
 
 function getHost(id) {
   return stmts.getHost.get(id);
+}
+
+// v1.18.0 — the TCP ports currently recorded for a host (the sensitive-port
+// detector reads them straight after a port scan saved them).
+function listTcpPortsByHost(hostId) {
+  return stmts.getTcpPortsByHost.all(hostId);
 }
 
 function saveHostPorts(hostId, ports, hostScripts) {
@@ -1025,6 +1041,7 @@ const ALERT_TYPES = Object.freeze([
   "changed_os",
   "changed_ports",
   "high_latency",
+  "sensitive_port",
 ]);
 
 function parseAlertRow(row) {
@@ -1177,6 +1194,10 @@ function deleteAlert(id) {
   return stmts.deleteAlertStmt.run(id).changes > 0;
 }
 
+function hasPendingAlertForHost(scanId, hostId, type) {
+  return !!stmts.pendingAlertForHostStmt.get(scanId, hostId, type);
+}
+
 // v1.17.0 — delete acknowledged alerts acked before the cutoff. The caller
 // owns the clock (cutoff in epoch ms); returns how many rows went.
 function pruneAckedAlerts(cutoffMs) {
@@ -1258,6 +1279,8 @@ module.exports = {
   ackAlert,
   deleteAlert,
   pruneAckedAlerts,
+  hasPendingAlertForHost,
+  listTcpPortsByHost,
   listLabels,
   upsertLabel,
 };

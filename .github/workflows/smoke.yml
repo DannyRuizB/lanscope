@@ -115,6 +115,11 @@ jobs:
             http://localhost:3030/api/notifications | grep -q '"daily_digest"'
           curl -fsS http://localhost:3030/api/notifications | grep -q '"daily_digest"'
 
+          echo "--- notifications sensitive_port event (v1.18.0) ---"
+          curl -fsS -X POST -H 'content-type: application/json' \
+            -d '{"name":"smoke sensitive","type":"webhook","config":{"url":"https://example.invalid/hook"},"events":["sensitive_port"],"enabled":false}' \
+            http://localhost:3030/api/notifications | grep -q '"sensitive_port"'
+
           echo "--- notifications high_latency event (v1.13.0) ---"
           # The event must round-trip the allowlist; enabled=false, never fires.
           curl -fsS -X POST -H 'content-type: application/json' \

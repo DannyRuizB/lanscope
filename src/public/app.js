@@ -2734,6 +2734,7 @@ const chanEls = {
   evtBaseline: document.getElementById("chan-evt-baseline"),
   evtLatency: document.getElementById("chan-evt-latency"),
   evtDigest: document.getElementById("chan-evt-digest"),
+  evtSensitive: document.getElementById("chan-evt-sensitive"),
 };
 
 let channels = [];
@@ -2874,6 +2875,7 @@ function selectedChannelEvents() {
   if (chanEls.evtSkipped?.checked) out.push("scan_skipped");
   if (chanEls.evtBaseline?.checked) out.push("baseline_diff");
   if (chanEls.evtLatency?.checked) out.push("high_latency");
+  if (chanEls.evtSensitive?.checked) out.push("sensitive_port");
   if (chanEls.evtDigest?.checked) out.push("daily_digest");
   return out;
 }
@@ -2895,6 +2897,7 @@ function openChannelModal() {
   chanEls.evtBaseline.checked = false;
   chanEls.evtLatency.checked = false;
   chanEls.evtDigest.checked = false;
+  chanEls.evtSensitive.checked = false;
   chanEls.typePresets.forEach((b, i) => b.classList.toggle("active", i === 0));
   chanEls.formatPresets.forEach((b, i) => b.classList.toggle("active", i === 0));
   syncChannelTypeUI();
@@ -3295,6 +3298,7 @@ const ALERT_TYPE_LABELS = {
   changed_os: "changed os",
   changed_ports: "changed ports",
   high_latency: "high latency",
+  sensitive_port: "sensitive port",
 };
 
 const alertsEls = {
@@ -3340,6 +3344,13 @@ function fmtAlertDetail(alert) {
     case "high_latency": {
       const who = p.hostname ? `${ip} (${p.hostname})` : ip;
       return `${who}: latency ${p.latency_ms} ms ≥ threshold ${p.threshold_ms} ms`;
+    }
+    case "sensitive_port": {
+      const who = p.hostname ? `${ip} (${p.hostname})` : ip;
+      const list = (p.ports || [])
+        .map((x) => (x.service ? `${x.port}/${x.service}` : String(x.port)))
+        .join(", ");
+      return `${who}: watched port${(p.ports || []).length === 1 ? "" : "s"} open — ${list}`;
     }
     default:
       return ip;

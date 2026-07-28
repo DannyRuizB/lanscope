@@ -14,7 +14,12 @@ process.env.DB_PATH = path.join(
 const { test, beforeEach } = require('node:test');
 const assert = require('node:assert/strict');
 const db = require('../src/db');
-const { detectAlertsForScan, latencyThresholdMs, partitionAlerts } = require('../src/alerts');
+const {
+  detectAlertsForScan,
+  latencyThresholdMs,
+  partitionAlerts,
+  sensitivePorts,
+} = require('../src/alerts');
 
 // Each test gets its own CIDR so scans/baselines never bleed across tests.
 let n = 0;
@@ -23,6 +28,7 @@ beforeEach(() => {
   n += 1;
   CIDR = `10.50.${n}.0/24`;
   delete process.env.LATENCY_ALERT_MS;
+  delete process.env.SENSITIVE_PORTS;
 });
 
 function doneScan(hosts) {
@@ -115,9 +121,10 @@ test('partitionAlerts splits high_latency from drift preserving order', () => {
 });
 
 test('partitionAlerts tolerates empty and missing input', () => {
-  assert.deepEqual(partitionAlerts([]), { drift: [], latency: [] });
-  assert.deepEqual(partitionAlerts(null), { drift: [], latency: [] });
-  assert.deepEqual(partitionAlerts(undefined), { drift: [], latency: [] });
+  const empty = { drift: [], latency: [], exposure: [] };
+  assert.deepEqual(partitionAlerts([]), empty);
+  assert.deepEqual(partitionAlerts(null), empty);
+  assert.deepEqual(partitionAlerts(undefined), empty);
 });
 
 // --- per-schedule latency threshold (v1.14.0) -------------------------------
@@ -209,4 +216,88 @@ test('getDigest excludes CIDRs with no activity in the window', () => {
   const d = db.getDigest(future);
   assert.equal(d.cidrs.length, 0);
   assert.equal(d.totals.scans, 0);
+});
+
+// --- sensitive_port (v1.18.0) ----------------------------------------------
+
+// Ports live in their own table, saved per host after the scan finishes —
+// mirror what the runner does: finish the scan, then attach ports by host id.
+function doneScanWithPorts(hosts) {
+  const id = doneScan(hosts.map(({ ports, ...h }) => h)); // eslint-disable-line no-unused-vars
+  const saved = db.getScan(id).hosts;
+  hosts.forEach((h, i) => {
+    if (h.ports) db.saveHostPorts(saved[i].id, h.ports, []);
+  });
+  return id;
+}
+
+test('sensitivePorts: unset/blank/garbage means OFF; a valid list parses sorted and deduped', () => {
+  for (const bad of [undefined, '', '   ', 'abc', 'zero,none', '0', '-5', '70000']) {
+    if (bad === undefined) delete process.env.SENSITIVE_PORTS;
+    else process.env.SENSITIVE_PORTS = bad;
+    assert.equal(sensitivePorts(), null, `expected OFF for ${JSON.stringify(bad)}`);
+  }
+  process.env.SENSITIVE_PORTS = '3389, 23,445 ,23';
+  assert.deepEqual(sensitivePorts(), [23, 445, 3389]);
+  // A partly-bad list keeps the usable entries rather than failing shut.
+  process.env.SENSITIVE_PORTS = '23,nope,99999,445';
+  assert.deepEqual(sensitivePorts(), [23, 445]);
+  delete process.env.SENSITIVE_PORTS;
+});
+
+test('with the watchlist unset, no sensitive_port alerts fire (the default)', () => {
+  const id = doneScanWithPorts([
+    { ip: `10.50.${n}.1`, status: 'up', ports: [{ port: 23, protocol: 'tcp', state: 'open', service: 'telnet' }] },
+  ]);
+  assert.equal(detectAlertsForScan(id).filter((a) => a.type === 'sensitive_port').length, 0);
+});
+
+test('one alert per host listing every watched port open on it', () => {
+  process.env.SENSITIVE_PORTS = '23,445,3389';
+  const id = doneScanWithPorts([
+    {
+      ip: `10.50.${n}.1`,
+      status: 'up',
+      hostname: 'legacy.lan',
+      ports: [
+        { port: 23, protocol: 'tcp', state: 'open', service: 'telnet' },
+        { port: 445, protocol: 'tcp', state: 'open', service: 'microsoft-ds' },
+        { port: 80, protocol: 'tcp', state: 'open', service: 'http' }, // not watched
+      ],
+    },
+  ]);
+  const hits = detectAlertsForScan(id).filter((a) => a.type === 'sensitive_port');
+  assert.equal(hits.length, 1, 'one alert per host, not per port');
+  assert.equal(hits[0].payload.ip, `10.50.${n}.1`);
+  assert.equal(hits[0].payload.hostname, 'legacy.lan');
+  assert.deepEqual(hits[0].payload.ports.map((p) => p.port), [23, 445]);
+  assert.deepEqual(hits[0].payload.watchlist, [23, 445, 3389]);
+  delete process.env.SENSITIVE_PORTS;
+});
+
+test('closed/filtered watched ports, unscanned hosts and down hosts stay quiet', () => {
+  process.env.SENSITIVE_PORTS = '23,3389';
+  const id = doneScanWithPorts([
+    { ip: `10.50.${n}.1`, status: 'up', ports: [{ port: 23, protocol: 'tcp', state: 'closed', service: 'telnet' }] },
+    { ip: `10.50.${n}.2`, status: 'up', ports: [{ port: 3389, protocol: 'tcp', state: 'filtered' }] },
+    { ip: `10.50.${n}.3`, status: 'up' }, // never port-scanned: says nothing
+    { ip: `10.50.${n}.4`, status: 'down', ports: [{ port: 23, protocol: 'tcp', state: 'open' }] },
+  ]);
+  assert.equal(detectAlertsForScan(id).filter((a) => a.type === 'sensitive_port').length, 0);
+  delete process.env.SENSITIVE_PORTS;
+});
+
+test('sensitive_port needs no baseline (like high_latency) and partitions into its own family', () => {
+  process.env.SENSITIVE_PORTS = '23';
+  const id = doneScanWithPorts([
+    { ip: `10.50.${n}.1`, status: 'up', ports: [{ port: 23, protocol: 'tcp', state: 'open', service: 'telnet' }] },
+  ]);
+  // No baseline declared for this CIDR at all, and it still fires.
+  const alerts = detectAlertsForScan(id);
+  assert.equal(alerts.filter((a) => a.type === 'sensitive_port').length, 1);
+  const { drift, latency, exposure } = partitionAlerts(alerts);
+  assert.equal(exposure.length, 1);
+  assert.equal(latency.length, 0);
+  assert.equal(drift.length, 0, 'exposure findings must not be reported as baseline drift');
+  delete process.env.SENSITIVE_PORTS;
 });
