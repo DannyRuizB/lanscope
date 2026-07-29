@@ -1,0 +1,144 @@
+'use strict';
+
+// Alert mutes (v1.20.0) need a real SQLite — point DB_PATH at a throwaway
+// file BEFORE requiring db (the module opens the database at import time;
+// the test runner gives each test file its own process, so this can't leak).
+const path = require('node:path');
+const os = require('node:os');
+const fs = require('node:fs');
+process.env.DB_PATH = path.join(
+  fs.mkdtempSync(path.join(os.tmpdir(), 'lanscope-test-')),
+  'test.db',
+);
+
+const { test, beforeEach } = require('node:test');
+const assert = require('node:assert/strict');
+const db = require('../src/db');
+const {
+  detectAlertsForScan,
+  detectSensitivePortsForHost,
+} = require('../src/alerts');
+
+// Each test gets its own CIDR so scans/baselines/mutes never bleed across
+// tests.
+let n = 0;
+let CIDR;
+beforeEach(() => {
+  n += 1;
+  CIDR = `10.60.${n}.0/24`;
+  delete process.env.LATENCY_ALERT_MS;
+  delete process.env.SENSITIVE_PORTS;
+});
+
+function doneScan(hosts) {
+  const id = db.startScan(CIDR);
+  db.finishScan(id, hosts);
+  return id;
+}
+
+test('setMute/clearMute: idempotent upsert keyed by (cidr, ip)', () => {
+  const ip = `10.60.${n}.9`;
+  assert.equal(db.listMutes(CIDR).length, 0);
+  const row = db.setMute(CIDR, ip);
+  assert.equal(row.ip, ip);
+  db.setMute(CIDR, ip); // flipping it twice must not create two rows
+  assert.equal(db.listMutes(CIDR).length, 1);
+  assert.ok(db.getMutedIps(CIDR).has(ip));
+  assert.equal(db.clearMute(CIDR, ip), null);
+  db.clearMute(CIDR, ip); // clearing an absent mute is a quiet no-op
+  assert.equal(db.listMutes(CIDR).length, 0);
+});
+
+test('mutes are scoped to their network — the same ip elsewhere still alerts', () => {
+  const ip = `10.60.${n}.9`;
+  db.setMute(CIDR, ip);
+  assert.ok(!db.getMutedIps('192.168.99.0/24').has(ip));
+});
+
+test('a muted host raises no high_latency alert; its neighbours still do', () => {
+  process.env.LATENCY_ALERT_MS = '50';
+  const slow1 = `10.60.${n}.11`;
+  const slow2 = `10.60.${n}.12`;
+  db.setMute(CIDR, slow1);
+  const id = doneScan([
+    { ip: slow1, status: 'up', latency_ms: 300 },
+    { ip: slow2, status: 'up', latency_ms: 300 },
+  ]);
+  const alerts = detectAlertsForScan(id);
+  const ips = alerts.map((a) => a.payload.ip);
+  assert.deepEqual(ips, [slow2], 'only the unmuted slow host alerts');
+});
+
+test('baseline drift is suppressed for a muted host — disappeared included (host_id is null there)', () => {
+  const stay = `10.60.${n}.20`;
+  const vanish = `10.60.${n}.21`;
+  const appear = `10.60.${n}.22`;
+  const baselineId = doneScan([
+    { ip: stay, status: 'up' },
+    { ip: vanish, status: 'up' },
+  ]);
+  db.setBaseline(baselineId);
+  db.setMute(CIDR, vanish);
+  db.setMute(CIDR, appear);
+  const id = doneScan([
+    { ip: stay, status: 'up' },
+    { ip: appear, status: 'up' },
+  ]);
+  const alerts = detectAlertsForScan(id);
+  assert.equal(alerts.length, 0, 'both drift alerts suppressed by their mutes');
+
+  // Control: the same scan shape without mutes raises both.
+  db.clearMute(CIDR, vanish);
+  db.clearMute(CIDR, appear);
+  const id2 = doneScan([
+    { ip: stay, status: 'up' },
+    { ip: appear, status: 'up' },
+  ]);
+  const types = detectAlertsForScan(id2).map((a) => a.type).sort();
+  assert.deepEqual(types, ['appeared', 'disappeared']);
+});
+
+test('the sensitive_port scan pass skips a muted host', () => {
+  process.env.SENSITIVE_PORTS = '23,445';
+  const ip = `10.60.${n}.30`;
+  db.setMute(CIDR, ip);
+  const id = doneScan([
+    {
+      ip,
+      status: 'up',
+      portscanned_at: Date.now(),
+      ports: [{ port: 445, protocol: 'tcp', state: 'open', service: 'microsoft-ds' }],
+    },
+  ]);
+  assert.equal(detectAlertsForScan(id).length, 0);
+});
+
+test('the live portscan hook respects the mute — and fires again once unmuted', () => {
+  process.env.SENSITIVE_PORTS = '23,445';
+  const ip = `10.60.${n}.40`;
+  const id = doneScan([{ ip, status: 'up' }]);
+  const scan = db.getScan(id);
+  const hostId = scan.hosts.find((h) => h.ip === ip).id;
+  db.saveHostPorts(hostId, [
+    { port: 445, protocol: 'tcp', state: 'open', service: 'microsoft-ds' },
+  ]);
+
+  db.setMute(CIDR, ip);
+  assert.equal(detectSensitivePortsForHost(hostId).length, 0, 'muted: nothing raised');
+
+  db.clearMute(CIDR, ip);
+  const raised = detectSensitivePortsForHost(hostId);
+  assert.equal(raised.length, 1, 'unmuted: the exposure is news again');
+  assert.equal(raised[0].type, 'sensitive_port');
+});
+
+test('muting does not touch alerts that already exist', () => {
+  process.env.LATENCY_ALERT_MS = '50';
+  const ip = `10.60.${n}.50`;
+  const id = doneScan([{ ip, status: 'up', latency_ms: 300 }]);
+  const before = detectAlertsForScan(id);
+  assert.equal(before.length, 1);
+  db.setMute(CIDR, ip);
+  const still = db.listAlerts({ cidr: CIDR });
+  assert.equal(still.length, 1, 'the pre-existing alert stays until acknowledged');
+});

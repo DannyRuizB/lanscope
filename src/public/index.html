@@ -533,6 +533,11 @@
             <textarea id="label-notes" rows="3" maxlength="500" placeholder="Asset tag, owner, rack position…"></textarea>
           </label>
           <span class="form-hint">The label is attached to this IP within this network and shows on every scan of it — past and future. Clear both fields to remove it.</span>
+          <label class="form-field form-checkbox">
+            <input id="label-mute" type="checkbox" />
+            <span class="form-label">🔕 Mute alerts for this host</span>
+          </label>
+          <span class="form-hint">While muted, no new alerts of any kind are raised for this IP on this network — baseline drift, latency and sensitive ports included. Alerts that already exist stay until acknowledged.</span>
         </form>
         <div class="modal-actions">
           <button type="button" class="ghost" data-modal-close>Cancel</button>
@@ -542,7 +547,7 @@
     </div>
 
     <footer class="bottombar">
-      <span>v1.19.0</span>
+      <span>v1.20.0</span>
       <span>·</span>
       <span>MIT</span>
       <span>·</span>

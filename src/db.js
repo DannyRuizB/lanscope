@@ -125,8 +125,17 @@ db.exec(`
     UNIQUE (cidr, ip)
   );
 
+  CREATE TABLE IF NOT EXISTS alert_mutes (
+    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    cidr       TEXT NOT NULL,
+    ip         TEXT NOT NULL,
+    created_at INTEGER NOT NULL,
+    UNIQUE (cidr, ip)
+  );
+
   CREATE INDEX IF NOT EXISTS idx_hosts_scan ON hosts(scan_id);
   CREATE INDEX IF NOT EXISTS idx_labels_cidr ON host_labels(cidr);
+  CREATE INDEX IF NOT EXISTS idx_mutes_cidr ON alert_mutes(cidr);
   CREATE INDEX IF NOT EXISTS idx_scans_started ON scans(started_at DESC);
   CREATE INDEX IF NOT EXISTS idx_ports_host ON host_ports(host_id);
   CREATE INDEX IF NOT EXISTS idx_os_matches_host ON host_os_matches(host_id);
@@ -1235,6 +1244,40 @@ function upsertLabel({ cidr, ip, label = null, notes = null }) {
     .get(cidr, ip);
 }
 
+// ----- Alert mutes (v1.20.0): per-host "stop alerting about this one" ------
+// Keyed by (cidr, ip) like host_labels: the mute follows the device across
+// scans of that network. Enforced at alert CREATION time (alerts.js filters
+// its specs), so a muted host produces nothing to notify, count or export —
+// alerts that already existed when the mute was set stay until acknowledged.
+function listMutes(cidr) {
+  return db
+    .prepare(`SELECT * FROM alert_mutes WHERE cidr = ? ORDER BY ip`)
+    .all(cidr);
+}
+
+function setMute(cidr, ip) {
+  db.prepare(
+    `INSERT INTO alert_mutes (cidr, ip, created_at) VALUES (?, ?, ?)
+     ON CONFLICT(cidr, ip) DO NOTHING`
+  ).run(cidr, ip, Date.now());
+  return db
+    .prepare(`SELECT * FROM alert_mutes WHERE cidr = ? AND ip = ?`)
+    .get(cidr, ip);
+}
+
+function clearMute(cidr, ip) {
+  db.prepare(`DELETE FROM alert_mutes WHERE cidr = ? AND ip = ?`).run(cidr, ip);
+  return null;
+}
+
+// One query per detection pass, not one per spec.
+function getMutedIps(cidr) {
+  const rows = db
+    .prepare(`SELECT ip FROM alert_mutes WHERE cidr = ?`)
+    .all(cidr);
+  return new Set(rows.map((r) => r.ip));
+}
+
 module.exports = {
   startScan,
   finishScan,
@@ -1283,4 +1326,8 @@ module.exports = {
   listTcpPortsByHost,
   listLabels,
   upsertLabel,
+  listMutes,
+  setMute,
+  clearMute,
+  getMutedIps,
 };

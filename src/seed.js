@@ -507,6 +507,12 @@ function run() {
   db.upsertLabel({ cidr: CIDR, ip: NAS.ip, label: "NAS (backups)", notes: "Synology DS220+. Nightly Hyper Backup to USB, quarterly restore test." });
   db.upsertLabel({ cidr: CIDR, ip: WIN_DESKTOP.ip, label: "Danny's desktop" });
 
+  // v1.20.0 — alert mutes: show the feature populated in the read-only demo
+  // (the 🔕 chip on the row, the checked box in the modal). The TV is the
+  // classic candidate: always on the network, chatty, harmless — and it
+  // produces no seeded alerts, so muting it changes nothing else in the demo.
+  db.setMute(CIDR, SMART_TV.ip);
+
   const alertCounts = seedAlerts(rawDb, {
     scan2Id: scan2,
     scan3Id: scan3,
