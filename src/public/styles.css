@@ -1457,6 +1457,18 @@ li.is-baseline .scan-cidr {
   display: block;
   margin-bottom: 14px;
 }
+/* v1.20.0 — checkbox rows (the mute toggle): control and caption inline,
+   caption keeps the uppercase form-label look without its block layout. */
+.form-checkbox {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 12px;
+}
+.form-checkbox .form-label {
+  display: inline;
+  margin: 0;
+}
 .form-label {
   display: block;
   font-size: 11px;

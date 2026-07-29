@@ -396,6 +396,31 @@ app.put("/api/labels", (req, res) => {
   res.json({ label: row }); // null when the upsert cleared it
 });
 
+// v1.20.0 — per-host alert mutes. Same (cidr, ip) keying and PUT-upsert
+// shape as labels: the UI has exactly one toggle per host and flipping it
+// twice must not create two rows. `muted` is a strict boolean on purpose —
+// a truthy string like "false" silently muting a host would be the worst
+// kind of bug to chase.
+app.get("/api/mutes", (req, res) => {
+  const cidr = req.query.cidr;
+  const errorMsg = validateCidr(cidr);
+  if (errorMsg) return res.status(400).json({ error: errorMsg });
+  res.json({ mutes: db.listMutes(cidr) });
+});
+
+app.put("/api/mutes", (req, res) => {
+  const { cidr, ip, muted } = req.body || {};
+  const cidrError = validateCidr(cidr);
+  if (cidrError) return res.status(400).json({ error: cidrError });
+  const ipError = validateIpv4(ip);
+  if (ipError) return res.status(400).json({ error: ipError });
+  if (typeof muted !== "boolean") {
+    return res.status(400).json({ error: "muted must be true or false" });
+  }
+  const row = muted ? db.setMute(cidr, ip) : db.clearMute(cidr, ip);
+  res.json({ mute: row }); // null when the mute was cleared
+});
+
 // v0.10.0 — scheduled scans. Persistence + REST surface. The actual cron
 // timer lives in src/scheduler.js (next step) and reloads on every mutation.
 

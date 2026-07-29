@@ -95,6 +95,22 @@ jobs:
           echo "--- /api/labels (v1.3.0) ---"
           curl -fsS "http://localhost:3030/api/labels?cidr=192.168.0.0%2F24" | grep -q '"labels":\[\]'
 
+          echo "--- /api/mutes (v1.20.0) ---"
+          curl -fsS "http://localhost:3030/api/mutes?cidr=192.168.0.0%2F24" | grep -q '"mutes":\[\]'
+          # PUT round-trip: mute, see it listed, unmute, gone again.
+          curl -fsS -X PUT -H 'content-type: application/json' \
+            -d '{"cidr":"192.168.0.0/24","ip":"192.168.0.9","muted":true}' \
+            "http://localhost:3030/api/mutes" | grep -q '"ip":"192.168.0.9"'
+          curl -fsS "http://localhost:3030/api/mutes?cidr=192.168.0.0%2F24" | grep -q '"ip":"192.168.0.9"'
+          curl -fsS -X PUT -H 'content-type: application/json' \
+            -d '{"cidr":"192.168.0.0/24","ip":"192.168.0.9","muted":false}' \
+            "http://localhost:3030/api/mutes" | grep -q '"mute":null'
+          # A non-boolean `muted` must be rejected, not coerced.
+          code=$(curl -s -o /dev/null -w '%{http_code}' -X PUT -H 'content-type: application/json' \
+            -d '{"cidr":"192.168.0.0/24","ip":"192.168.0.9","muted":"yes"}' \
+            "http://localhost:3030/api/mutes")
+          [ "$code" = "400" ]
+
           echo "--- /api/timeline (v1.5.0) ---"
           curl -fsS "http://localhost:3030/api/timeline?cidr=192.168.0.0%2F24" | grep -q '"points":\[\]'
 

@@ -168,6 +168,10 @@ function detectSensitivePortsForHost(hostId) {
   if (watch === null) return [];
   const host = db.getHost(hostId);
   if (!host || host.status !== "up") return [];
+  const cidr = db.getScan(host.scan_id)?.cidr;
+  // v1.20.0 — a muted host produces nothing, exposure included: the mute is
+  // the operator saying "this one is mine and noisy, leave it alone".
+  if (cidr && db.getMutedIps(cidr).has(host.ip)) return [];
   const open = openWatchedPorts(db.listTcpPortsByHost(hostId), watch);
   if (!open.length) return [];
   if (db.hasPendingAlertForHost(host.scan_id, hostId, "sensitive_port")) return [];
@@ -175,7 +179,7 @@ function detectSensitivePortsForHost(hostId) {
     {
       scan_id: host.scan_id,
       host_id: hostId,
-      cidr: db.getScan(host.scan_id)?.cidr,
+      cidr,
       type: "sensitive_port",
       payload: {
         ip: host.ip,
@@ -204,17 +208,29 @@ function detectAlertsForScan(scanId) {
     payload,
   });
 
+  // v1.20.0 — per-host mutes, enforced at CREATION time so a muted host
+  // produces nothing to notify, count or export. Every spec carries the
+  // host's ip in its payload — including `disappeared`, whose host_id is
+  // null (the host isn't in this scan; its ip is all that's left of it).
+  const mutedIps = db.getMutedIps(scan.cidr);
+  const createUnmuted = (list) => {
+    const kept = mutedIps.size
+      ? list.filter((s) => !mutedIps.has(s.payload.ip))
+      : list;
+    return kept.length ? db.createAlerts(kept) : [];
+  };
+
   pushLatencySpecs(scan, specs, spec);
   pushSensitivePortSpecs(scan, specs, spec);
 
   const baseline = db.getBaselineByCidr(scan.cidr);
   if (!baseline || baseline.scan_id === scanId) {
-    return specs.length ? db.createAlerts(specs) : [];
+    return createUnmuted(specs);
   }
 
   const baselineScan = db.getScan(baseline.scan_id);
   if (!baselineScan) {
-    return specs.length ? db.createAlerts(specs) : [];
+    return createUnmuted(specs);
   }
 
   const currentByIp = new Map();
@@ -289,7 +305,7 @@ function detectAlertsForScan(scanId) {
     }
   }
 
-  return specs.length ? db.createAlerts(specs) : [];
+  return createUnmuted(specs);
 }
 
 // Aggregate counts per alert type for the notifier baseline_diff payload.

@@ -273,17 +273,25 @@ function renderWakeButton(host) {
 // Cached per CIDR; labels are cosmetic, so a failed load never breaks the
 // view — the table just falls back to bare hostnames.
 let hostLabels = new Map(); // ip -> {label, notes, ...}
+let hostMutes = new Set(); // ips whose alerts are muted (v1.20.0)
 let hostLabelsCidr = null;
 
 async function ensureLabels(cidr) {
   if (hostLabelsCidr === cidr) return;
   hostLabelsCidr = cidr; // set before the await so re-renders don't re-fetch
   hostLabels = new Map();
+  hostMutes = new Set();
   try {
     const data = await fetchJson(`/api/labels?cidr=${encodeURIComponent(cidr)}`);
     hostLabels = new Map((data.labels || []).map((l) => [l.ip, l]));
   } catch {
     /* keep the empty map */
+  }
+  try {
+    const data = await fetchJson(`/api/mutes?cidr=${encodeURIComponent(cidr)}`);
+    hostMutes = new Set((data.mutes || []).map((m) => m.ip));
+  } catch {
+    /* keep the empty set */
   }
 }
 
@@ -369,11 +377,14 @@ function renderHostnameCell(h) {
   const notesChip = l && l.notes
     ? ` <span class="label-notes" title="${escapeHtml(l.notes)}" aria-label="Notes: ${escapeHtml(l.notes)}">🗒</span>`
     : "";
+  const muteChip = hostMutes.has(h.ip)
+    ? ` <span class="label-notes" title="Alerts muted for this host — new alerts are not raised for it" aria-label="Alerts muted for ${escapeHtml(h.ip)}">🔕</span>`
+    : "";
   if (l && l.label) {
     const hn = h.hostname ? `<span class="label-hostname">${escapeHtml(h.hostname)}</span>` : "";
-    return `<td class="hostname-cell"><span class="host-label">${escapeHtml(l.label)}</span>${notesChip}${editBtn}${hn}</td>`;
+    return `<td class="hostname-cell"><span class="host-label">${escapeHtml(l.label)}</span>${notesChip}${muteChip}${editBtn}${hn}</td>`;
   }
-  return `<td class="hostname-cell ${h.hostname ? "" : "muted"}">${escapeHtml(h.hostname) || "—"}${notesChip}${editBtn}</td>`;
+  return `<td class="hostname-cell ${h.hostname ? "" : "muted"}">${escapeHtml(h.hostname) || "—"}${notesChip}${muteChip}${editBtn}</td>`;
 }
 
 function attachLabelHandlers() {
@@ -2435,6 +2446,7 @@ const labelEls = {
   form: document.getElementById("label-modal-form"),
   name: document.getElementById("label-name"),
   notes: document.getElementById("label-notes"),
+  mute: document.getElementById("label-mute"),
   save: document.getElementById("label-modal-save"),
 };
 let labelModalIp = null;
@@ -2446,6 +2458,7 @@ function openLabelModal(ip) {
   labelEls.title.textContent = `Label ${ip}`;
   labelEls.name.value = existing?.label || "";
   labelEls.notes.value = existing?.notes || "";
+  if (labelEls.mute) labelEls.mute.checked = hostMutes.has(ip);
   labelEls.error.hidden = true;
   labelEls.error.textContent = "";
   labelEls.modal.hidden = false;
@@ -2475,6 +2488,18 @@ async function submitLabelModal() {
     // Server returns null when both fields were cleared (label removed).
     if (data.label) hostLabels.set(ip, data.label);
     else hostLabels.delete(ip);
+    // v1.20.0 — the mute toggle rides the same Save. Only PUT when the
+    // state actually changed, so a plain label edit stays one request.
+    const wantMute = !!labelEls.mute?.checked;
+    if (wantMute !== hostMutes.has(ip)) {
+      await fetchJson("/api/mutes", {
+        method: "PUT",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ cidr: lastScan.cidr, ip, muted: wantMute }),
+      });
+      if (wantMute) hostMutes.add(ip);
+      else hostMutes.delete(ip);
+    }
     closeLabelModal();
     if (lastScan) renderScan(lastScan);
   } catch (e) {
