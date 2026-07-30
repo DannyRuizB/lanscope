@@ -1,6 +1,6 @@
 # Show HN post — draft
 
-Ready to submit once v1.0.0 is tagged and the public demo is updated.
+Refreshed for v1.21.0 (2026-07-30) — ready to submit any time.
 Paste the title into the "title" field on https://news.ycombinator.com/submit,
 paste the URL into the "url" field, leave the "text" field empty, then post
 the first comment immediately so it appears at the top of the thread.
@@ -50,20 +50,27 @@ Some things you can poke at:
 - Topology graph (Cytoscape) with the gateway at the centre and hosts on
   concentric rings by relevance (open ports + OS detected → inner ring; just
   alive → outer ring).
-- Diff between any two scans of the same CIDR (appeared / disappeared /
-  changed mac / hostname / OS).
-- Baseline you can declare on any scan, after which every later scan of the
-  same CIDR auto-compares against it.
+- Diff between any two scans of the same CIDR, and a baseline you can declare
+  on any scan — every later scan of that CIDR auto-compares against it and
+  divergence (new / gone / changed host) lands in an alert tray with
+  ack/triage.
+- The alerting grew into the interesting part: a sensitive-ports watchlist
+  ("tell me if 3389 opens anywhere"), latency thresholds (global or
+  per-schedule), per-host mutes scoped by alert type ("the NAS pings slow
+  during backups — silence latency, still tell me about new ports"), a daily
+  digest, and opt-in retention so acked noise ages out.
 - Scheduled scans (node-cron) with per-channel notifications to webhook
   (generic / Discord / Slack format) or ntfy.sh.
-- Per-CIDR timeline aggregating every historical scan (Chart.js).
-- Baseline-divergence alerts with ack/triage in the UI.
+- Per-CIDR timeline of every historical scan, per-host history with latency
+  sparklines, and CSV/JSON export of scans, host history and alerts.
+- Host labels/notes, free-text search, Wake-on-LAN buttons, optional Basic
+  Auth for exposing it beyond localhost.
 
-Read-only demo with three pre-seeded scans of a synthetic /24 lives at
-https://lanscope-demo.onrender.com — first hit takes ~10-30 s to wake the
-free-tier dyno, then it's instant.
+Read-only demo on a pre-seeded synthetic /24 (scans, schedules, alerts and
+mutes all populated) lives at https://lanscope-demo.onrender.com — first hit
+takes ~10-30 s to wake the free-tier dyno, then it's instant.
 
-Stack: Node 20, Express, better-sqlite3, vanilla JS frontend. Multi-arch
+Stack: Node 24, Express, better-sqlite3, vanilla JS frontend. Multi-arch
 Docker image on GHCR (linux/amd64 + linux/arm64). No telemetry, no outbound
 calls except the notifier channels you opt into.
 
@@ -74,6 +81,22 @@ out of scope and the FAQ in the README says so explicitly.
 
 Happy to answer technical questions and take bug reports / PRs.
 ```
+
+## ⚠️ Pre-flight OBLIGATORIO (descubierto 30/07/2026)
+
+**La demo de Render corre una imagen ANTIGUA** (footer v0.12.0, sin
+/api/mutes — algo entre v0.13 y v1.4, ~un año de releases por detrás).
+El pin de render.yaml NO despliega solo: hay que entrar al dashboard de
+Render y darle a **"Manual Deploy → Deploy latest reference"** (o configurar
+auto-deploy/deploy hook para el futuro). Verificación tras el deploy:
+
+```
+curl -s https://lanscope-demo.onrender.com/ | grep -o "v1\.[0-9.]*"   # → v1.21.0
+curl -s "https://lanscope-demo.onrender.com/api/mutes?cidr=192.168.1.0%2F24"  # → JSON con la TV y el NAS
+```
+
+Publicar con la demo vieja = el primer comentario de HN será "the demo
+doesn't have half the features you list". NO publicar sin esto.
 
 ## Tone / etiquette checklist
 

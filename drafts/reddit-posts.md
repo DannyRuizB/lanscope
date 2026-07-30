@@ -48,35 +48,42 @@ against a known baseline.
 
 **What it does**
 
-- CIDR ping sweep, alive-host table with MAC / vendor / hostname / OS.
+- CIDR ping sweep, alive-host table with MAC / vendor / hostname / OS /
+  latency (with per-host sparklines).
 - Per-host TCP scan, OS fingerprint, UDP scan, NSE scripts — each via a
-  one-click button on the host's row.
+  one-click button on the host's row. Wake-on-LAN button when the MAC is
+  known.
 - Topology graph (Cytoscape.js) — gateway at the centre, hosts on concentric
   rings by how much I know about them.
 - Diff between two scans of the same CIDR — appeared / disappeared / changed
   hostname, MAC or OS family.
-- "Set as baseline" on any scan; every later scan auto-compares.
-- Scheduled scans (cron) with webhook / ntfy notifications.
-- Per-CIDR timeline with hosts-alive, open-ports, scan-duration and
-  baseline-diff charts.
-- Baseline-divergence alerts — anything new / gone / changed gets queued
-  for triage; a red badge in the sidebar shows the unack count.
+- "Set as baseline" on any scan; every later scan auto-compares and
+  divergence lands in an alert tray with ack/triage.
+- Alerting beyond drift: a sensitive-ports watchlist ("tell me if 3389
+  opens anywhere on the LAN"), latency thresholds (global or per-schedule),
+  per-host mutes scoped by alert type ("the NAS pings slow during backups —
+  silence latency, still tell me about new ports"), and a daily digest.
+- Scheduled scans (cron) with webhook / ntfy notifications, per-schedule
+  retention, and opt-in alert retention so acked noise ages out.
+- Per-CIDR timeline, per-host history modal, host labels/notes, free-text
+  search, and CSV/JSON export of scans, host history and alerts.
+- Optional Basic Auth if you expose it beyond localhost.
 
 **Stack and footprint**
 
-Node 20 + Express + better-sqlite3, vanilla JS for the frontend. Multi-arch
+Node 24 + Express + better-sqlite3, vanilla JS for the frontend. Multi-arch
 image on GHCR (`ghcr.io/dannyruizb/lanscope`, amd64 + arm64). One SQLite
 file in a Docker named volume, no external dependencies. Zero telemetry,
 zero outbound calls except the notifier channels you opt into.
 
 **Try without installing**
 
-A read-only public demo with three pre-seeded scans of a synthetic
-`192.168.1.0/24` runs at https://lanscope-demo.onrender.com. First hit
-takes ~10-30 s to wake the free-tier dyno; after that everything is
-snappy. Every button that would actually run nmap returns
-`Demo mode: scans disabled` — you get to poke at the UI without leaving
-my Render account scanning the data centre.
+A read-only public demo on a pre-seeded synthetic `192.168.1.0/24` — scan
+history, schedules, alerts and mutes all populated — runs at
+https://lanscope-demo.onrender.com. First hit takes ~10-30 s to wake the
+free-tier dyno; after that everything is snappy. Every button that would
+actually run nmap returns `Demo mode: scans disabled` — you get to poke at
+the UI without leaving my Render account scanning the data centre.
 
 **Caveats**
 
@@ -155,19 +162,26 @@ for a few weeks and the topology graph alone has been worth the effort.
   or to spot a guest device on the LAN.)
 - Scheduled scans (cron) — I have one running every hour. If anything
   diverges from the baseline, a red badge shows up in the UI and (optionally)
-  a webhook / ntfy push fires.
+  a webhook / ntfy push fires. There's a daily digest if you'd rather get
+  one summary than a push per event.
+- A sensitive-ports watchlist ("tell me if RDP or Telnet opens anywhere"),
+  latency alerts, and per-host mutes you can scope by alert type — the
+  chatty smart TV stays quiet without blinding you to a new open port on it.
+- Labels and notes per host ("office printer", asset tags), Wake-on-LAN
+  buttons, free-text search, CSV/JSON exports.
 - Multi-arch Docker image, so it runs on a Pi or an x86 NUC without
   thinking about it.
-- Per-CIDR timeline of hosts-alive, open-ports and scan-duration over time.
+- Per-CIDR timeline of hosts-alive, open-ports, latency and scan-duration
+  over time, plus a per-host history view with latency sparklines.
 
-**Demo** (no install, read-only, pre-seeded /24):
-https://lanscope-demo.onrender.com
+**Demo** (no install, read-only, pre-seeded /24 with alerts and schedules
+populated): https://lanscope-demo.onrender.com
 
 **Code**: https://github.com/DannyRuizB/lanscope (MIT)
 
-**Stack**: Node 20, better-sqlite3, vanilla JS (Cytoscape.js for the graph,
+**Stack**: Node 24, better-sqlite3, vanilla JS (Cytoscape.js for the graph,
 Chart.js for the timeline). One container, one SQLite file in a named
-volume, no other dependencies.
+volume, no other dependencies. Optional Basic Auth if it leaves localhost.
 
 Curious if there's a feature anyone really wants — the scheduler and the
 alert / notification stack are the newest pieces and I'd like to know what
@@ -182,8 +196,19 @@ combinations end up being useful in practice.
   marketing).
 - Mentioning RPi 4 explicitly is intentional: r/homelab is heavily Pi-
   positive and showing the arm64 image works on the platform earns goodwill.
+- ⚠️ **Pre-flight**: the Pi 4 + "running every hour for a few weeks" lines
+  are PERSONAL claims — make them true before posting (run it at home for
+  real) or soften them ("runs fine on a Pi thanks to the arm64 image").
+  Nothing kills a launch thread like being caught embellishing.
 
 ---
+
+## ⚠️ Pre-flight OBLIGATORIO
+
+Igual que en el draft de HN: **la demo de Render corre una imagen antigua**
+(v0.13–v1.4; sin mutes, sin watchlist, sin exports…). Redeploy manual en el
+dashboard de Render ANTES de publicar nada, y verificar que el footer dice
+v1.21.0. Detalle completo en [hn-post.md](./hn-post.md).
 
 ## Cross-cutting rules
 
