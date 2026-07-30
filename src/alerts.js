@@ -42,6 +42,14 @@ function normName(s) {
 // threshold, a high_latency alert fires. Parsed on every call so tests can
 // flip it; strict parse — zero, negatives and garbage mean "off" rather than
 // a threshold that accidentally matches everything.
+// v1.21.0 — does this mute scope cover an alert of this type? `entry` comes
+// from db.getMutes: undefined = no mute, null = every type (the v1.20
+// meaning), a Set = just those types.
+function muteCovers(entry, type) {
+  if (entry === undefined) return false;
+  return entry === null || entry.has(type);
+}
+
 function latencyThresholdMs() {
   const raw = (process.env.LATENCY_ALERT_MS || "").trim();
   if (!raw) return null;
@@ -171,7 +179,11 @@ function detectSensitivePortsForHost(hostId) {
   const cidr = db.getScan(host.scan_id)?.cidr;
   // v1.20.0 — a muted host produces nothing, exposure included: the mute is
   // the operator saying "this one is mine and noisy, leave it alone".
-  if (cidr && db.getMutedIps(cidr).has(host.ip)) return [];
+  // v1.21.0 — unless the mute is scoped to OTHER types: a latency-only mute
+  // must not swallow an exposure finding.
+  if (cidr && muteCovers(db.getMutes(cidr).get(host.ip), "sensitive_port")) {
+    return [];
+  }
   const open = openWatchedPorts(db.listTcpPortsByHost(hostId), watch);
   if (!open.length) return [];
   if (db.hasPendingAlertForHost(host.scan_id, hostId, "sensitive_port")) return [];
@@ -212,10 +224,12 @@ function detectAlertsForScan(scanId) {
   // produces nothing to notify, count or export. Every spec carries the
   // host's ip in its payload — including `disappeared`, whose host_id is
   // null (the host isn't in this scan; its ip is all that's left of it).
-  const mutedIps = db.getMutedIps(scan.cidr);
+  // v1.21.0 — the mute may be scoped to some alert types: each spec is
+  // judged by its own type against the host's mute scope.
+  const mutes = db.getMutes(scan.cidr);
   const createUnmuted = (list) => {
-    const kept = mutedIps.size
-      ? list.filter((s) => !mutedIps.has(s.payload.ip))
+    const kept = mutes.size
+      ? list.filter((s) => !muteCovers(mutes.get(s.payload.ip), s.type))
       : list;
     return kept.length ? db.createAlerts(kept) : [];
   };

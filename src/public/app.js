@@ -273,7 +273,35 @@ function renderWakeButton(host) {
 // Cached per CIDR; labels are cosmetic, so a failed load never breaks the
 // view — the table just falls back to bare hostnames.
 let hostLabels = new Map(); // ip -> {label, notes, ...}
-let hostMutes = new Set(); // ips whose alerts are muted (v1.20.0)
+// v1.20.0 — ips whose alerts are muted; v1.21.0 the value carries the scope:
+// null = every alert type, an array = just those types.
+let hostMutes = new Map();
+
+// The modal talks in FAMILIES (the same three buckets the alerts tray uses);
+// the API talks in types. A family reads as muted only when every one of its
+// types is — a finer API-made mute shows unchecked and would be broadened by
+// a Save, which is the documented trade of editing it through the modal.
+const MUTE_FAMILIES = [
+  {
+    input: "mute-family-drift",
+    label: "baseline drift",
+    types: ["appeared", "disappeared", "changed_mac", "changed_hostname", "changed_os", "changed_ports"],
+  },
+  { input: "mute-family-latency", label: "high latency", types: ["high_latency"] },
+  { input: "mute-family-exposure", label: "sensitive ports", types: ["sensitive_port"] },
+];
+
+function muteChipTitle(scope) {
+  if (scope === null || scope === undefined) {
+    return "Alerts muted for this host — new alerts are not raised for it";
+  }
+  const set = new Set(scope);
+  const named = MUTE_FAMILIES.filter((f) => f.types.every((t) => set.has(t))).map(
+    (f) => f.label,
+  );
+  const what = named.length ? named.join(", ") : scope.join(", ");
+  return `Some alerts muted for this host — ${what}`;
+}
 let hostLabelsCidr = null;
 
 async function ensureLabels(cidr) {
@@ -289,7 +317,7 @@ async function ensureLabels(cidr) {
   }
   try {
     const data = await fetchJson(`/api/mutes?cidr=${encodeURIComponent(cidr)}`);
-    hostMutes = new Set((data.mutes || []).map((m) => m.ip));
+    hostMutes = new Map((data.mutes || []).map((m) => [m.ip, m.types ?? null]));
   } catch {
     /* keep the empty set */
   }
@@ -378,7 +406,7 @@ function renderHostnameCell(h) {
     ? ` <span class="label-notes" title="${escapeHtml(l.notes)}" aria-label="Notes: ${escapeHtml(l.notes)}">🗒</span>`
     : "";
   const muteChip = hostMutes.has(h.ip)
-    ? ` <span class="label-notes" title="Alerts muted for this host — new alerts are not raised for it" aria-label="Alerts muted for ${escapeHtml(h.ip)}">🔕</span>`
+    ? ` <span class="label-notes" title="${escapeHtml(muteChipTitle(hostMutes.get(h.ip)))}" aria-label="Alerts muted for ${escapeHtml(h.ip)}">🔕</span>`
     : "";
   if (l && l.label) {
     const hn = h.hostname ? `<span class="label-hostname">${escapeHtml(h.hostname)}</span>` : "";
@@ -2447,9 +2475,20 @@ const labelEls = {
   name: document.getElementById("label-name"),
   notes: document.getElementById("label-notes"),
   mute: document.getElementById("label-mute"),
+  muteScope: document.getElementById("label-mute-scope"),
   save: document.getElementById("label-modal-save"),
 };
 let labelModalIp = null;
+
+// v1.21.0 — the scope fieldset only makes sense while the mute is on.
+function syncMuteScopeVisibility() {
+  if (labelEls.muteScope) labelEls.muteScope.hidden = !labelEls.mute?.checked;
+}
+labelEls.mute?.addEventListener("change", syncMuteScopeVisibility);
+
+function familyInput(f) {
+  return document.getElementById(f.input);
+}
 
 function openLabelModal(ip) {
   if (!lastScan) return;
@@ -2458,7 +2497,18 @@ function openLabelModal(ip) {
   labelEls.title.textContent = `Label ${ip}`;
   labelEls.name.value = existing?.label || "";
   labelEls.notes.value = existing?.notes || "";
-  if (labelEls.mute) labelEls.mute.checked = hostMutes.has(ip);
+  if (labelEls.mute) {
+    labelEls.mute.checked = hostMutes.has(ip);
+    // Scope prefill: no mute or a full mute checks every family; a scoped
+    // one checks a family only when ALL its types are covered.
+    const scope = hostMutes.get(ip);
+    const set = scope ? new Set(scope) : null;
+    for (const f of MUTE_FAMILIES) {
+      const el = familyInput(f);
+      if (el) el.checked = set === null ? true : f.types.every((t) => set.has(t));
+    }
+    syncMuteScopeVisibility();
+  }
   labelEls.error.hidden = true;
   labelEls.error.textContent = "";
   labelEls.modal.hidden = false;
@@ -2490,14 +2540,29 @@ async function submitLabelModal() {
     else hostLabels.delete(ip);
     // v1.20.0 — the mute toggle rides the same Save. Only PUT when the
     // state actually changed, so a plain label edit stays one request.
-    const wantMute = !!labelEls.mute?.checked;
-    if (wantMute !== hostMutes.has(ip)) {
-      await fetchJson("/api/mutes", {
+    // v1.21.0 — the scope rides along: all families on = mute everything
+    // (types omitted, the canonical spelling), a subset = just those types,
+    // none = there is nothing to mute, which IS an unmute.
+    const checkedFamilies = MUTE_FAMILIES.filter((f) => familyInput(f)?.checked);
+    const wantMute = !!labelEls.mute?.checked && checkedFamilies.length > 0;
+    const wantScope =
+      wantMute && checkedFamilies.length < MUTE_FAMILIES.length
+        ? checkedFamilies.flatMap((f) => f.types)
+        : null;
+    const scopeKey = (s) => (s === null || s === undefined ? "all" : [...s].sort().join(","));
+    const current = hostMutes.get(ip); // undefined = not muted
+    const changed = wantMute
+      ? current === undefined || scopeKey(current) !== scopeKey(wantScope)
+      : hostMutes.has(ip);
+    if (changed) {
+      const body = { cidr: lastScan.cidr, ip, muted: wantMute };
+      if (wantMute && wantScope) body.types = wantScope;
+      const data = await fetchJson("/api/mutes", {
         method: "PUT",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ cidr: lastScan.cidr, ip, muted: wantMute }),
+        body: JSON.stringify(body),
       });
-      if (wantMute) hostMutes.add(ip);
+      if (wantMute) hostMutes.set(ip, data.mute?.types ?? null);
       else hostMutes.delete(ip);
     }
     closeLabelModal();

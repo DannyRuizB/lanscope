@@ -129,6 +129,7 @@ db.exec(`
     id         INTEGER PRIMARY KEY AUTOINCREMENT,
     cidr       TEXT NOT NULL,
     ip         TEXT NOT NULL,
+    types      TEXT,
     created_at INTEGER NOT NULL,
     UNIQUE (cidr, ip)
   );
@@ -190,6 +191,12 @@ if (!columnExists("scheduled_scans", "keep_last")) {
 // v1.12 alerts lesson).
 if (!columnExists("scheduled_scans", "latency_alert_ms")) {
   db.exec(`ALTER TABLE scheduled_scans ADD COLUMN latency_alert_ms INTEGER`);
+}
+// v1.21.0 — per-type mutes. NULL keeps the v1.20 meaning (mute everything);
+// a JSON array of alert types mutes just those. Nullable, no CHECK — the
+// server validates against ALERT_TYPES, and no CHECK means no table rebuild.
+if (!columnExists("alert_mutes", "types")) {
+  db.exec(`ALTER TABLE alert_mutes ADD COLUMN types TEXT`);
 }
 // v1.12.0 (extended in v1.18.0) — the alerts.type CHECK cannot be altered in
 // place in SQLite, so a DB whose CHECK predates a new alert type gets the
@@ -1249,20 +1256,40 @@ function upsertLabel({ cidr, ip, label = null, notes = null }) {
 // scans of that network. Enforced at alert CREATION time (alerts.js filters
 // its specs), so a muted host produces nothing to notify, count or export —
 // alerts that already existed when the mute was set stay until acknowledged.
+// v1.21.0 — `types` scopes the mute: NULL mutes every alert type (the v1.20
+// meaning, so old rows keep behaving), a JSON array mutes just those types.
+function parseMuteRow(row) {
+  if (!row) return null;
+  let types = null;
+  if (row.types) {
+    try {
+      types = JSON.parse(row.types);
+    } catch {
+      types = null; // an unreadable scope fails open to "mute everything"
+    }
+  }
+  return { ...row, types };
+}
+
 function listMutes(cidr) {
   return db
     .prepare(`SELECT * FROM alert_mutes WHERE cidr = ? ORDER BY ip`)
-    .all(cidr);
+    .all(cidr)
+    .map(parseMuteRow);
 }
 
-function setMute(cidr, ip) {
+function setMute(cidr, ip, types = null) {
+  // Re-muting with a different scope UPDATES the row (the modal's Save is
+  // an upsert); created_at keeps the first mute's timestamp.
+  const stored =
+    Array.isArray(types) && types.length ? JSON.stringify([...types].sort()) : null;
   db.prepare(
-    `INSERT INTO alert_mutes (cidr, ip, created_at) VALUES (?, ?, ?)
-     ON CONFLICT(cidr, ip) DO NOTHING`
-  ).run(cidr, ip, Date.now());
-  return db
-    .prepare(`SELECT * FROM alert_mutes WHERE cidr = ? AND ip = ?`)
-    .get(cidr, ip);
+    `INSERT INTO alert_mutes (cidr, ip, types, created_at) VALUES (?, ?, ?, ?)
+     ON CONFLICT(cidr, ip) DO UPDATE SET types = excluded.types`
+  ).run(cidr, ip, stored, Date.now());
+  return parseMuteRow(
+    db.prepare(`SELECT * FROM alert_mutes WHERE cidr = ? AND ip = ?`).get(cidr, ip)
+  );
 }
 
 function clearMute(cidr, ip) {
@@ -1270,12 +1297,23 @@ function clearMute(cidr, ip) {
   return null;
 }
 
-// One query per detection pass, not one per spec.
+// One query per detection pass, not one per spec. Map of ip -> scope, where
+// scope is null (every type) or a Set of alert types.
+function getMutes(cidr) {
+  const map = new Map();
+  for (const row of db
+    .prepare(`SELECT ip, types FROM alert_mutes WHERE cidr = ?`)
+    .all(cidr)) {
+    const parsed = parseMuteRow(row);
+    map.set(row.ip, parsed.types ? new Set(parsed.types) : null);
+  }
+  return map;
+}
+
+// Presence only ("does this host have SOME mute?") — scope-blind on purpose;
+// the type-aware filtering lives on getMutes.
 function getMutedIps(cidr) {
-  const rows = db
-    .prepare(`SELECT ip FROM alert_mutes WHERE cidr = ?`)
-    .all(cidr);
-  return new Set(rows.map((r) => r.ip));
+  return new Set(getMutes(cidr).keys());
 }
 
 module.exports = {
@@ -1329,5 +1367,6 @@ module.exports = {
   listMutes,
   setMute,
   clearMute,
+  getMutes,
   getMutedIps,
 };

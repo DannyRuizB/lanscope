@@ -512,6 +512,11 @@ function run() {
   // classic candidate: always on the network, chatty, harmless — and it
   // produces no seeded alerts, so muting it changes nothing else in the demo.
   db.setMute(CIDR, SMART_TV.ip);
+  // v1.21.0 — a SCOPED mute alongside the full one: the NAS pings slow
+  // during its backup window, so only high_latency is silenced — drift and
+  // exposure still alert. The NAS raises no seeded alerts at all (and none
+  // of the demo's are high_latency), so the counters don't move.
+  db.setMute(CIDR, NAS.ip, ["high_latency"]);
 
   const alertCounts = seedAlerts(rawDb, {
     scan2Id: scan2,
