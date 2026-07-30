@@ -1465,6 +1465,19 @@ li.is-baseline .scan-cidr {
   gap: 8px;
   margin-top: 12px;
 }
+/* v1.21.0 — mute scope: the family checkboxes indent under the 🔕 toggle */
+.mute-scope {
+  margin: 4px 0 0 26px;
+  padding: 0;
+  border: 0;
+}
+.mute-scope legend {
+  padding: 0;
+}
+.mute-scope .form-checkbox {
+  margin-top: 6px;
+  font-size: 13px;
+}
 .form-checkbox .form-label {
   display: inline;
   margin: 0;

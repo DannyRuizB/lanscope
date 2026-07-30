@@ -142,3 +142,74 @@ test('muting does not touch alerts that already exist', () => {
   const still = db.listAlerts({ cidr: CIDR });
   assert.equal(still.length, 1, 'the pre-existing alert stays until acknowledged');
 });
+
+// ----- v1.21.0: type-scoped mutes --------------------------------------------
+
+test('setMute stores a type scope, re-muting updates it in place', () => {
+  const ip = `10.60.${n}.60`;
+  const scoped = db.setMute(CIDR, ip, ['high_latency']);
+  assert.deepEqual(scoped.types, ['high_latency']);
+  const widened = db.setMute(CIDR, ip); // re-mute with no scope = everything
+  assert.equal(widened.types, null);
+  const narrowed = db.setMute(CIDR, ip, ['sensitive_port', 'appeared']);
+  assert.deepEqual(narrowed.types, ['appeared', 'sensitive_port'], 'stored sorted');
+  assert.equal(db.listMutes(CIDR).length, 1, 'three saves, still one row');
+  // Presence stays scope-blind: a partially muted host still "has a mute".
+  assert.ok(db.getMutedIps(CIDR).has(ip));
+});
+
+test('a latency-only mute silences high_latency and nothing else', () => {
+  process.env.LATENCY_ALERT_MS = '50';
+  const ip = `10.60.${n}.61`;
+  const baselineId = doneScan([
+    { ip, status: 'up', latency_ms: 1, hostname: 'printer.lan' },
+  ]);
+  db.setBaseline(baselineId);
+  db.setMute(CIDR, ip, ['high_latency']);
+  // The host comes back slow AND with a different hostname: the latency
+  // finding dies at the scope, the drift one sails through. (Both scans
+  // carry a hostname — the detector only judges a rename, not a naming.)
+  const id = doneScan([
+    { ip, status: 'up', latency_ms: 300, hostname: 'renamed.lan' },
+  ]);
+  const types = detectAlertsForScan(id).map((a) => a.type);
+  assert.deepEqual(types, ['changed_hostname'], 'drift alerts, latency muted');
+});
+
+test('a disappeared-scoped mute lets an appearance elsewhere in scope through', () => {
+  const vanish = `10.60.${n}.62`;
+  const stay = `10.60.${n}.63`;
+  const baselineId = doneScan([
+    { ip: vanish, status: 'up' },
+    { ip: stay, status: 'up' },
+  ]);
+  db.setBaseline(baselineId);
+  // Scoped to 'appeared' only: the host vanishing must STILL raise
+  // disappeared (host_id is null there — the scope check rides payload.ip).
+  db.setMute(CIDR, vanish, ['appeared']);
+  const id = doneScan([{ ip: stay, status: 'up' }]);
+  const types = detectAlertsForScan(id).map((a) => a.type);
+  assert.deepEqual(types, ['disappeared'], 'the mute scope does not cover it');
+});
+
+test('the live portscan hook honours the scope: latency-only mute keeps exposure alive', () => {
+  process.env.SENSITIVE_PORTS = '23,445';
+  const ip = `10.60.${n}.64`;
+  const id = doneScan([{ ip, status: 'up' }]);
+  const hostId = db.getScan(id).hosts.find((h) => h.ip === ip).id;
+  db.saveHostPorts(hostId, [
+    { port: 445, protocol: 'tcp', state: 'open', service: 'microsoft-ds' },
+  ]);
+
+  db.setMute(CIDR, ip, ['high_latency']);
+  const raised = detectSensitivePortsForHost(hostId);
+  assert.equal(raised.length, 1, 'exposure is outside the mute scope');
+  db.ackAlert(raised[0].id);
+
+  db.setMute(CIDR, ip, ['sensitive_port']);
+  assert.equal(
+    detectSensitivePortsForHost(hostId).length,
+    0,
+    'an exposure-scoped mute suppresses it',
+  );
+});

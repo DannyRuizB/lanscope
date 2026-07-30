@@ -537,7 +537,22 @@
             <input id="label-mute" type="checkbox" />
             <span class="form-label">🔕 Mute alerts for this host</span>
           </label>
-          <span class="form-hint">While muted, no new alerts of any kind are raised for this IP on this network — baseline drift, latency and sensitive ports included. Alerts that already exist stay until acknowledged.</span>
+          <fieldset id="label-mute-scope" class="form-field mute-scope" hidden>
+            <legend class="form-label">Which alerts to mute</legend>
+            <label class="form-checkbox">
+              <input id="mute-family-drift" type="checkbox" checked />
+              <span>Baseline drift (new / gone / changed hosts)</span>
+            </label>
+            <label class="form-checkbox">
+              <input id="mute-family-latency" type="checkbox" checked />
+              <span>High latency</span>
+            </label>
+            <label class="form-checkbox">
+              <input id="mute-family-exposure" type="checkbox" checked />
+              <span>Sensitive ports</span>
+            </label>
+          </fieldset>
+          <span class="form-hint">While muted, no new alerts of the chosen kinds are raised for this IP on this network — leave all three on to silence it completely. Alerts that already exist stay until acknowledged.</span>
         </form>
         <div class="modal-actions">
           <button type="button" class="ghost" data-modal-close>Cancel</button>
@@ -547,7 +562,7 @@
     </div>
 
     <footer class="bottombar">
-      <span>v1.20.0</span>
+      <span>v1.21.0</span>
       <span>·</span>
       <span>MIT</span>
       <span>·</span>

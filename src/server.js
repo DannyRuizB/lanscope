@@ -409,7 +409,7 @@ app.get("/api/mutes", (req, res) => {
 });
 
 app.put("/api/mutes", (req, res) => {
-  const { cidr, ip, muted } = req.body || {};
+  const { cidr, ip, muted, types } = req.body || {};
   const cidrError = validateCidr(cidr);
   if (cidrError) return res.status(400).json({ error: cidrError });
   const ipError = validateIpv4(ip);
@@ -417,7 +417,28 @@ app.put("/api/mutes", (req, res) => {
   if (typeof muted !== "boolean") {
     return res.status(400).json({ error: "muted must be true or false" });
   }
-  const row = muted ? db.setMute(cidr, ip) : db.clearMute(cidr, ip);
+  // v1.21.0 — optional scope. Omitted/null mutes every type (the v1.20
+  // shape, still the UI's "mute everything"). An array mutes just those
+  // types; an empty array is rejected — a mute of nothing is an unmute,
+  // and accepting it would store a row that silences nothing but still
+  // wears the 🔕. A full set is canonicalized to null so "everything"
+  // has exactly one spelling in the table.
+  let scope = null;
+  if (types !== undefined && types !== null) {
+    if (!Array.isArray(types) || types.length === 0) {
+      return res
+        .status(400)
+        .json({ error: "types must be a non-empty array of alert types (or omitted to mute all)" });
+    }
+    const unique = [...new Set(types)];
+    for (const t of unique) {
+      if (!ALERT_TYPES_SET.has(t)) {
+        return res.status(400).json({ error: `unknown alert type: ${t}` });
+      }
+    }
+    scope = unique.length === db.ALERT_TYPES.length ? null : unique;
+  }
+  const row = muted ? db.setMute(cidr, ip, scope) : db.clearMute(cidr, ip);
   res.json({ mute: row }); // null when the mute was cleared
 });
 
