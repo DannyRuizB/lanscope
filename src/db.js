@@ -1336,6 +1336,65 @@ function getMutedIps(cidr) {
   return new Set(getMutes(cidr).keys());
 }
 
+// ----- Config portability (v1.23.0) ----------------------------------------
+// Cross-CIDR listings for the export document. Mutes purge first, so a
+// backup never carries rows that are already dead.
+function listAllLabels() {
+  return db.prepare(`SELECT * FROM host_labels ORDER BY cidr, ip`).all();
+}
+
+function listAllMutes() {
+  purgeExpiredMutes();
+  return db
+    .prepare(`SELECT * FROM alert_mutes ORDER BY cidr, ip`)
+    .all()
+    .map(parseMuteRow);
+}
+
+// One atomic call — the HTTP layer validates the whole document first, so a
+// config restore is all-or-nothing, never half a backup. Labels and mutes
+// UPSERT (keyed by cidr+ip, the same semantics as their endpoints);
+// schedules and channels are created only when no row already wears that
+// name — re-importing a backup must not breed duplicates, and the name is
+// the closest thing either table has to an identity.
+function importConfig({ labels = [], mutes = [], schedules = [], channels = [] }) {
+  const result = {
+    imported: { labels: 0, mutes: 0, schedules: 0, channels: 0 },
+    skipped: { schedules: [], channels: [] },
+  };
+  db.transaction(() => {
+    for (const l of labels) {
+      upsertLabel(l);
+      result.imported.labels += 1;
+    }
+    for (const m of mutes) {
+      setMute(m.cidr, m.ip, m.types ?? null, m.expires_at ?? null);
+      result.imported.mutes += 1;
+    }
+    const schedNames = new Set(listSchedules().map((s) => s.name));
+    for (const s of schedules) {
+      if (schedNames.has(s.name)) {
+        result.skipped.schedules.push(s.name);
+        continue;
+      }
+      createSchedule(s);
+      schedNames.add(s.name);
+      result.imported.schedules += 1;
+    }
+    const chanNames = new Set(listChannels().map((c) => c.name));
+    for (const c of channels) {
+      if (chanNames.has(c.name)) {
+        result.skipped.channels.push(c.name);
+        continue;
+      }
+      createChannel(c);
+      chanNames.add(c.name);
+      result.imported.channels += 1;
+    }
+  })();
+  return result;
+}
+
 module.exports = {
   startScan,
   finishScan,
@@ -1384,6 +1443,9 @@ module.exports = {
   listTcpPortsByHost,
   listLabels,
   upsertLabel,
+  listAllLabels,
+  listAllMutes,
+  importConfig,
   listMutes,
   setMute,
   clearMute,

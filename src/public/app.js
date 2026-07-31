@@ -3663,6 +3663,59 @@ function setupAlerts() {
 
 setupAlerts();
 
+// ----- Config export/import (v1.23.0) --------------------------------------
+// Export needs no JS at all — the sidebar anchor downloads straight off the
+// GET. Import reads the picked file, POSTs it and names what landed; the
+// server validates the whole document first, so an error here means nothing
+// was written.
+const configEls = {
+  importBtn: document.getElementById("config-import-btn"),
+  file: document.getElementById("config-import-file"),
+  status: document.getElementById("config-io-status"),
+};
+
+function configStatus(text, isError = false) {
+  if (!configEls.status) return;
+  configEls.status.textContent = text;
+  configEls.status.hidden = false;
+  configEls.status.classList.toggle("config-io-error", isError);
+}
+
+configEls.importBtn?.addEventListener("click", () => configEls.file?.click());
+configEls.file?.addEventListener("change", async () => {
+  const f = configEls.file.files?.[0];
+  configEls.file.value = ""; // allow re-picking the same file
+  if (!f) return;
+  let doc;
+  try {
+    doc = JSON.parse(await f.text());
+  } catch {
+    configStatus("Not a JSON file.", true);
+    return;
+  }
+  try {
+    const r = await fetchJson("/api/config/import", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(doc),
+    });
+    const i = r.imported;
+    const skipped = r.skipped.schedules.length + r.skipped.channels.length;
+    configStatus(
+      `Imported ${i.labels} labels, ${i.mutes} mutes, ${i.schedules} schedules, ${i.channels} channels` +
+        (skipped ? ` — ${skipped} skipped (name already exists)` : "") + ".",
+    );
+    // Labels/mutes ride a per-CIDR cache — drop it and re-render so the
+    // current table picks up what just landed.
+    hostLabelsCidr = null;
+    await loadSchedules();
+    await loadChannels();
+    if (lastScan) renderScan(lastScan);
+  } catch (e) {
+    configStatus(e.message, true);
+  }
+});
+
 // Boot fetches. Kept at the bottom so every module-level const above
 // (els, alertsEls, schedule/channel helpers, …) is already initialized
 // by the time any of these async calls invokes a function that touches them.

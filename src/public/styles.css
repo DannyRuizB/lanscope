@@ -2068,3 +2068,14 @@ li.is-baseline .scan-cidr {
 .latency-cell .spark circle {
   fill: var(--accent);
 }
+
+/* ----- Config export/import (v1.23.0) ------------------------------------ */
+.config-io-status {
+  margin: 0;
+  padding: 0 4px 10px;
+  font-size: 12px;
+  line-height: 1.4;
+}
+.config-io-status.config-io-error {
+  color: var(--danger);
+}

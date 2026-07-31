@@ -24,6 +24,7 @@ const {
   validateChannelEvents,
   validateLabelText,
   validateNotesText,
+  validateConfigDoc,
 } = require("./http-validators");
 const {
   scanToCsv, exportFilename, historyToCsv, historyFilename, alertsToCsv, alertsFilename,
@@ -462,6 +463,63 @@ app.put("/api/mutes", (req, res) => {
   }
   const row = muted ? db.setMute(cidr, ip, scope, expiresAt) : db.clearMute(cidr, ip);
   res.json({ mute: row }); // null when the mute was cleared
+});
+
+// v1.23.0 — config portability: labels, mutes, schedules and notification
+// channels in one JSON document. Scan history stays out on purpose — it is
+// data, not configuration, and it already has its own per-scan exports.
+// Export is a GET so it works on the read-only public demo and downloads
+// with a plain anchor click; runtime fields (ids, last_run/last_sent) are
+// stripped — a backup describes intent, not state.
+app.get("/api/config/export", (req, res) => {
+  const doc = {
+    lanscope_config: 1,
+    exported_at: Date.now(),
+    labels: db.listAllLabels().map(({ cidr, ip, label, notes }) => ({ cidr, ip, label, notes })),
+    mutes: db.listAllMutes().map(({ cidr, ip, types, expires_at }) => ({
+      cidr, ip, types, expires_at: expires_at ?? null,
+    })),
+    schedules: db.listSchedules().map((s) => ({
+      name: s.name,
+      cidr: s.cidr,
+      cron_expr: s.cron_expr,
+      enabled: !!s.enabled,
+      scan_options: s.scan_options ?? null,
+      keep_last: s.keep_last ?? null,
+      latency_alert_ms: s.latency_alert_ms ?? null,
+    })),
+    channels: db.listChannels().map((c) => ({
+      name: c.name,
+      type: c.type,
+      config: c.config,
+      events: c.events,
+      enabled: !!c.enabled,
+    })),
+  };
+  res.setHeader(
+    "Content-Disposition",
+    `attachment; filename="lanscope_config_${new Date(doc.exported_at).toISOString().slice(0, 10)}.json"`,
+  );
+  res.json(doc);
+});
+
+// Import validates the WHOLE document first and writes in one transaction —
+// all-or-nothing, a 400 names the exact offending item. Labels and mutes
+// upsert; schedules and channels are skipped when the name already exists
+// (re-importing a backup must not breed duplicates). Blocked on the demo by
+// the read-only middleware like every other mutation.
+app.post("/api/config/import", (req, res) => {
+  const v = validateConfigDoc(req.body, {
+    validateCidr,
+    validateIpv4,
+    validateScanOptions: scheduler.validateScheduleScanOptions,
+    alertTypes: db.ALERT_TYPES,
+  });
+  if (v.error) return res.status(400).json({ error: v.error });
+  const result = db.importConfig(v.value);
+  // Imported schedules must start ticking now, not at the next boot.
+  if (result.imported.schedules > 0) scheduler.reload();
+  res.json(result);
 });
 
 // v0.10.0 — scheduled scans. Persistence + REST surface. The actual cron
