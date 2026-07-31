@@ -213,3 +213,54 @@ test('the live portscan hook honours the scope: latency-only mute keeps exposure
     'an exposure-scoped mute suppresses it',
   );
 });
+
+// ----- v1.22.0: mute expiry ("snooze") -------------------------------------
+
+test('a snoozed mute suppresses while live and round-trips its deadline', () => {
+  process.env.LATENCY_ALERT_MS = '50';
+  const ip = `10.60.${n}.70`;
+  const until = Date.now() + 3600_000;
+  const row = db.setMute(CIDR, ip, null, until);
+  assert.equal(row.expires_at, until, 'the stored deadline comes back verbatim');
+  assert.ok(db.getMutedIps(CIDR).has(ip), 'live snooze reads as muted');
+  const id = doneScan([{ ip, status: 'up', latency_ms: 300 }]);
+  assert.equal(detectAlertsForScan(id).length, 0, 'live snooze suppresses');
+});
+
+test('an expired snooze re-arms alerting by itself and is purged from the table', () => {
+  process.env.LATENCY_ALERT_MS = '50';
+  const ip = `10.60.${n}.71`;
+  db.setMute(CIDR, ip, null, Date.now() - 1000); // already past
+  const id = doneScan([{ ip, status: 'up', latency_ms: 300 }]);
+  const alerts = detectAlertsForScan(id);
+  assert.equal(alerts.length, 1, 'the expired mute no longer suppresses');
+  assert.equal(alerts[0].type, 'high_latency');
+  assert.equal(db.listMutes(CIDR).length, 0, 'the dead row is gone, not lingering');
+});
+
+test('a permanent mute (expires_at null) keeps the pre-v1.22 behaviour forever', () => {
+  process.env.LATENCY_ALERT_MS = '50';
+  const ip = `10.60.${n}.72`;
+  const row = db.setMute(CIDR, ip); // no types, no expiry — the v1.20 call shape
+  assert.equal(row.expires_at, null);
+  const id = doneScan([{ ip, status: 'up', latency_ms: 300 }]);
+  assert.equal(detectAlertsForScan(id).length, 0);
+});
+
+test('re-muting re-arms or clears the clock: the upsert takes the new expiry', () => {
+  const ip = `10.60.${n}.73`;
+  const e1 = Date.now() + 3600_000;
+  assert.equal(db.setMute(CIDR, ip, null, e1).expires_at, e1);
+  const e2 = Date.now() + 7200_000;
+  assert.equal(db.setMute(CIDR, ip, null, e2).expires_at, e2, 're-snooze re-arms');
+  assert.equal(db.setMute(CIDR, ip).expires_at, null, 'saving forever clears the deadline');
+  assert.equal(db.listMutes(CIDR).length, 1, 'still one row through it all');
+});
+
+test('a snoozed scoped mute expires as one unit — scope does not outlive the clock', () => {
+  process.env.LATENCY_ALERT_MS = '50';
+  const ip = `10.60.${n}.74`;
+  db.setMute(CIDR, ip, ['high_latency'], Date.now() - 1000);
+  const id = doneScan([{ ip, status: 'up', latency_ms: 300 }]);
+  assert.equal(detectAlertsForScan(id).length, 1, 'expired scope suppresses nothing');
+});

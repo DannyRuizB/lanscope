@@ -516,7 +516,10 @@ function run() {
   // during its backup window, so only high_latency is silenced — drift and
   // exposure still alert. The NAS raises no seeded alerts at all (and none
   // of the demo's are high_latency), so the counters don't move.
-  db.setMute(CIDR, NAS.ip, ["high_latency"]);
+  // v1.22.0 — and SNOOZED: the backup window ends, so the mute does too.
+  // Six hours from seed time keeps it visibly alive however long the demo
+  // dyno has been up (Render re-seeds on every cold start).
+  db.setMute(CIDR, NAS.ip, ["high_latency"], Date.now() + 6 * 3600 * 1000);
 
   const alertCounts = seedAlerts(rawDb, {
     scan2Id: scan2,

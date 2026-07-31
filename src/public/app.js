@@ -273,8 +273,9 @@ function renderWakeButton(host) {
 // Cached per CIDR; labels are cosmetic, so a failed load never breaks the
 // view — the table just falls back to bare hostnames.
 let hostLabels = new Map(); // ip -> {label, notes, ...}
-// v1.20.0 — ips whose alerts are muted; v1.21.0 the value carries the scope:
-// null = every alert type, an array = just those types.
+// v1.20.0 — ips whose alerts are muted; v1.21.0 the value carries the scope
+// (types: null = every alert type, an array = just those); v1.22.0 the value
+// is the whole mute — { types, expires_at }, expires_at null = forever.
 let hostMutes = new Map();
 
 // The modal talks in FAMILIES (the same three buckets the alerts tray uses);
@@ -291,16 +292,19 @@ const MUTE_FAMILIES = [
   { input: "mute-family-exposure", label: "sensitive ports", types: ["sensitive_port"] },
 ];
 
-function muteChipTitle(scope) {
-  if (scope === null || scope === undefined) {
-    return "Alerts muted for this host — new alerts are not raised for it";
+function muteChipTitle(mute) {
+  const scope = mute?.types ?? null;
+  // v1.22.0 — a snoozed mute names its deadline; a permanent one stays terse.
+  const until = mute?.expires_at ? ` — until ${fmtTime(mute.expires_at)}` : "";
+  if (scope === null) {
+    return `Alerts muted for this host — new alerts are not raised for it${until}`;
   }
   const set = new Set(scope);
   const named = MUTE_FAMILIES.filter((f) => f.types.every((t) => set.has(t))).map(
     (f) => f.label,
   );
   const what = named.length ? named.join(", ") : scope.join(", ");
-  return `Some alerts muted for this host — ${what}`;
+  return `Some alerts muted for this host — ${what}${until}`;
 }
 let hostLabelsCidr = null;
 
@@ -317,7 +321,12 @@ async function ensureLabels(cidr) {
   }
   try {
     const data = await fetchJson(`/api/mutes?cidr=${encodeURIComponent(cidr)}`);
-    hostMutes = new Map((data.mutes || []).map((m) => [m.ip, m.types ?? null]));
+    hostMutes = new Map(
+      (data.mutes || []).map((m) => [
+        m.ip,
+        { types: m.types ?? null, expires_at: m.expires_at ?? null },
+      ]),
+    );
   } catch {
     /* keep the empty set */
   }
@@ -2476,6 +2485,7 @@ const labelEls = {
   notes: document.getElementById("label-notes"),
   mute: document.getElementById("label-mute"),
   muteScope: document.getElementById("label-mute-scope"),
+  muteDuration: document.getElementById("label-mute-duration"),
   save: document.getElementById("label-modal-save"),
 };
 let labelModalIp = null;
@@ -2501,11 +2511,26 @@ function openLabelModal(ip) {
     labelEls.mute.checked = hostMutes.has(ip);
     // Scope prefill: no mute or a full mute checks every family; a scoped
     // one checks a family only when ALL its types are covered.
-    const scope = hostMutes.get(ip);
-    const set = scope ? new Set(scope) : null;
+    const mute = hostMutes.get(ip);
+    const set = mute?.types ? new Set(mute.types) : null;
     for (const f of MUTE_FAMILIES) {
       const el = familyInput(f);
       if (el) el.checked = set === null ? true : f.types.every((t) => set.has(t));
+    }
+    // v1.22.0 — duration prefill. A current deadline is represented as an
+    // injected "keep" option, so a Save that only touches the scope keeps
+    // the snooze exactly; picking any real option re-arms or clears it.
+    if (labelEls.muteDuration) {
+      labelEls.muteDuration.querySelector('option[value="keep"]')?.remove();
+      if (mute?.expires_at) {
+        const opt = document.createElement("option");
+        opt.value = "keep";
+        opt.textContent = `Until ${fmtTime(mute.expires_at)} (current)`;
+        labelEls.muteDuration.prepend(opt);
+        labelEls.muteDuration.value = "keep";
+      } else {
+        labelEls.muteDuration.value = "";
+      }
     }
     syncMuteScopeVisibility();
   }
@@ -2543,6 +2568,9 @@ async function submitLabelModal() {
     // v1.21.0 — the scope rides along: all families on = mute everything
     // (types omitted, the canonical spelling), a subset = just those types,
     // none = there is nothing to mute, which IS an unmute.
+    // v1.22.0 — the snooze rides along too: "keep" round-trips the current
+    // deadline untouched, "" is forever, a number is seconds from now (and
+    // re-picking a duration deliberately re-arms the clock).
     const checkedFamilies = MUTE_FAMILIES.filter((f) => familyInput(f)?.checked);
     const wantMute = !!labelEls.mute?.checked && checkedFamilies.length > 0;
     const wantScope =
@@ -2551,18 +2579,33 @@ async function submitLabelModal() {
         : null;
     const scopeKey = (s) => (s === null || s === undefined ? "all" : [...s].sort().join(","));
     const current = hostMutes.get(ip); // undefined = not muted
-    const changed = wantMute
-      ? current === undefined || scopeKey(current) !== scopeKey(wantScope)
-      : hostMutes.has(ip);
+    const durSel = labelEls.muteDuration?.value ?? "";
+    const wantUntil =
+      durSel === "keep"
+        ? current?.expires_at ?? null
+        : durSel === ""
+          ? null
+          : Date.now() + Number(durSel) * 1000;
+    const scopeChanged =
+      current === undefined || scopeKey(current.types) !== scopeKey(wantScope);
+    const expiryChanged =
+      durSel !== "keep" &&
+      (current === undefined ? durSel !== "" : (current.expires_at ?? null) !== wantUntil);
+    const changed = wantMute ? scopeChanged || expiryChanged : hostMutes.has(ip);
     if (changed) {
       const body = { cidr: lastScan.cidr, ip, muted: wantMute };
       if (wantMute && wantScope) body.types = wantScope;
+      if (wantMute && wantUntil) body.until = wantUntil;
       const data = await fetchJson("/api/mutes", {
         method: "PUT",
         headers: { "content-type": "application/json" },
         body: JSON.stringify(body),
       });
-      if (wantMute) hostMutes.set(ip, data.mute?.types ?? null);
+      if (wantMute)
+        hostMutes.set(ip, {
+          types: data.mute?.types ?? null,
+          expires_at: data.mute?.expires_at ?? null,
+        });
       else hostMutes.delete(ip);
     }
     closeLabelModal();
