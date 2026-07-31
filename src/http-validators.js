@@ -160,7 +160,130 @@ function validateNotesText(s) {
   return { value: v };
 }
 
+// v1.23.0 — config import. Validates the WHOLE document before anything is
+// written (the import itself is one db transaction): a config restore is
+// all-or-nothing, never half a backup. Dependencies are injected so this
+// stays a pure module — validateCidr/validateIpv4 live in the scanner and
+// the scan-options validator in the scheduler, and dragging either in here
+// would tie the unit tests to nmap and node-cron wiring.
+function validateConfigDoc(doc, deps) {
+  const { validateCidr, validateIpv4, validateScanOptions, alertTypes } = deps;
+  if (!doc || typeof doc !== "object" || Array.isArray(doc)) {
+    return { error: "body must be a config export object" };
+  }
+  if (doc.lanscope_config !== 1) {
+    return { error: "not a LanScope config export (expected lanscope_config: 1)" };
+  }
+  const sections = {};
+  for (const key of ["labels", "mutes", "schedules", "channels"]) {
+    const v = doc[key];
+    if (v === undefined || v === null) {
+      sections[key] = [];
+    } else if (!Array.isArray(v)) {
+      return { error: `${key} must be an array` };
+    } else {
+      sections[key] = v;
+    }
+  }
+  const out = { labels: [], mutes: [], schedules: [], channels: [] };
+  const typeSet = new Set(alertTypes);
+
+  for (const [i, l] of sections.labels.entries()) {
+    const where = `labels[${i}]`;
+    if (!l || typeof l !== "object") return { error: `${where} must be an object` };
+    const cidrErr = validateCidr(l.cidr);
+    if (cidrErr) return { error: `${where}: ${cidrErr}` };
+    const ipErr = validateIpv4(l.ip);
+    if (ipErr) return { error: `${where}: ${ipErr}` };
+    const lblV = validateLabelText(l.label ?? "");
+    if (lblV.error) return { error: `${where}: ${lblV.error}` };
+    const ntsV = validateNotesText(l.notes ?? "");
+    if (ntsV.error) return { error: `${where}: ${ntsV.error}` };
+    out.labels.push({ cidr: l.cidr, ip: l.ip, label: lblV.value, notes: ntsV.value });
+  }
+
+  for (const [i, m] of sections.mutes.entries()) {
+    const where = `mutes[${i}]`;
+    if (!m || typeof m !== "object") return { error: `${where} must be an object` };
+    const cidrErr = validateCidr(m.cidr);
+    if (cidrErr) return { error: `${where}: ${cidrErr}` };
+    const ipErr = validateIpv4(m.ip);
+    if (ipErr) return { error: `${where}: ${ipErr}` };
+    let types = null;
+    if (m.types !== undefined && m.types !== null) {
+      if (!Array.isArray(m.types) || m.types.length === 0) {
+        return { error: `${where}: types must be a non-empty array of alert types, or null` };
+      }
+      const unique = [...new Set(m.types)];
+      for (const t of unique) {
+        if (!typeSet.has(t)) return { error: `${where}: unknown alert type: ${t}` };
+      }
+      types = unique.length === alertTypes.length ? null : unique;
+    }
+    let expires = null;
+    if (m.expires_at !== undefined && m.expires_at !== null) {
+      if (!Number.isInteger(m.expires_at)) {
+        return { error: `${where}: expires_at must be an epoch-ms integer or null` };
+      }
+      // A deadline already in the past is legal here, unlike on the live
+      // endpoint: a backup is a snapshot, and the lazy purge retires the
+      // row on its first read after import.
+      expires = m.expires_at;
+    }
+    out.mutes.push({ cidr: m.cidr, ip: m.ip, types, expires_at: expires });
+  }
+
+  for (const [i, s] of sections.schedules.entries()) {
+    const where = `schedules[${i}]`;
+    if (!s || typeof s !== "object") return { error: `${where} must be an object` };
+    const nameV = validateScheduleName(s.name);
+    if (nameV.error) return { error: `${where}: ${nameV.error}` };
+    const cidrErr = validateCidr(s.cidr);
+    if (cidrErr) return { error: `${where}: ${cidrErr}` };
+    const cronV = validateCronExpr(s.cron_expr);
+    if (cronV.error) return { error: `${where}: ${cronV.error}` };
+    const optsV = validateScanOptions(s.scan_options ?? null);
+    if (optsV.error) return { error: `${where}: ${optsV.error}` };
+    const keepV = validateKeepLast(s.keep_last);
+    if (keepV.error) return { error: `${where}: ${keepV.error}` };
+    const latencyV = validateLatencyAlertMs(s.latency_alert_ms);
+    if (latencyV.error) return { error: `${where}: ${latencyV.error}` };
+    out.schedules.push({
+      name: nameV.value,
+      cidr: s.cidr,
+      cron_expr: cronV.value,
+      enabled: s.enabled !== false,
+      scan_options: s.scan_options ?? null,
+      keep_last: keepV.value,
+      latency_alert_ms: latencyV.value,
+    });
+  }
+
+  for (const [i, c] of sections.channels.entries()) {
+    const where = `channels[${i}]`;
+    if (!c || typeof c !== "object") return { error: `${where} must be an object` };
+    const nameV = validateChannelName(c.name);
+    if (nameV.error) return { error: `${where}: ${nameV.error}` };
+    const typeV = validateChannelType(c.type);
+    if (typeV.error) return { error: `${where}: ${typeV.error}` };
+    const confV = validateChannelConfig(typeV.value, c.config);
+    if (confV.error) return { error: `${where}: ${confV.error}` };
+    const eventsV = validateChannelEvents(c.events);
+    if (eventsV.error) return { error: `${where}: ${eventsV.error}` };
+    out.channels.push({
+      name: nameV.value,
+      type: typeV.value,
+      config: confV.value,
+      events: eventsV.value,
+      enabled: c.enabled !== false,
+    });
+  }
+
+  return { value: out };
+}
+
 module.exports = {
+  validateConfigDoc,
   validateScheduleName,
   validateCronExpr,
   validateKeepLast,

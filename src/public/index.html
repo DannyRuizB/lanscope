@@ -87,6 +87,16 @@
             </button>
           </li>
         </ul>
+
+        <div class="panel-header">
+          <h2>Config</h2>
+          <div class="panel-actions">
+            <a id="config-export-btn" class="ghost small" href="/api/config/export" download title="Download labels, mutes, schedules and notification channels as one JSON backup">⬇ Export</a>
+            <button id="config-import-btn" class="ghost small" type="button" title="Restore a config backup — labels and mutes upsert; schedules and channels with an existing name are skipped">⬆ Import</button>
+            <input id="config-import-file" type="file" accept=".json,application/json" hidden />
+          </div>
+        </div>
+        <p id="config-io-status" class="muted config-io-status" hidden></p>
       </aside>
 
       <section class="content">
@@ -573,7 +583,7 @@
     </div>
 
     <footer class="bottombar">
-      <span>v1.22.0</span>
+      <span>v1.23.0</span>
       <span>·</span>
       <span>MIT</span>
       <span>·</span>
