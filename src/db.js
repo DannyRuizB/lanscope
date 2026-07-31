@@ -198,6 +198,12 @@ if (!columnExists("scheduled_scans", "latency_alert_ms")) {
 if (!columnExists("alert_mutes", "types")) {
   db.exec(`ALTER TABLE alert_mutes ADD COLUMN types TEXT`);
 }
+// v1.22.0 — mute expiry ("snooze"). NULL keeps the v1.20/21 meaning (muted
+// forever, so old rows keep behaving); an epoch-ms timestamp arms the mute
+// until then. Nullable, soft ALTER, no rebuild — same recipe as `types`.
+if (!columnExists("alert_mutes", "expires_at")) {
+  db.exec(`ALTER TABLE alert_mutes ADD COLUMN expires_at INTEGER`);
+}
 // v1.12.0 (extended in v1.18.0) — the alerts.type CHECK cannot be altered in
 // place in SQLite, so a DB whose CHECK predates a new alert type gets the
 // table rebuilt once (same columns, ids and data preserved; nothing
@@ -1258,6 +1264,16 @@ function upsertLabel({ cidr, ip, label = null, notes = null }) {
 // alerts that already existed when the mute was set stay until acknowledged.
 // v1.21.0 — `types` scopes the mute: NULL mutes every alert type (the v1.20
 // meaning, so old rows keep behaving), a JSON array mutes just those types.
+// v1.22.0 — `expires_at` snoozes it: NULL mutes forever (every pre-existing
+// row), an epoch-ms deadline re-arms alerting by itself when it passes.
+// Expired rows are lazily DELETEd on every read path (listMutes / getMutes),
+// so neither the UI nor the detector ever sees a dead mute — no cron needed.
+function purgeExpiredMutes() {
+  db.prepare(
+    `DELETE FROM alert_mutes WHERE expires_at IS NOT NULL AND expires_at <= ?`
+  ).run(Date.now());
+}
+
 function parseMuteRow(row) {
   if (!row) return null;
   let types = null;
@@ -1272,21 +1288,23 @@ function parseMuteRow(row) {
 }
 
 function listMutes(cidr) {
+  purgeExpiredMutes();
   return db
     .prepare(`SELECT * FROM alert_mutes WHERE cidr = ? ORDER BY ip`)
     .all(cidr)
     .map(parseMuteRow);
 }
 
-function setMute(cidr, ip, types = null) {
+function setMute(cidr, ip, types = null, expiresAt = null) {
   // Re-muting with a different scope UPDATES the row (the modal's Save is
-  // an upsert); created_at keeps the first mute's timestamp.
+  // an upsert); created_at keeps the first mute's timestamp. The expiry is
+  // whatever the caller just chose — re-snoozing re-arms the clock.
   const stored =
     Array.isArray(types) && types.length ? JSON.stringify([...types].sort()) : null;
   db.prepare(
-    `INSERT INTO alert_mutes (cidr, ip, types, created_at) VALUES (?, ?, ?, ?)
-     ON CONFLICT(cidr, ip) DO UPDATE SET types = excluded.types`
-  ).run(cidr, ip, stored, Date.now());
+    `INSERT INTO alert_mutes (cidr, ip, types, expires_at, created_at) VALUES (?, ?, ?, ?, ?)
+     ON CONFLICT(cidr, ip) DO UPDATE SET types = excluded.types, expires_at = excluded.expires_at`
+  ).run(cidr, ip, stored, expiresAt, Date.now());
   return parseMuteRow(
     db.prepare(`SELECT * FROM alert_mutes WHERE cidr = ? AND ip = ?`).get(cidr, ip)
   );
@@ -1298,8 +1316,10 @@ function clearMute(cidr, ip) {
 }
 
 // One query per detection pass, not one per spec. Map of ip -> scope, where
-// scope is null (every type) or a Set of alert types.
+// scope is null (every type) or a Set of alert types. Purges first, so an
+// expired snooze never suppresses a fresh detection.
 function getMutes(cidr) {
+  purgeExpiredMutes();
   const map = new Map();
   for (const row of db
     .prepare(`SELECT ip, types FROM alert_mutes WHERE cidr = ?`)

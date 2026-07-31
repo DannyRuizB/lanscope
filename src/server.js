@@ -409,7 +409,7 @@ app.get("/api/mutes", (req, res) => {
 });
 
 app.put("/api/mutes", (req, res) => {
-  const { cidr, ip, muted, types } = req.body || {};
+  const { cidr, ip, muted, types, until } = req.body || {};
   const cidrError = validateCidr(cidr);
   if (cidrError) return res.status(400).json({ error: cidrError });
   const ipError = validateIpv4(ip);
@@ -438,7 +438,29 @@ app.put("/api/mutes", (req, res) => {
     }
     scope = unique.length === db.ALERT_TYPES.length ? null : unique;
   }
-  const row = muted ? db.setMute(cidr, ip, scope) : db.clearMute(cidr, ip);
+  // v1.22.0 — optional snooze. Omitted/null mutes forever (the v1.20/21
+  // shape); an epoch-ms `until` arms the mute only until then. Absolute on
+  // purpose — the UI's "keep current deadline" round-trips exactly, and the
+  // stored row is returned verbatim. Must sit in the future (small client
+  // clock skew shortens a snooze, it never rejects one) and within a year:
+  // beyond that you mean "forever", and "forever" has one spelling — null.
+  let expiresAt = null;
+  if (until !== undefined && until !== null) {
+    if (!Number.isInteger(until)) {
+      return res
+        .status(400)
+        .json({ error: "until must be an epoch-ms integer (or omitted to mute forever)" });
+    }
+    const now = Date.now();
+    if (until <= now) {
+      return res.status(400).json({ error: "until must be in the future" });
+    }
+    if (until > now + 366 * 24 * 3600 * 1000) {
+      return res.status(400).json({ error: "until is more than a year away — omit it to mute forever" });
+    }
+    expiresAt = until;
+  }
+  const row = muted ? db.setMute(cidr, ip, scope, expiresAt) : db.clearMute(cidr, ip);
   res.json({ mute: row }); // null when the mute was cleared
 });
 

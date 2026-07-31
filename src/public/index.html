@@ -551,8 +551,19 @@
               <input id="mute-family-exposure" type="checkbox" checked />
               <span>Sensitive ports</span>
             </label>
+            <label class="form-field mute-duration">
+              <span class="form-label">For how long</span>
+              <select id="label-mute-duration">
+                <option value="" selected>Forever — until I unmute</option>
+                <option value="3600">1 hour</option>
+                <option value="28800">8 hours</option>
+                <option value="86400">24 hours</option>
+                <option value="604800">7 days</option>
+                <option value="2592000">30 days</option>
+              </select>
+            </label>
           </fieldset>
-          <span class="form-hint">While muted, no new alerts of the chosen kinds are raised for this IP on this network — leave all three on to silence it completely. Alerts that already exist stay until acknowledged.</span>
+          <span class="form-hint">While muted, no new alerts of the chosen kinds are raised for this IP on this network — leave all three on to silence it completely. A snoozed mute re-arms alerting by itself when the time is up. Alerts that already exist stay until acknowledged.</span>
         </form>
         <div class="modal-actions">
           <button type="button" class="ghost" data-modal-close>Cancel</button>
@@ -562,7 +573,7 @@
     </div>
 
     <footer class="bottombar">
-      <span>v1.21.0</span>
+      <span>v1.22.0</span>
       <span>·</span>
       <span>MIT</span>
       <span>·</span>
