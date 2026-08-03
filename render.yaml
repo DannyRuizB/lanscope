@@ -3,6 +3,11 @@
 # the seed script populates SQLite with three demo scans on every boot.
 # Render's free tier has no persistent disk; the DB lives in /tmp and is
 # re-seeded on every cold start, which is exactly what we want for a demo.
+#
+# NOTE: updating the pin below does NOT redeploy the service by itself —
+# Render redeploys via its deploy hook (see .github/workflows/deploy-demo.yml,
+# which fires it on every release once RENDER_DEPLOY_HOOK is set) or from
+# the dashboard. If the live demo lags the releases, that hook is the fix.
 services:
   - type: web
     name: lanscope-demo

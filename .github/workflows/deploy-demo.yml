@@ -1,0 +1,35 @@
+name: Deploy demo
+
+# Pokes the Render deploy hook so lanscope-demo redeploys with the image
+# it is configured to run. The pins in render.yaml do NOT deploy anything
+# by themselves — Render only redeploys when its deploy hook is hit (or
+# from the dashboard), which is how the demo once drifted a year behind
+# the releases. release.yml pushes a fresh `latest` to GHCR on every
+# release, so a service pointed at `:latest` plus this hook stays current
+# with zero clicks.
+#
+# Needs the RENDER_DEPLOY_HOOK repo secret (Render dashboard → service →
+# Settings → Deploy Hook → copy URL, then `gh secret set
+# RENDER_DEPLOY_HOOK`). Without the secret the job explains itself and
+# exits green, so nothing turns red before the secret exists.
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+
+permissions: {}
+
+jobs:
+  poke-render:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Trigger the Render deploy hook
+        env:
+          HOOK: ${{ secrets.RENDER_DEPLOY_HOOK }}
+        run: |
+          if [ -z "$HOOK" ]; then
+            echo "::notice::RENDER_DEPLOY_HOOK secret not set — skipping. Grab the URL from Render → lanscope-demo → Settings → Deploy Hook and add it with: gh secret set RENDER_DEPLOY_HOOK"
+            exit 0
+          fi
+          curl -fsS -o /dev/null "$HOOK"
+          echo "Render deploy triggered — give it a couple of minutes, then check the footer version at https://lanscope-demo.onrender.com/"
