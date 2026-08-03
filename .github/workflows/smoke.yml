@@ -179,6 +179,18 @@ jobs:
           # subscribed, so it's a safe no-op that still exercises the endpoint.
           curl -fsS -X POST http://localhost:3030/api/digest/run | grep -q '"ok":true'
 
+          echo "--- config export / import dry run (v1.23.0, v1.24.0) ---"
+          curl -fsS -o /tmp/backup.json http://localhost:3030/api/config/export
+          grep -q '"lanscope_config"' /tmp/backup.json
+          # Re-importing the instance's own backup as a DRY RUN must report a
+          # plan and write nothing: every schedule/channel name already exists,
+          # so they all land in "skipped".
+          curl -fsS -X POST "http://localhost:3030/api/config/import?dry_run=1" \
+            -H 'content-type: application/json' --data-binary @/tmp/backup.json \
+            -o /tmp/dryrun.json
+          grep -q '"dry_run":true' /tmp/dryrun.json
+          grep -q '"plan"' /tmp/dryrun.json
+
           echo "--- GET / ---"
           curl -fsS -o /tmp/index.html -w "code=%{http_code}\n" http://localhost:3030/
           grep -q '<title>LanScope' /tmp/index.html

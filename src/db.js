@@ -1357,17 +1357,49 @@ function listAllMutes() {
 // schedules and channels are created only when no row already wears that
 // name — re-importing a backup must not breed duplicates, and the name is
 // the closest thing either table has to an identity.
-function importConfig({ labels = [], mutes = [], schedules = [], channels = [] }) {
+// `dryRun` runs the import for real and then ROLLS BACK, so the plan it
+// reports is produced by the very code that would write — not by a parallel
+// simulation that can drift from it as the merge rules evolve. The rollback
+// rides on better-sqlite3's transaction semantics: throwing from inside
+// aborts it, and the sentinel is caught right here.
+const DRY_RUN_ROLLBACK = Symbol("dry-run rollback");
+
+function importConfig(
+  { labels = [], mutes = [], schedules = [], channels = [] },
+  { dryRun = false } = {},
+) {
   const result = {
+    dry_run: dryRun,
     imported: { labels: 0, mutes: 0, schedules: 0, channels: 0 },
     skipped: { schedules: [], channels: [] },
+    // What the counts above are made of: an upsert that lands on an existing
+    // row overwrites a name someone typed, which is the one thing a person
+    // reviewing a restore actually wants to know before saying yes.
+    plan: {
+      labels: { created: 0, updated: [] },
+      mutes: { created: 0, updated: [] },
+    },
   };
-  db.transaction(() => {
+  const existingLabels = new Set(listAllLabels().map((l) => `${l.cidr}|${l.ip}`));
+  const existingMutes = new Set(listAllMutes().map((m) => `${m.cidr}|${m.ip}`));
+  const run = db.transaction(() => {
     for (const l of labels) {
+      const key = `${l.cidr}|${l.ip}`;
+      if (existingLabels.has(key)) result.plan.labels.updated.push(l.ip);
+      else {
+        result.plan.labels.created += 1;
+        existingLabels.add(key);
+      }
       upsertLabel(l);
       result.imported.labels += 1;
     }
     for (const m of mutes) {
+      const key = `${m.cidr}|${m.ip}`;
+      if (existingMutes.has(key)) result.plan.mutes.updated.push(m.ip);
+      else {
+        result.plan.mutes.created += 1;
+        existingMutes.add(key);
+      }
       setMute(m.cidr, m.ip, m.types ?? null, m.expires_at ?? null);
       result.imported.mutes += 1;
     }
@@ -1391,7 +1423,13 @@ function importConfig({ labels = [], mutes = [], schedules = [], channels = [] }
       chanNames.add(c.name);
       result.imported.channels += 1;
     }
-  })();
+    if (dryRun) throw DRY_RUN_ROLLBACK;
+  });
+  try {
+    run();
+  } catch (err) {
+    if (err !== DRY_RUN_ROLLBACK) throw err;
+  }
   return result;
 }
 

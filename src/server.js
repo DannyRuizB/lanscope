@@ -516,9 +516,18 @@ app.post("/api/config/import", (req, res) => {
     alertTypes: db.ALERT_TYPES,
   });
   if (v.error) return res.status(400).json({ error: v.error });
-  const result = db.importConfig(v.value);
-  // Imported schedules must start ticking now, not at the next boot.
-  if (result.imported.schedules > 0) scheduler.reload();
+  // ?dry_run=1 reports the plan and writes nothing (v1.24.0). Same validation,
+  // same merge code, rolled back at the end — a restore stops being a blind
+  // button. The flag fails SAFE: any present value means dry run except an
+  // explicit 0/false/empty, so a typo (`?dry_run=maybe`) yields a preview
+  // rather than the unwanted write that strict parsing would have caused.
+  const raw = req.query.dry_run;
+  const dryRun =
+    raw !== undefined && !["0", "false", ""].includes(String(raw).toLowerCase());
+  const result = db.importConfig(v.value, { dryRun });
+  // Imported schedules must start ticking now, not at the next boot — but a
+  // dry run imported nothing, so there is nothing to reload.
+  if (!dryRun && result.imported.schedules > 0) scheduler.reload();
   res.json(result);
 });
 

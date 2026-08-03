@@ -3681,6 +3681,47 @@ function configStatus(text, isError = false) {
   configEls.status.classList.toggle("config-io-error", isError);
 }
 
+// Turn a server result into the one sentence a person needs.
+function configPlanSentence(r) {
+  const i = r.imported;
+  const p = r.plan;
+  const parts = [];
+  if (i.labels) {
+    const upd = p.labels.updated.length;
+    parts.push(`${i.labels} labels (${p.labels.created} new` + (upd ? `, ${upd} overwritten` : "") + ")");
+  }
+  if (i.mutes) {
+    const upd = p.mutes.updated.length;
+    parts.push(`${i.mutes} mutes (${p.mutes.created} new` + (upd ? `, ${upd} overwritten` : "") + ")");
+  }
+  if (i.schedules) parts.push(`${i.schedules} schedules`);
+  if (i.channels) parts.push(`${i.channels} channels`);
+  const skipped = r.skipped.schedules.concat(r.skipped.channels);
+  const tail = skipped.length
+    ? ` — skipping ${skipped.length} by name (${skipped.join(", ")})`
+    : "";
+  return (parts.length ? parts.join(" · ") : "nothing") + tail;
+}
+
+async function postImport(doc, dryRun) {
+  return fetchJson("/api/config/import" + (dryRun ? "?dry_run=1" : ""), {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(doc),
+  });
+}
+
+async function applyImport(doc) {
+  const r = await postImport(doc, false);
+  configStatus(`Imported ${configPlanSentence(r)}.`);
+  // Labels/mutes ride a per-CIDR cache — drop it and re-render so the
+  // current table picks up what just landed.
+  hostLabelsCidr = null;
+  await loadSchedules();
+  await loadChannels();
+  if (lastScan) renderScan(lastScan);
+}
+
 configEls.importBtn?.addEventListener("click", () => configEls.file?.click());
 configEls.file?.addEventListener("change", async () => {
   const f = configEls.file.files?.[0];
@@ -3693,24 +3734,19 @@ configEls.file?.addEventListener("change", async () => {
     configStatus("Not a JSON file.", true);
     return;
   }
+  // Two steps on purpose (v1.24.0): a restore overwrites names someone typed,
+  // so the dry run says exactly what would happen and the person confirms.
   try {
-    const r = await fetchJson("/api/config/import", {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify(doc),
-    });
-    const i = r.imported;
-    const skipped = r.skipped.schedules.length + r.skipped.channels.length;
-    configStatus(
-      `Imported ${i.labels} labels, ${i.mutes} mutes, ${i.schedules} schedules, ${i.channels} channels` +
-        (skipped ? ` — ${skipped} skipped (name already exists)` : "") + ".",
+    const preview = await postImport(doc, true);
+    const ok = window.confirm(
+      `This backup would import ${configPlanSentence(preview)}.\n\n` +
+        "Overwritten labels and mutes cannot be undone. Apply it?",
     );
-    // Labels/mutes ride a per-CIDR cache — drop it and re-render so the
-    // current table picks up what just landed.
-    hostLabelsCidr = null;
-    await loadSchedules();
-    await loadChannels();
-    if (lastScan) renderScan(lastScan);
+    if (!ok) {
+      configStatus("Import cancelled — nothing was written.");
+      return;
+    }
+    await applyImport(doc);
   } catch (e) {
     configStatus(e.message, true);
   }
