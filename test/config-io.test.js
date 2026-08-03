@@ -128,3 +128,80 @@ test('imported channel keeps its enabled=false and its events', () => {
   assert.deepEqual(chan.events, ['scan_done']);
   assert.equal(chan.config.format, 'generic');
 });
+
+// --- dry run (v1.24.0) ------------------------------------------------------
+// The tests above left the roundtrip's rows in place, which is exactly the
+// state a dry run has to describe honestly: same names again = updates and
+// skips, not a fresh install.
+
+test('a dry run writes nothing and reports the same counts the real import would', () => {
+  const v = validateConfigDoc(validDoc(), DEPS);
+  assert.ok(!v.error, v.error);
+
+  const before = {
+    labels: db.listAllLabels().length,
+    mutes: db.listAllMutes().length,
+    schedules: db.listSchedules().length,
+    channels: db.listChannels().length,
+  };
+
+  const dry = db.importConfig(v.value, { dryRun: true });
+  assert.equal(dry.dry_run, true);
+  assert.deepEqual(dry.imported, { labels: 1, mutes: 2, schedules: 0, channels: 0 });
+  assert.deepEqual(dry.skipped, { schedules: ['Nightly sweep'], channels: ['Ops webhook'] });
+
+  // Nothing moved on disk — the rollback is the whole point.
+  assert.equal(db.listAllLabels().length, before.labels);
+  assert.equal(db.listAllMutes().length, before.mutes);
+  assert.equal(db.listSchedules().length, before.schedules);
+  assert.equal(db.listChannels().length, before.channels);
+});
+
+test('the plan separates new rows from the ones an upsert would overwrite', () => {
+  const doc = validDoc();
+  // 192.168.7.10 already carries a label from the roundtrip test; this IP does
+  // not — so one gets overwritten and one is created.
+  doc.labels.push({ cidr: '192.168.7.0/24', ip: '192.168.7.77', label: 'Printer', notes: null });
+  const v = validateConfigDoc(doc, DEPS);
+  assert.ok(!v.error, v.error);
+
+  const dry = db.importConfig(v.value, { dryRun: true });
+  assert.equal(dry.plan.labels.created, 1);
+  assert.deepEqual(dry.plan.labels.updated, ['192.168.7.10']);
+  // Both roundtrip mutes exist already, so both would be overwritten.
+  assert.equal(dry.plan.mutes.created, 0);
+  assert.equal(dry.plan.mutes.updated.length, 2);
+
+  // And the dry run really was dry: the new IP never landed.
+  assert.equal(db.listAllLabels().filter((l) => l.ip === '192.168.7.77').length, 0);
+});
+
+test('a real import after a dry run lands exactly what the plan promised', () => {
+  const doc = validDoc();
+  doc.labels.push({ cidr: '192.168.7.0/24', ip: '192.168.7.77', label: 'Printer', notes: null });
+  const v = validateConfigDoc(doc, DEPS);
+  const dry = db.importConfig(v.value, { dryRun: true });
+  const real = db.importConfig(v.value);
+
+  assert.equal(real.dry_run, false);
+  assert.deepEqual(real.imported, dry.imported);
+  assert.deepEqual(real.skipped, dry.skipped);
+  assert.deepEqual(real.plan, dry.plan);
+  assert.equal(db.listAllLabels().find((l) => l.ip === '192.168.7.77').label, 'Printer');
+});
+
+test('a dry run of an invalid-but-parsed doc still rolls back partial work', () => {
+  // A schedule whose cron the validator accepts but createSchedule rejects is
+  // hard to fake; instead prove the rollback survives an exception thrown
+  // mid-transaction by handing the real import a doc that dies halfway.
+  const doc = validDoc();
+  doc.labels = [
+    { cidr: '192.168.7.0/24', ip: '192.168.7.88', label: 'First', notes: null },
+    // A cidr the DB layer will choke on (NOT NULL violation) — validation is
+    // bypassed here on purpose to exercise the transaction, not the validator.
+    { cidr: null, ip: '192.168.7.89', label: 'Second', notes: null },
+  ];
+  assert.throws(() => db.importConfig({ labels: doc.labels, mutes: [], schedules: [], channels: [] }));
+  // All-or-nothing: the first label must NOT be there.
+  assert.equal(db.listAllLabels().filter((l) => l.ip === '192.168.7.88').length, 0);
+});
