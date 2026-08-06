@@ -134,6 +134,14 @@ db.exec(`
     UNIQUE (cidr, ip)
   );
 
+  CREATE TABLE IF NOT EXISTS api_tokens (
+    id           INTEGER PRIMARY KEY AUTOINCREMENT,
+    name         TEXT NOT NULL UNIQUE,
+    token_hash   TEXT NOT NULL UNIQUE,
+    created_at   INTEGER NOT NULL,
+    last_used_at INTEGER
+  );
+
   CREATE INDEX IF NOT EXISTS idx_hosts_scan ON hosts(scan_id);
   CREATE INDEX IF NOT EXISTS idx_labels_cidr ON host_labels(cidr);
   CREATE INDEX IF NOT EXISTS idx_mutes_cidr ON alert_mutes(cidr);
@@ -1433,6 +1441,48 @@ function importConfig(
   return result;
 }
 
+// ===== API tokens (v1.25.0) =====
+// Only the sha256 hex of each token lives here — the plaintext is shown
+// once at creation and never touches the database. The list never returns
+// the hash either: knowing it wouldn't open the door (the middleware hashes
+// the presented token), but there is no reason to hand out oracle material.
+function createApiToken(name, tokenHash) {
+  const info = db
+    .prepare(
+      `INSERT INTO api_tokens (name, token_hash, created_at) VALUES (?, ?, ?)`
+    )
+    .run(name, tokenHash, Date.now());
+  return { id: info.lastInsertRowid, name };
+}
+
+function listApiTokens() {
+  return db
+    .prepare(
+      `SELECT id, name, created_at, last_used_at FROM api_tokens ORDER BY created_at, id`
+    )
+    .all();
+}
+
+function deleteApiToken(id) {
+  return db.prepare(`DELETE FROM api_tokens WHERE id = ?`).run(id).changes > 0;
+}
+
+function findApiTokenByHash(hash) {
+  return (
+    db
+      .prepare(`SELECT id, name FROM api_tokens WHERE token_hash = ?`)
+      .get(hash) || null
+  );
+}
+
+// last_used_at answers "is anyone still using this token?" before a revoke.
+function touchApiToken(id) {
+  db.prepare(`UPDATE api_tokens SET last_used_at = ? WHERE id = ?`).run(
+    Date.now(),
+    id
+  );
+}
+
 module.exports = {
   startScan,
   finishScan,
@@ -1489,4 +1539,9 @@ module.exports = {
   clearMute,
   getMutes,
   getMutedIps,
+  createApiToken,
+  listApiTokens,
+  deleteApiToken,
+  findApiTokenByHash,
+  touchApiToken,
 };

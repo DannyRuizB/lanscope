@@ -16,6 +16,16 @@ function validateScheduleName(s) {
   return { value: name };
 }
 
+// v1.25.0 — an API token's name is its identity in the list ("backup-cron",
+// "grafana"): required, trimmed, and short enough to read in a table row.
+function validateTokenName(s) {
+  if (typeof s !== "string") return { error: "name is required" };
+  const name = s.trim();
+  if (name.length === 0) return { error: "name cannot be empty" };
+  if (name.length > 64) return { error: "name too long (max 64 chars)" };
+  return { value: name };
+}
+
 function validateCronExpr(s) {
   if (typeof s !== "string" || s.trim().length === 0) {
     return { error: "cron_expr is required" };
@@ -285,6 +295,7 @@ function validateConfigDoc(doc, deps) {
 module.exports = {
   validateConfigDoc,
   validateScheduleName,
+  validateTokenName,
   validateCronExpr,
   validateKeepLast,
   validateLatencyAlertMs,
