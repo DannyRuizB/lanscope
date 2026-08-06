@@ -25,6 +25,7 @@ const {
   validateLabelText,
   validateNotesText,
   validateConfigDoc,
+  validateTokenName,
 } = require("./http-validators");
 const {
   scanToCsv, exportFilename, historyToCsv, historyFilename, alertsToCsv, alertsFilename,
@@ -34,7 +35,7 @@ const { executeCidrScan } = require("./runner");
 const { detectSensitivePortsForHost } = require("./alerts");
 const scheduler = require("./scheduler");
 const notifier = require("./notifier");
-const { basicAuth } = require("./auth");
+const { requireAuth, generateToken, hashToken } = require("./auth");
 
 const PORT = parseInt(process.env.PORT, 10) || 3030;
 const DEMO_MODE = process.env.DEMO_MODE === "true";
@@ -64,8 +65,17 @@ app.use(express.json({ limit: "32kb" }));
 // inventory of your network — there is nothing here worth serving to an
 // unauthenticated visitor.
 if (AUTH_USER) {
-  app.use(basicAuth({ user: AUTH_USER, pass: AUTH_PASS }));
-  console.log("[auth] HTTP Basic Auth enabled");
+  // v1.25.0: an API token opens the same door as the Basic credential, so
+  // scripts and cron jobs never need the admin password (see /api/tokens).
+  app.use(
+    requireAuth({
+      user: AUTH_USER,
+      pass: AUTH_PASS,
+      findTokenByHash: db.findApiTokenByHash,
+      markTokenUsed: db.touchApiToken,
+    })
+  );
+  console.log("[auth] HTTP Basic Auth enabled (API tokens accepted)");
 }
 
 app.use(express.static(path.join(__dirname, "public")));
@@ -84,7 +94,7 @@ if (DEMO_MODE) {
 }
 
 app.get("/api/config", (req, res) => {
-  res.json({ demoMode: DEMO_MODE });
+  res.json({ demoMode: DEMO_MODE, authEnabled: AUTH_USER !== "" });
 });
 
 app.get("/api/scans", (req, res) => {
@@ -529,6 +539,49 @@ app.post("/api/config/import", (req, res) => {
   // dry run imported nothing, so there is nothing to reload.
   if (!dryRun && result.imported.schedules > 0) scheduler.reload();
   res.json(result);
+});
+
+// v1.25.0 — API tokens. Basic Auth (v1.6) guards the browser; these let a
+// script or cron job call the API with a revocable key instead of the admin
+// password. The DEMO_MODE middleware already blocks POST/DELETE, and when
+// auth is enabled the requireAuth gate above covers these routes too — you
+// need the admin credential (or an existing token) to mint or revoke one.
+
+app.get("/api/tokens", (req, res) => {
+  // Names and timestamps only — the hash never leaves the database.
+  res.json({ tokens: db.listApiTokens() });
+});
+
+app.post("/api/tokens", (req, res) => {
+  if (!AUTH_USER) {
+    // Without auth every door is already open — a token would guard nothing,
+    // and handing one out would only pretend otherwise.
+    return res.status(400).json({
+      error: "authentication is disabled (set AUTH_USER/AUTH_PASS) — a token would do nothing",
+    });
+  }
+  const nameV = validateTokenName((req.body || {}).name);
+  if (nameV.error) return res.status(400).json({ error: nameV.error });
+  const token = generateToken();
+  let created;
+  try {
+    created = db.createApiToken(nameV.value, hashToken(token));
+  } catch (e) {
+    if (String(e.message).includes("UNIQUE")) {
+      return res.status(400).json({ error: `a token named "${nameV.value}" already exists` });
+    }
+    throw e;
+  }
+  // The plaintext appears in this response and nowhere else — only its
+  // sha256 is stored. Copy it now or mint a new one.
+  res.status(201).json({ id: created.id, name: created.name, token });
+});
+
+app.delete("/api/tokens/:id", (req, res) => {
+  const id = parseInt(req.params.id, 10);
+  if (!Number.isInteger(id) || id <= 0) return res.status(400).json({ error: "invalid id" });
+  if (!db.deleteApiToken(id)) return res.status(404).json({ error: "token not found" });
+  res.json({ ok: true });
 });
 
 // v0.10.0 — scheduled scans. Persistence + REST surface. The actual cron

@@ -45,4 +45,64 @@ function basicAuth({ user, pass }) {
   };
 }
 
-module.exports = { basicAuth, parseBasicHeader, safeEqual };
+// ===== API tokens (v1.25.0) =====
+// Basic Auth guards the browser, but handing the admin password to every
+// cron job and script that polls the API is how the password ends up in
+// shell history and crontabs. A token is a second door with its own key:
+// mintable, listable and revocable one by one, without ever touching the
+// admin credential.
+
+// "lsk_" + 64 hex chars (32 random bytes). The prefix makes a leaked token
+// recognizable in logs and secret scanners; the body is crypto-random.
+const TOKEN_RE = /^lsk_[0-9a-f]{64}$/;
+
+function generateToken() {
+  return `lsk_${crypto.randomBytes(32).toString("hex")}`;
+}
+
+// Only the sha256 of the token is ever stored — a read of the database (a
+// backup, a stray copy) yields nothing presentable. Lookup happens by hash
+// equality: an attacker controls the preimage, not the digest, so a timing
+// difference in the index probe tells them nothing they can steer.
+function hashToken(token) {
+  return crypto.createHash("sha256").update(String(token)).digest("hex");
+}
+
+// "Bearer lsk_…" → the token string, or null. Anything not shaped exactly
+// like one of our tokens is rejected before touching the database.
+function parseBearerHeader(header) {
+  if (typeof header !== "string") return null;
+  const m = header.match(/^Bearer +(\S+)$/i);
+  if (!m) return null;
+  return TOKEN_RE.test(m[1]) ? m[1] : null;
+}
+
+// Combined middleware: a valid API token OR the Basic credential opens the
+// door. Token first — it's cheap to rule out (regex + one indexed lookup)
+// and API clients never see the browser's Basic prompt semantics change.
+function requireAuth({ user, pass, findTokenByHash, markTokenUsed }) {
+  const basic = basicAuth({ user, pass });
+  return (req, res, next) => {
+    const token = parseBearerHeader(req.headers.authorization);
+    if (token) {
+      const row = findTokenByHash(hashToken(token));
+      if (row) {
+        markTokenUsed(row.id);
+        return next();
+      }
+      // A malformed or revoked token falls through to the same 401 the
+      // Basic path produces — one failure shape, nothing to enumerate.
+    }
+    return basic(req, res, next);
+  };
+}
+
+module.exports = {
+  basicAuth,
+  parseBasicHeader,
+  safeEqual,
+  generateToken,
+  hashToken,
+  parseBearerHeader,
+  requireAuth,
+};

@@ -191,6 +191,14 @@ jobs:
           grep -q '"dry_run":true' /tmp/dryrun.json
           grep -q '"plan"' /tmp/dryrun.json
 
+          echo "--- /api/tokens (v1.25.0) ---"
+          # The list works with auth off; minting must refuse (a token would
+          # guard nothing while every door is open) — 400, not a silent 201.
+          curl -fsS http://localhost:3030/api/tokens | grep -q '"tokens":\[\]'
+          code=$(curl -s -o /dev/null -w '%{http_code}' -X POST http://localhost:3030/api/tokens \
+            -H 'content-type: application/json' --data '{"name":"smoke"}')
+          test "$code" = "400"
+
           echo "--- GET / ---"
           curl -fsS -o /tmp/index.html -w "code=%{http_code}\n" http://localhost:3030/
           grep -q '<title>LanScope' /tmp/index.html

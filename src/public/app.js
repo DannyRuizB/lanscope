@@ -3149,6 +3149,15 @@ document.addEventListener("keydown", (e) => {
       if (els.demoBanner) els.demoBanner.hidden = false;
       document.body.classList.add("demo-mode");
     }
+    // v1.25.0: the API-tokens section only makes sense behind auth — with
+    // it off the server refuses to mint tokens, so the UI doesn't offer.
+    // (Safe to touch here: this runs after module evaluation, so the token
+    // elements and handlers below are already wired.)
+    if (cfg.authEnabled) {
+      const sec = document.getElementById("tokens-section");
+      if (sec) sec.hidden = false;
+      loadTokens().catch((e) => console.warn("tokens load failed:", e));
+    }
   } catch (e) {
     console.warn("config fetch failed:", e);
   }
@@ -3749,6 +3758,80 @@ configEls.file?.addEventListener("change", async () => {
     await applyImport(doc);
   } catch (e) {
     configStatus(e.message, true);
+  }
+});
+
+// ----- API tokens (v1.25.0) -------------------------------------------------
+// Only rendered when /api/config says authEnabled (the boot fetch above
+// unhides the section): with auth off every door is already open and a token
+// guards nothing — the server refuses to mint one, so the UI doesn't offer.
+const tokenEls = {
+  section: document.getElementById("tokens-section"),
+  list: document.getElementById("token-list"),
+  form: document.getElementById("token-form"),
+  name: document.getElementById("token-name"),
+  status: document.getElementById("token-status"),
+};
+
+function tokenStatus(text, isError = false) {
+  if (!tokenEls.status) return;
+  tokenEls.status.textContent = text;
+  tokenEls.status.hidden = false;
+  tokenEls.status.classList.toggle("config-io-error", isError);
+}
+
+async function loadTokens() {
+  if (!tokenEls.list) return;
+  const data = await fetchJson("/api/tokens");
+  tokenEls.list.innerHTML = data.tokens
+    .map((t) => {
+      const used = t.last_used_at
+        ? `last used ${new Date(t.last_used_at).toLocaleDateString()}`
+        : "never used";
+      return (
+        `<li><span class="token-name" title="${escapeHtml(t.name)}">${escapeHtml(t.name)}</span>` +
+        `<span class="token-meta">${used}</span>` +
+        `<button class="ghost small token-revoke" data-id="${t.id}" title="Revoke this token — scripts using it stop working immediately" aria-label="Revoke token ${escapeHtml(t.name)}">×</button></li>`
+      );
+    })
+    .join("");
+}
+
+tokenEls.form?.addEventListener("submit", async (ev) => {
+  ev.preventDefault();
+  const name = (tokenEls.name?.value || "").trim();
+  if (!name) return;
+  try {
+    const r = await fetchJson("/api/tokens", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ name }),
+    });
+    tokenEls.name.value = "";
+    // The plaintext exists only in this response — the prompt is the one
+    // chance to copy it (a prompt beats a status line: selectable, modal,
+    // and it doesn't linger on screen afterwards).
+    window.prompt(
+      `Token "${r.name}" created. Copy it now — it will not be shown again:`,
+      r.token,
+    );
+    tokenStatus(`Token "${r.name}" created.`);
+    await loadTokens();
+  } catch (e) {
+    tokenStatus(e.message, true);
+  }
+});
+
+tokenEls.list?.addEventListener("click", async (ev) => {
+  const btn = ev.target.closest(".token-revoke");
+  if (!btn) return;
+  if (!window.confirm("Revoke this token? Scripts using it stop working immediately.")) return;
+  try {
+    await fetchJson(`/api/tokens/${btn.dataset.id}`, { method: "DELETE" });
+    tokenStatus("Token revoked.");
+    await loadTokens();
+  } catch (e) {
+    tokenStatus(e.message, true);
   }
 });
 

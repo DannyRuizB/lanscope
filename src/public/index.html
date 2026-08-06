@@ -97,6 +97,20 @@
           </div>
         </div>
         <p id="config-io-status" class="muted config-io-status" hidden></p>
+
+        <!-- v1.25.0: only shown when the server reports authEnabled — with
+             auth off every door is already open and a token guards nothing. -->
+        <div id="tokens-section" hidden>
+          <div class="panel-header">
+            <h2>API tokens</h2>
+          </div>
+          <ul id="token-list" class="token-list"></ul>
+          <form id="token-form" class="token-form">
+            <input id="token-name" type="text" placeholder="Name (e.g. backup-cron)" maxlength="64" autocomplete="off" />
+            <button type="submit" class="ghost small">+ Create</button>
+          </form>
+          <p id="token-status" class="muted config-io-status" hidden></p>
+        </div>
       </aside>
 
       <section class="content">
@@ -583,7 +597,7 @@
     </div>
 
     <footer class="bottombar">
-      <span>v1.23.0</span>
+      <span>v1.25.0</span>
       <span>·</span>
       <span>MIT</span>
       <span>·</span>
