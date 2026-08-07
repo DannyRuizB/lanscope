@@ -170,6 +170,34 @@ function validateNotesText(s) {
   return { value: v };
 }
 
+// v1.26.0 — selective config export. The ?sections= query names which
+// sections the backup carries; the import side already treats a missing
+// section as "nothing to restore here", so a labels-only backup restores
+// labels and touches nothing else — the two halves compose by design.
+const CONFIG_SECTIONS = ["labels", "mutes", "schedules", "channels"];
+
+function validateExportSections(raw) {
+  // Absent means everything — the pre-v1.26 contract, unchanged.
+  if (raw === undefined) return { value: null };
+  if (typeof raw !== "string") {
+    return { error: "sections must be a single comma-separated list" };
+  }
+  const tokens = raw.split(",").map((t) => t.trim()).filter((t) => t.length > 0);
+  if (tokens.length === 0) {
+    return { error: "sections is empty — omit the parameter to export everything" };
+  }
+  for (const t of tokens) {
+    if (!CONFIG_SECTIONS.includes(t)) {
+      return { error: `unknown section: ${t} (valid: ${CONFIG_SECTIONS.join(", ")})` };
+    }
+  }
+  // Deduped, in canonical order — and the full set collapses to null so
+  // "everything" has exactly one spelling (the mute-types precedent).
+  const picked = CONFIG_SECTIONS.filter((s) => tokens.includes(s));
+  if (picked.length === CONFIG_SECTIONS.length) return { value: null };
+  return { value: picked };
+}
+
 // v1.23.0 — config import. Validates the WHOLE document before anything is
 // written (the import itself is one db transaction): a config restore is
 // all-or-nothing, never half a backup. Dependencies are injected so this
@@ -294,6 +322,8 @@ function validateConfigDoc(doc, deps) {
 
 module.exports = {
   validateConfigDoc,
+  validateExportSections,
+  CONFIG_SECTIONS,
   validateScheduleName,
   validateTokenName,
   validateCronExpr,

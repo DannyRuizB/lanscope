@@ -25,6 +25,7 @@ const {
   validateLabelText,
   validateNotesText,
   validateConfigDoc,
+  validateExportSections,
   validateTokenName,
 } = require("./http-validators");
 const {
@@ -481,15 +482,29 @@ app.put("/api/mutes", (req, res) => {
 // Export is a GET so it works on the read-only public demo and downloads
 // with a plain anchor click; runtime fields (ids, last_run/last_sent) are
 // stripped — a backup describes intent, not state.
+// v1.26.0 — ?sections=labels,mutes exports just those sections. The keys the
+// backup does not carry are simply ABSENT (not empty arrays): the import
+// treats a missing section as "nothing to restore here", so a labels-only
+// backup restores labels and cannot touch schedules someone hand-tuned since.
 app.get("/api/config/export", (req, res) => {
+  const secV = validateExportSections(req.query.sections);
+  if (secV.error) return res.status(400).json({ error: secV.error });
+  const wanted = secV.value; // null = everything, the pre-v1.26 document
+  const has = (s) => wanted === null || wanted.includes(s);
   const doc = {
     lanscope_config: 1,
     exported_at: Date.now(),
-    labels: db.listAllLabels().map(({ cidr, ip, label, notes }) => ({ cidr, ip, label, notes })),
-    mutes: db.listAllMutes().map(({ cidr, ip, types, expires_at }) => ({
+  };
+  if (has("labels")) {
+    doc.labels = db.listAllLabels().map(({ cidr, ip, label, notes }) => ({ cidr, ip, label, notes }));
+  }
+  if (has("mutes")) {
+    doc.mutes = db.listAllMutes().map(({ cidr, ip, types, expires_at }) => ({
       cidr, ip, types, expires_at: expires_at ?? null,
-    })),
-    schedules: db.listSchedules().map((s) => ({
+    }));
+  }
+  if (has("schedules")) {
+    doc.schedules = db.listSchedules().map((s) => ({
       name: s.name,
       cidr: s.cidr,
       cron_expr: s.cron_expr,
@@ -497,18 +512,22 @@ app.get("/api/config/export", (req, res) => {
       scan_options: s.scan_options ?? null,
       keep_last: s.keep_last ?? null,
       latency_alert_ms: s.latency_alert_ms ?? null,
-    })),
-    channels: db.listChannels().map((c) => ({
+    }));
+  }
+  if (has("channels")) {
+    doc.channels = db.listChannels().map((c) => ({
       name: c.name,
       type: c.type,
       config: c.config,
       events: c.events,
       enabled: !!c.enabled,
-    })),
-  };
+    }));
+  }
+  // The filename says the scope, so a folder of backups reads at a glance.
+  const scope = wanted === null ? "" : `${wanted.join("+")}_`;
   res.setHeader(
     "Content-Disposition",
-    `attachment; filename="lanscope_config_${new Date(doc.exported_at).toISOString().slice(0, 10)}.json"`,
+    `attachment; filename="lanscope_config_${scope}${new Date(doc.exported_at).toISOString().slice(0, 10)}.json"`,
   );
   res.json(doc);
 });

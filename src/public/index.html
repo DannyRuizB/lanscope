@@ -96,6 +96,15 @@
             <input id="config-import-file" type="file" accept=".json,application/json" hidden />
           </div>
         </div>
+        <!-- v1.26.0: pick what the backup carries. All checked = the classic
+             full document; a subset exports only those sections, and the
+             import side restores only what the file carries. -->
+        <div class="adv-checks-row config-export-scope">
+          <label class="adv-check"><input type="checkbox" id="cfg-sec-labels" checked /><span>labels</span></label>
+          <label class="adv-check"><input type="checkbox" id="cfg-sec-mutes" checked /><span>mutes</span></label>
+          <label class="adv-check"><input type="checkbox" id="cfg-sec-schedules" checked /><span>schedules</span></label>
+          <label class="adv-check"><input type="checkbox" id="cfg-sec-channels" checked /><span>channels</span></label>
+        </div>
         <p id="config-io-status" class="muted config-io-status" hidden></p>
 
         <!-- v1.25.0: only shown when the server reports authEnabled — with
@@ -597,7 +606,7 @@
     </div>
 
     <footer class="bottombar">
-      <span>v1.25.0</span>
+      <span>v1.26.0</span>
       <span>·</span>
       <span>MIT</span>
       <span>·</span>

@@ -3678,10 +3678,42 @@ setupAlerts();
 // server validates the whole document first, so an error here means nothing
 // was written.
 const configEls = {
+  exportBtn: document.getElementById("config-export-btn"),
   importBtn: document.getElementById("config-import-btn"),
   file: document.getElementById("config-import-file"),
   status: document.getElementById("config-io-status"),
 };
+
+// v1.26.0 — the scope checkboxes rewrite the export anchor. All checked is
+// the canonical full export (no query at all, same URL as ever); a subset
+// rides ?sections=; none checked disables the anchor — an empty backup is
+// a mistake, not a document.
+const configScopeBoxes = ["labels", "mutes", "schedules", "channels"].map((s) => ({
+  section: s,
+  el: document.getElementById(`cfg-sec-${s}`),
+}));
+
+function updateExportScope() {
+  if (!configEls.exportBtn) return;
+  const picked = configScopeBoxes.filter((b) => b.el?.checked).map((b) => b.section);
+  const all = picked.length === configScopeBoxes.length;
+  const none = picked.length === 0;
+  configEls.exportBtn.classList.toggle("disabled", none);
+  configEls.exportBtn.setAttribute("aria-disabled", none ? "true" : "false");
+  if (none) {
+    configEls.exportBtn.removeAttribute("href");
+    configEls.exportBtn.title = "Pick at least one section to export";
+    return;
+  }
+  configEls.exportBtn.href = all
+    ? "/api/config/export"
+    : `/api/config/export?sections=${picked.join(",")}`;
+  configEls.exportBtn.title = all
+    ? "Download labels, mutes, schedules and notification channels as one JSON backup"
+    : `Download only ${picked.join(", ")} as a JSON backup`;
+}
+
+for (const b of configScopeBoxes) b.el?.addEventListener("change", updateExportScope);
 
 function configStatus(text, isError = false) {
   if (!configEls.status) return;
