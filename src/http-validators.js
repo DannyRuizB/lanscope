@@ -170,13 +170,14 @@ function validateNotesText(s) {
   return { value: v };
 }
 
-// v1.26.0 — selective config export. The ?sections= query names which
-// sections the backup carries; the import side already treats a missing
-// section as "nothing to restore here", so a labels-only backup restores
-// labels and touches nothing else — the two halves compose by design.
+// The ?sections= query, shared by selective export (v1.26) and selective
+// import (v1.27): it names which config sections an operation touches. Same
+// vocabulary either way — on export it picks what the backup carries, on
+// import what gets restored — and both compose because the import already
+// treats an absent section as "nothing to do here".
 const CONFIG_SECTIONS = ["labels", "mutes", "schedules", "channels"];
 
-function validateExportSections(raw) {
+function validateSectionsParam(raw) {
   // Absent means everything — the pre-v1.26 contract, unchanged.
   if (raw === undefined) return { value: null };
   if (typeof raw !== "string") {
@@ -184,7 +185,7 @@ function validateExportSections(raw) {
   }
   const tokens = raw.split(",").map((t) => t.trim()).filter((t) => t.length > 0);
   if (tokens.length === 0) {
-    return { error: "sections is empty — omit the parameter to export everything" };
+    return { error: "sections is empty — omit the parameter to act on everything" };
   }
   for (const t of tokens) {
     if (!CONFIG_SECTIONS.includes(t)) {
@@ -322,7 +323,7 @@ function validateConfigDoc(doc, deps) {
 
 module.exports = {
   validateConfigDoc,
-  validateExportSections,
+  validateSectionsParam,
   CONFIG_SECTIONS,
   validateScheduleName,
   validateTokenName,
