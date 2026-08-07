@@ -25,7 +25,7 @@ const {
   validateLabelText,
   validateNotesText,
   validateConfigDoc,
-  validateExportSections,
+  validateSectionsParam,
   validateTokenName,
 } = require("./http-validators");
 const {
@@ -487,7 +487,7 @@ app.put("/api/mutes", (req, res) => {
 // treats a missing section as "nothing to restore here", so a labels-only
 // backup restores labels and cannot touch schedules someone hand-tuned since.
 app.get("/api/config/export", (req, res) => {
-  const secV = validateExportSections(req.query.sections);
+  const secV = validateSectionsParam(req.query.sections);
   if (secV.error) return res.status(400).json({ error: secV.error });
   const wanted = secV.value; // null = everything, the pre-v1.26 document
   const has = (s) => wanted === null || wanted.includes(s);
@@ -545,15 +545,31 @@ app.post("/api/config/import", (req, res) => {
     alertTypes: db.ALERT_TYPES,
   });
   if (v.error) return res.status(400).json({ error: v.error });
+  // v1.27.0 — ?sections=labels,mutes restores only those sections and leaves
+  // the rest of the document on the floor: the mirror of selective export.
+  // You keep a full backup but restore just the schedules onto a box without
+  // clobbering the labels/mutes you curated there since. The sections NOT
+  // named are dropped to empty arrays, which importConfig already reads as
+  // "touch nothing here" — the two halves compose. Absent = everything.
+  const secV = validateSectionsParam(req.query.sections);
+  if (secV.error) return res.status(400).json({ error: secV.error });
+  const doc = v.value;
+  if (secV.value !== null) {
+    for (const section of ["labels", "mutes", "schedules", "channels"]) {
+      if (!secV.value.includes(section)) doc[section] = [];
+    }
+  }
   // ?dry_run=1 reports the plan and writes nothing (v1.24.0). Same validation,
   // same merge code, rolled back at the end — a restore stops being a blind
   // button. The flag fails SAFE: any present value means dry run except an
   // explicit 0/false/empty, so a typo (`?dry_run=maybe`) yields a preview
   // rather than the unwanted write that strict parsing would have caused.
+  // It composes with ?sections=: preview exactly the subset you will apply.
   const raw = req.query.dry_run;
   const dryRun =
     raw !== undefined && !["0", "false", ""].includes(String(raw).toLowerCase());
-  const result = db.importConfig(v.value, { dryRun });
+  const result = db.importConfig(doc, { dryRun });
+  result.sections = secV.value; // null = all; echoes what was applied
   // Imported schedules must start ticking now, not at the next boot — but a
   // dry run imported nothing, so there is nothing to reload.
   if (!dryRun && result.imported.schedules > 0) scheduler.reload();

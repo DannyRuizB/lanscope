@@ -3744,8 +3744,23 @@ function configPlanSentence(r) {
   return (parts.length ? parts.join(" · ") : "nothing") + tail;
 }
 
+// The section checkboxes scope BOTH directions (v1.27): on import they pick
+// which sections of the file get restored. All four checked = the whole
+// document (no ?sections=, the classic behaviour); a subset rides ?sections=;
+// none checked is a mistake the caller catches before we get here.
+function currentSectionsParam() {
+  const picked = configScopeBoxes.filter((b) => b.el?.checked).map((b) => b.section);
+  if (picked.length === 0 || picked.length === configScopeBoxes.length) return null;
+  return picked.join(",");
+}
+
 async function postImport(doc, dryRun) {
-  return fetchJson("/api/config/import" + (dryRun ? "?dry_run=1" : ""), {
+  const params = new URLSearchParams();
+  if (dryRun) params.set("dry_run", "1");
+  const sections = currentSectionsParam();
+  if (sections) params.set("sections", sections);
+  const qs = params.toString();
+  return fetchJson("/api/config/import" + (qs ? "?" + qs : ""), {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify(doc),
@@ -3768,6 +3783,12 @@ configEls.file?.addEventListener("change", async () => {
   const f = configEls.file.files?.[0];
   configEls.file.value = ""; // allow re-picking the same file
   if (!f) return;
+  // None checked = nothing to restore: catch it here rather than POST an
+  // empty scope (mirrors the export anchor disabling itself).
+  if (configScopeBoxes.every((b) => !b.el?.checked)) {
+    configStatus("Pick at least one section to import.", true);
+    return;
+  }
   let doc;
   try {
     doc = JSON.parse(await f.text());
@@ -3777,6 +3798,7 @@ configEls.file?.addEventListener("change", async () => {
   }
   // Two steps on purpose (v1.24.0): a restore overwrites names someone typed,
   // so the dry run says exactly what would happen and the person confirms.
+  // The preview is already scoped to the checked sections (v1.27).
   try {
     const preview = await postImport(doc, true);
     const ok = window.confirm(

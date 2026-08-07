@@ -235,3 +235,38 @@ test('a labels-only document restores labels and cannot touch anything else', ()
   );
   assert.equal(db.listAllLabels().find((l) => l.ip === '10.9.0.5').label, 'Camera');
 });
+
+// --- selective import (v1.27.0) --------------------------------------------
+// The endpoint filters the validated document down to the requested sections
+// before handing it to importConfig (?sections=labels zeroes the rest). These
+// prove the composition the endpoint relies on: a section reduced to [] is
+// left untouched, whatever the source document also carried.
+
+test('a full document scoped to labels imports only labels, leaving the rest', () => {
+  // A complete backup — labels, mutes, a schedule and a channel with FRESH
+  // names so they WOULD import if not scoped out.
+  const full = {
+    lanscope_config: 1,
+    exported_at: 1785000000000,
+    labels: [{ cidr: '10.27.0.0/24', ip: '10.27.0.5', label: 'ScopedCam', notes: null }],
+    mutes: [{ cidr: '10.27.0.0/24', ip: '10.27.0.9', types: null, expires_at: null }],
+    schedules: [{ name: 'v127 nightly', cidr: '10.27.0.0/24', cron_expr: '0 4 * * *', enabled: true, scan_options: null, keep_last: null, latency_alert_ms: null }],
+    channels: [{ name: 'v127 hook', type: 'webhook', config: { url: 'https://example.com/v127' }, events: ['scan_done'], enabled: false }],
+  };
+  const v = validateConfigDoc(full, DEPS);
+  assert.ok(!v.error, v.error);
+  // What the endpoint does for ?sections=labels: keep labels, zero the rest.
+  const scoped = { ...v.value, mutes: [], schedules: [], channels: [] };
+  const schedBefore = db.listSchedules().length;
+  const chanBefore = db.listChannels().length;
+  const muteBefore = db.listAllMutes().length;
+  const r = db.importConfig(scoped);
+  assert.equal(r.imported.labels, 1);
+  assert.equal(r.imported.mutes, 0);
+  assert.equal(r.imported.schedules, 0);
+  assert.equal(r.imported.channels, 0);
+  assert.equal(db.listSchedules().length, schedBefore, 'the schedule in the doc was scoped out');
+  assert.equal(db.listChannels().length, chanBefore, 'the channel in the doc was scoped out');
+  assert.equal(db.listAllMutes().length, muteBefore, 'the mute in the doc was scoped out');
+  assert.equal(db.listAllLabels().find((l) => l.ip === '10.27.0.5').label, 'ScopedCam');
+});

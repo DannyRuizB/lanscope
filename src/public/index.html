@@ -92,13 +92,14 @@
           <h2>Config</h2>
           <div class="panel-actions">
             <a id="config-export-btn" class="ghost small" href="/api/config/export" download title="Download labels, mutes, schedules and notification channels as one JSON backup">⬇ Export</a>
-            <button id="config-import-btn" class="ghost small" type="button" title="Restore a config backup — labels and mutes upsert; schedules and channels with an existing name are skipped">⬆ Import</button>
+            <button id="config-import-btn" class="ghost small" type="button" title="Restore a config backup — scoped to the checked sections; labels and mutes upsert, schedules and channels with an existing name are skipped">⬆ Import</button>
             <input id="config-import-file" type="file" accept=".json,application/json" hidden />
           </div>
         </div>
-        <!-- v1.26.0: pick what the backup carries. All checked = the classic
-             full document; a subset exports only those sections, and the
-             import side restores only what the file carries. -->
+        <!-- The section checkboxes scope BOTH directions: on export (v1.26)
+             they pick what the backup carries, on import (v1.27) which
+             sections of the file get restored. All four checked = the whole
+             document either way; a subset scopes the operation. -->
         <div class="adv-checks-row config-export-scope">
           <label class="adv-check"><input type="checkbox" id="cfg-sec-labels" checked /><span>labels</span></label>
           <label class="adv-check"><input type="checkbox" id="cfg-sec-mutes" checked /><span>mutes</span></label>
@@ -606,7 +607,7 @@
     </div>
 
     <footer class="bottombar">
-      <span>v1.26.0</span>
+      <span>v1.27.0</span>
       <span>·</span>
       <span>MIT</span>
       <span>·</span>

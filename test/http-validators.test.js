@@ -129,32 +129,32 @@ test('validateLatencyAlertMs: null inherits, 0 = off, range capped (v1.14.0)', (
 
 // --- selective config export (v1.26.0) -------------------------------------
 
-test('validateExportSections: absent means everything (null, one spelling)', () => {
-  assert.equal(V.validateExportSections(undefined).value, null);
+test('validateSectionsParam: absent means everything (null, one spelling)', () => {
+  assert.equal(V.validateSectionsParam(undefined).value, null);
 });
 
-test('validateExportSections: subset comes back deduped in canonical order', () => {
-  assert.deepEqual(V.validateExportSections('mutes,labels').value, ['labels', 'mutes']);
-  assert.deepEqual(V.validateExportSections('labels,labels').value, ['labels']);
+test('validateSectionsParam: subset comes back deduped in canonical order', () => {
+  assert.deepEqual(V.validateSectionsParam('mutes,labels').value, ['labels', 'mutes']);
+  assert.deepEqual(V.validateSectionsParam('labels,labels').value, ['labels']);
   // whitespace and a trailing comma are hand-typed URL reality
-  assert.deepEqual(V.validateExportSections(' schedules , channels ,').value, ['schedules', 'channels']);
+  assert.deepEqual(V.validateSectionsParam(' schedules , channels ,').value, ['schedules', 'channels']);
 });
 
-test('validateExportSections: the full set collapses to null (mute-types precedent)', () => {
-  assert.equal(V.validateExportSections('channels,schedules,mutes,labels').value, null);
+test('validateSectionsParam: the full set collapses to null (mute-types precedent)', () => {
+  assert.equal(V.validateSectionsParam('channels,schedules,mutes,labels').value, null);
 });
 
-test('validateExportSections: unknown section named in the error', () => {
-  const v = V.validateExportSections('labels,tokens');
+test('validateSectionsParam: unknown section named in the error', () => {
+  const v = V.validateSectionsParam('labels,tokens');
   assert.ok(v.error);
   assert.match(v.error, /unknown section: tokens/);
 });
 
-test('validateExportSections: empty means a mistake, not "nothing"', () => {
-  assert.ok(V.validateExportSections('').error);
-  assert.ok(V.validateExportSections(' , ,').error);
+test('validateSectionsParam: empty means a mistake, not "nothing"', () => {
+  assert.ok(V.validateSectionsParam('').error);
+  assert.ok(V.validateSectionsParam(' , ,').error);
 });
 
-test('validateExportSections: a repeated query param (array) is rejected', () => {
-  assert.ok(V.validateExportSections(['labels', 'mutes']).error);
+test('validateSectionsParam: a repeated query param (array) is rejected', () => {
+  assert.ok(V.validateSectionsParam(['labels', 'mutes']).error);
 });
