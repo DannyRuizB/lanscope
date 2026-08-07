@@ -2101,6 +2101,17 @@ li.is-baseline .scan-cidr {
   min-width: 0;
 }
 
+/* v1.26.0 — export scope checkboxes: which sections the backup carries */
+.config-export-scope {
+  padding: 0 4px 8px;
+  gap: 12px;
+}
+#config-export-btn.disabled {
+  opacity: 0.45;
+  pointer-events: none;
+  cursor: default;
+}
+
 .config-io-status {
   margin: 0;
   padding: 0 4px 10px;

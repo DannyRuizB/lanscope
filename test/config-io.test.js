@@ -205,3 +205,33 @@ test('a dry run of an invalid-but-parsed doc still rolls back partial work', () 
   // All-or-nothing: the first label must NOT be there.
   assert.equal(db.listAllLabels().filter((l) => l.ip === '192.168.7.88').length, 0);
 });
+
+// --- selective export composes with import (v1.26.0) ------------------------
+
+test('a labels-only document restores labels and cannot touch anything else', () => {
+  // Exactly what GET /api/config/export?sections=labels produces: the other
+  // section keys are ABSENT, not empty — and the import side must read that
+  // as "nothing to restore here".
+  const doc = {
+    lanscope_config: 1,
+    exported_at: 1785000000000,
+    labels: [
+      { cidr: '10.9.0.0/24', ip: '10.9.0.5', label: 'Camera', notes: null },
+    ],
+  };
+  const before = {
+    schedules: db.listSchedules().length,
+    channels: db.listChannels().length,
+    mutes: db.listAllMutes().length,
+  };
+  const v = validateConfigDoc(doc, DEPS);
+  assert.ok(!v.error, v.error);
+  const r = db.importConfig(v.value);
+  assert.equal(r.imported.labels, 1);
+  assert.deepEqual(
+    { schedules: db.listSchedules().length, channels: db.listChannels().length, mutes: db.listAllMutes().length },
+    before,
+    'sections the backup does not carry stay untouched',
+  );
+  assert.equal(db.listAllLabels().find((l) => l.ip === '10.9.0.5').label, 'Camera');
+});

@@ -126,3 +126,35 @@ test('validateLatencyAlertMs: null inherits, 0 = off, range capped (v1.14.0)', (
   assert.ok(V.validateLatencyAlertMs(2.5).error);
   assert.ok(V.validateLatencyAlertMs('50').error);
 });
+
+// --- selective config export (v1.26.0) -------------------------------------
+
+test('validateExportSections: absent means everything (null, one spelling)', () => {
+  assert.equal(V.validateExportSections(undefined).value, null);
+});
+
+test('validateExportSections: subset comes back deduped in canonical order', () => {
+  assert.deepEqual(V.validateExportSections('mutes,labels').value, ['labels', 'mutes']);
+  assert.deepEqual(V.validateExportSections('labels,labels').value, ['labels']);
+  // whitespace and a trailing comma are hand-typed URL reality
+  assert.deepEqual(V.validateExportSections(' schedules , channels ,').value, ['schedules', 'channels']);
+});
+
+test('validateExportSections: the full set collapses to null (mute-types precedent)', () => {
+  assert.equal(V.validateExportSections('channels,schedules,mutes,labels').value, null);
+});
+
+test('validateExportSections: unknown section named in the error', () => {
+  const v = V.validateExportSections('labels,tokens');
+  assert.ok(v.error);
+  assert.match(v.error, /unknown section: tokens/);
+});
+
+test('validateExportSections: empty means a mistake, not "nothing"', () => {
+  assert.ok(V.validateExportSections('').error);
+  assert.ok(V.validateExportSections(' , ,').error);
+});
+
+test('validateExportSections: a repeated query param (array) is rejected', () => {
+  assert.ok(V.validateExportSections(['labels', 'mutes']).error);
+});

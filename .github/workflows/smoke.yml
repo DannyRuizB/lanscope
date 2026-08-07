@@ -191,6 +191,16 @@ jobs:
           grep -q '"dry_run":true' /tmp/dryrun.json
           grep -q '"plan"' /tmp/dryrun.json
 
+          echo "--- selective config export (v1.26.0) ---"
+          # A labels-only export carries the labels key and NOT the others —
+          # absence is the contract the import side reads as "don't touch".
+          curl -fsS -o /tmp/labels-only.json "http://localhost:3030/api/config/export?sections=labels"
+          grep -q '"labels"' /tmp/labels-only.json
+          ! grep -q '"schedules"' /tmp/labels-only.json
+          # An unknown section must be a named 400, not a silent full export.
+          code=$(curl -s -o /dev/null -w '%{http_code}' "http://localhost:3030/api/config/export?sections=nope")
+          test "$code" = "400"
+
           echo "--- /api/tokens (v1.25.0) ---"
           # The list works with auth off; minting must refuse (a token would
           # guard nothing while every door is open) — 400, not a silent 201.
