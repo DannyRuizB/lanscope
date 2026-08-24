@@ -321,12 +321,32 @@ function validateConfigDoc(doc, deps) {
   return { value: out };
 }
 
+// v1.29.0 — a token that never expires is a password with extra steps, but
+// FORCING an expiry breaks the homelab cron nobody rotates: optional.
+// Absent / null / "" keeps the v1.25 behaviour (never expires). Otherwise a
+// whole number of days, 1..3650 — ten years is "effectively never" said out
+// loud. Relative on purpose (the server computes the deadline from its own
+// clock at mint time): a mint is a one-shot, so the absolute-deadline
+// round-trip argument that made mute snoozes take `until` does not apply.
+function validateTokenTtlDays(v) {
+  if (v === undefined || v === null || v === "") return { value: null };
+  const n = typeof v === "number" ? v : Number(String(v).trim());
+  if (!Number.isInteger(n) || n < 1 || n > 3650) {
+    return {
+      error:
+        "expires_in_days must be a whole number of days between 1 and 3650 (omit it for a token that never expires)",
+    };
+  }
+  return { value: n };
+}
+
 module.exports = {
   validateConfigDoc,
   validateSectionsParam,
   CONFIG_SECTIONS,
   validateScheduleName,
   validateTokenName,
+  validateTokenTtlDays,
   validateCronExpr,
   validateKeepLast,
   validateLatencyAlertMs,

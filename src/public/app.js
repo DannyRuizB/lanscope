@@ -3824,6 +3824,7 @@ const tokenEls = {
   list: document.getElementById("token-list"),
   form: document.getElementById("token-form"),
   name: document.getElementById("token-name"),
+  ttl: document.getElementById("token-ttl"),
   status: document.getElementById("token-status"),
 };
 
@@ -3842,9 +3843,16 @@ async function loadTokens() {
       const used = t.last_used_at
         ? `last used ${new Date(t.last_used_at).toLocaleDateString()}`
         : "never used";
+      // v1.29.0: an expired token stays listed (a broken cron deserves an
+      // answer) but the server refuses it — say so where the operator looks.
+      const expiry = !t.expires_at
+        ? ""
+        : t.expires_at <= Date.now()
+          ? ` · <strong>expired ${new Date(t.expires_at).toLocaleDateString()}</strong>`
+          : ` · expires ${new Date(t.expires_at).toLocaleDateString()}`;
       return (
         `<li><span class="token-name" title="${escapeHtml(t.name)}">${escapeHtml(t.name)}</span>` +
-        `<span class="token-meta">${used}</span>` +
+        `<span class="token-meta">${used}${expiry}</span>` +
         `<button class="ghost small token-revoke" data-id="${t.id}" title="Revoke this token — scripts using it stop working immediately" aria-label="Revoke token ${escapeHtml(t.name)}">×</button></li>`
       );
     })
@@ -3856,12 +3864,16 @@ tokenEls.form?.addEventListener("submit", async (ev) => {
   const name = (tokenEls.name?.value || "").trim();
   if (!name) return;
   try {
+    const ttl = tokenEls.ttl?.value || "";
+    const body = { name };
+    if (ttl !== "") body.expires_in_days = parseInt(ttl, 10);
     const r = await fetchJson("/api/tokens", {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ name }),
+      body: JSON.stringify(body),
     });
     tokenEls.name.value = "";
+    if (tokenEls.ttl) tokenEls.ttl.value = "";
     // The plaintext exists only in this response — the prompt is the one
     // chance to copy it (a prompt beats a status line: selectable, modal,
     // and it doesn't linger on screen afterwards).

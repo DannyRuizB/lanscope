@@ -90,8 +90,9 @@ function requireAuth({ user, pass, findTokenByHash, markTokenUsed }) {
         markTokenUsed(row.id);
         return next();
       }
-      // A malformed or revoked token falls through to the same 401 the
-      // Basic path produces — one failure shape, nothing to enumerate.
+      // A malformed, revoked or EXPIRED token falls through to the same 401
+      // the Basic path produces — one failure shape, nothing to enumerate
+      // (expiry is enforced in the lookup itself; see db.findApiTokenByHash).
     }
     return basic(req, res, next);
   };

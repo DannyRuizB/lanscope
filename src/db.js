@@ -139,7 +139,8 @@ db.exec(`
     name         TEXT NOT NULL UNIQUE,
     token_hash   TEXT NOT NULL UNIQUE,
     created_at   INTEGER NOT NULL,
-    last_used_at INTEGER
+    last_used_at INTEGER,
+    expires_at   INTEGER
   );
 
   CREATE INDEX IF NOT EXISTS idx_hosts_scan ON hosts(scan_id);
@@ -205,6 +206,11 @@ if (!columnExists("scheduled_scans", "latency_alert_ms")) {
 // server validates against ALERT_TYPES, and no CHECK means no table rebuild.
 if (!columnExists("alert_mutes", "types")) {
   db.exec(`ALTER TABLE alert_mutes ADD COLUMN types TEXT`);
+}
+if (!columnExists("api_tokens", "expires_at")) {
+  // v1.29 token expiry — NULL means "never expires", so every pre-existing
+  // token keeps behaving unchanged (the v1.22 mute-expiry recipe).
+  db.exec(`ALTER TABLE api_tokens ADD COLUMN expires_at INTEGER`);
 }
 // v1.22.0 — mute expiry ("snooze"). NULL keeps the v1.20/21 meaning (muted
 // forever, so old rows keep behaving); an epoch-ms timestamp arms the mute
@@ -1506,19 +1512,19 @@ function importConfig(
 // once at creation and never touches the database. The list never returns
 // the hash either: knowing it wouldn't open the door (the middleware hashes
 // the presented token), but there is no reason to hand out oracle material.
-function createApiToken(name, tokenHash) {
+function createApiToken(name, tokenHash, expiresAt = null) {
   const info = db
     .prepare(
-      `INSERT INTO api_tokens (name, token_hash, created_at) VALUES (?, ?, ?)`
+      `INSERT INTO api_tokens (name, token_hash, created_at, expires_at) VALUES (?, ?, ?, ?)`
     )
-    .run(name, tokenHash, Date.now());
-  return { id: info.lastInsertRowid, name };
+    .run(name, tokenHash, Date.now(), expiresAt);
+  return { id: info.lastInsertRowid, name, expires_at: expiresAt };
 }
 
 function listApiTokens() {
   return db
     .prepare(
-      `SELECT id, name, created_at, last_used_at FROM api_tokens ORDER BY created_at, id`
+      `SELECT id, name, created_at, last_used_at, expires_at FROM api_tokens ORDER BY created_at, id`
     )
     .all();
 }
@@ -1527,11 +1533,20 @@ function deleteApiToken(id) {
   return db.prepare(`DELETE FROM api_tokens WHERE id = ?`).run(id).changes > 0;
 }
 
-function findApiTokenByHash(hash) {
+// Expiry is enforced HERE, on the lookup the middleware uses: an expired
+// token falls through to the same bare 401 as a revoked one — one failure
+// shape, nothing to enumerate. The row itself stays in the table and in the
+// list, visibly expired: unlike a lapsed mute (nothing left to debug), a
+// lapsed token means someone's script just broke, and "expired three days
+// ago" in the list is the answer to "why".
+function findApiTokenByHash(hash, now = Date.now()) {
   return (
     db
-      .prepare(`SELECT id, name FROM api_tokens WHERE token_hash = ?`)
-      .get(hash) || null
+      .prepare(
+        `SELECT id, name FROM api_tokens
+         WHERE token_hash = ? AND (expires_at IS NULL OR expires_at > ?)`
+      )
+      .get(hash, now) || null
   );
 }
 

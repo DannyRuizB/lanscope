@@ -27,6 +27,7 @@ const {
   validateConfigDoc,
   validateSectionsParam,
   validateTokenName,
+  validateTokenTtlDays,
 } = require("./http-validators");
 const {
   scanToCsv, exportFilename, historyToCsv, historyFilename, alertsToCsv, alertsFilename,
@@ -614,10 +615,16 @@ app.post("/api/tokens", (req, res) => {
   }
   const nameV = validateTokenName((req.body || {}).name);
   if (nameV.error) return res.status(400).json({ error: nameV.error });
+  // v1.29.0 — optional expiry: the server computes the deadline from its
+  // own clock, so client skew can't stretch a token's life. NULL stays
+  // "never expires" (every v1.25 token keeps behaving unchanged).
+  const ttlV = validateTokenTtlDays((req.body || {}).expires_in_days);
+  if (ttlV.error) return res.status(400).json({ error: ttlV.error });
+  const expiresAt = ttlV.value == null ? null : Date.now() + ttlV.value * 86400000;
   const token = generateToken();
   let created;
   try {
-    created = db.createApiToken(nameV.value, hashToken(token));
+    created = db.createApiToken(nameV.value, hashToken(token), expiresAt);
   } catch (e) {
     if (String(e.message).includes("UNIQUE")) {
       return res.status(400).json({ error: `a token named "${nameV.value}" already exists` });
@@ -626,7 +633,7 @@ app.post("/api/tokens", (req, res) => {
   }
   // The plaintext appears in this response and nowhere else — only its
   // sha256 is stored. Copy it now or mint a new one.
-  res.status(201).json({ id: created.id, name: created.name, token });
+  res.status(201).json({ id: created.id, name: created.name, token, expires_at: expiresAt });
 });
 
 app.delete("/api/tokens/:id", (req, res) => {
