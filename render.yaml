@@ -13,7 +13,7 @@ services:
     name: lanscope-demo
     runtime: image
     image:
-      url: ghcr.io/dannyruizb/lanscope:1.28.0
+      url: ghcr.io/dannyruizb/lanscope:1.29.0
     plan: free
     region: frankfurt
     healthCheckPath: /
