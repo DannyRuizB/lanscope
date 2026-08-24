@@ -226,6 +226,18 @@ jobs:
           curl -fsS -o /tmp/index.html -w "code=%{http_code}\n" http://localhost:3030/
           grep -q '<title>LanScope' /tmp/index.html
 
+          echo "--- /metrics (v1.28.0) ---"
+          # Prometheus exposition: right content-type, HELP/TYPE headers,
+          # and the alert families zero-filled even on an empty database.
+          # (Express appends charset and reorders the params — match both,
+          # not a literal order: "text/plain; charset=utf-8; version=0.0.4".)
+          curl -fsS -D /tmp/metrics.h http://localhost:3030/metrics -o /tmp/metrics.txt
+          grep -qi '^content-type: text/plain' /tmp/metrics.h
+          grep -qi 'version=0.0.4' /tmp/metrics.h
+          grep -q '^# TYPE lanscope_scans_stored gauge' /tmp/metrics.txt
+          grep -q '^lanscope_info{version=' /tmp/metrics.txt
+          grep -q '^lanscope_alerts_pending{type="sensitive_port"} 0' /tmp/metrics.txt
+
           echo "All endpoints responded with expected shape"
 
       - name: Container logs on failure

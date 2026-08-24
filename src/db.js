@@ -262,6 +262,33 @@ const stmts = {
   failScan: db.prepare(
     `UPDATE scans SET status = 'error', finished_at = ?, error_message = ? WHERE id = ?`,
   ),
+  metricsScanCounts: db.prepare(
+    `SELECT COUNT(*) AS stored,
+            COALESCE(SUM(CASE WHEN status = 'running' THEN 1 ELSE 0 END), 0) AS running
+     FROM scans`,
+  ),
+  // Latest finished scan per network by MAX(id), not MAX(started_at) —
+  // same-millisecond scans made ordering by time ambiguous once already
+  // (the latency-sparks axis bug); ids are monotonic and never tie.
+  metricsLatestDoneScans: db.prepare(
+    `SELECT s.cidr, s.id, s.started_at, s.finished_at
+     FROM scans s
+     JOIN (SELECT cidr, MAX(id) AS mid FROM scans WHERE status = 'done' GROUP BY cidr) t
+       ON s.id = t.mid`,
+  ),
+  metricsHostCounts: db.prepare(
+    `SELECT COUNT(*) AS total,
+            COALESCE(SUM(CASE WHEN status = 'up' THEN 1 ELSE 0 END), 0) AS up
+     FROM hosts WHERE scan_id = ?`,
+  ),
+  metricsPendingAlertsByType: db.prepare(
+    `SELECT type, COUNT(*) AS n FROM alerts WHERE acknowledged_at IS NULL GROUP BY type`,
+  ),
+  metricsScheduleCounts: db.prepare(
+    `SELECT COUNT(*) AS total,
+            COALESCE(SUM(CASE WHEN enabled = 1 THEN 1 ELSE 0 END), 0) AS enabled
+     FROM scheduled_scans`,
+  ),
   insertHost: db.prepare(
     `INSERT INTO hosts (scan_id, ip, mac, vendor, hostname, status, reason, latency_ms)
      VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
@@ -596,6 +623,39 @@ function finishScan(scanId, hosts) {
 
 function failScan(scanId, message) {
   stmts.failScan.run(Date.now(), message, scanId);
+}
+
+// One read for a /metrics scrape. Per-network figures come from the LATEST
+// finished scan of each CIDR; a scan still running or errored never
+// represents a network. Pending alerts arrive as {type: count} with only
+// the types that have rows — the formatter zero-fills over ALERT_TYPES so
+// this stays a plain GROUP BY.
+function getMetricsSnapshot() {
+  const scans = stmts.metricsScanCounts.get();
+  const networks = stmts.metricsLatestDoneScans.all().map((s) => {
+    const hosts = stmts.metricsHostCounts.get(s.id);
+    return {
+      cidr: s.cidr,
+      hostsUp: hosts.up,
+      hostsTotal: hosts.total,
+      lastScanFinishedAt: s.finished_at ?? null,
+      lastScanDurationMs:
+        s.finished_at != null ? s.finished_at - s.started_at : null,
+    };
+  });
+  const alertsPending = {};
+  for (const row of stmts.metricsPendingAlertsByType.all()) {
+    alertsPending[row.type] = row.n;
+  }
+  const schedules = stmts.metricsScheduleCounts.get();
+  return {
+    scansStored: scans.stored,
+    scansRunning: scans.running,
+    networks,
+    alertsPending,
+    schedulesEnabled: schedules.enabled,
+    schedulesTotal: schedules.total,
+  };
 }
 
 function listScans(limit = 50) {
@@ -1516,6 +1576,7 @@ module.exports = {
   getTimeline,
   getHostHistory,
   getLatencySparks,
+  getMetricsSnapshot,
   ALERT_TYPES,
   createAlert,
   createAlerts,

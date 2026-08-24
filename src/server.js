@@ -37,6 +37,8 @@ const { detectSensitivePortsForHost } = require("./alerts");
 const scheduler = require("./scheduler");
 const notifier = require("./notifier");
 const { requireAuth, generateToken, hashToken } = require("./auth");
+const { buildMetrics } = require("./metrics");
+const PKG_VERSION = require("../package.json").version;
 
 const PORT = parseInt(process.env.PORT, 10) || 3030;
 const DEMO_MODE = process.env.DEMO_MODE === "true";
@@ -96,6 +98,21 @@ if (DEMO_MODE) {
 
 app.get("/api/config", (req, res) => {
   res.json({ demoMode: DEMO_MODE, authEnabled: AUTH_USER !== "" });
+});
+
+// Prometheus scrape endpoint — at the conventional root path, not under
+// /api. Read-only GET (works in the demo), and when auth is on the
+// requireAuth gate above covers it: mint an API token for the scraper
+// (`Authorization: Bearer lsk_…` in the scrape config) instead of handing
+// Prometheus the admin password.
+app.get("/metrics", (req, res) => {
+  res.set("Content-Type", "text/plain; version=0.0.4; charset=utf-8");
+  res.send(
+    buildMetrics(db.getMetricsSnapshot(), {
+      version: PKG_VERSION,
+      alertTypes: db.ALERT_TYPES,
+    }),
+  );
 });
 
 app.get("/api/scans", (req, res) => {
