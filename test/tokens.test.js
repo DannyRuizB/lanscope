@@ -171,3 +171,66 @@ test('token names are unique — a duplicate insert throws', () => {
     /UNIQUE/,
   );
 });
+
+// ----- expiry (v1.29.0) -------------------------------------------------------
+
+const { validateTokenTtlDays } = require('../src/http-validators');
+
+test('validateTokenTtlDays: absent means never, whole days 1..3650, everything else named', () => {
+  assert.deepEqual(validateTokenTtlDays(undefined), { value: null });
+  assert.deepEqual(validateTokenTtlDays(null), { value: null });
+  assert.deepEqual(validateTokenTtlDays(''), { value: null });
+  assert.deepEqual(validateTokenTtlDays(30), { value: 30 });
+  assert.deepEqual(validateTokenTtlDays('365'), { value: 365 });
+  assert.deepEqual(validateTokenTtlDays(3650), { value: 3650 });
+  for (const bad of [0, -1, 1.5, 3651, 'soon', true, {}, []]) {
+    assert.ok(validateTokenTtlDays(bad).error, `should reject ${JSON.stringify(bad)}`);
+  }
+});
+
+test('an expired token stops opening the door but stays in the list — a broken cron deserves an answer', () => {
+  const t = generateToken();
+  const deadline = Date.now() + 1000;
+  const created = db.createApiToken('nightly-report', hashToken(t), deadline);
+  assert.equal(created.expires_at, deadline);
+
+  // Alive: the lookup matches and the list names the deadline.
+  assert.ok(db.findApiTokenByHash(hashToken(t)), 'not expired yet — must match');
+  const listed = db.listApiTokens().find((x) => x.name === 'nightly-report');
+  assert.equal(listed.expires_at, deadline);
+
+  // The clock passes (injected — the test never sleeps): the lookup goes
+  // dark exactly like a revoked token, but the row is still listed.
+  assert.equal(db.findApiTokenByHash(hashToken(t), deadline + 1), null);
+  assert.ok(
+    db.listApiTokens().some((x) => x.name === 'nightly-report'),
+    'expired tokens stay visible — silent disappearance explains nothing',
+  );
+  assert.ok(db.deleteApiToken(created.id), 'an expired token is still revocable');
+});
+
+test('a token without expiry keeps the v1.25 behaviour: NULL means never', () => {
+  const t = generateToken();
+  db.createApiToken('forever-cron', hashToken(t));
+  const listed = db.listApiTokens().find((x) => x.name === 'forever-cron');
+  assert.equal(listed.expires_at, null);
+  const farFuture = Date.now() + 100 * 365 * 86400000;
+  assert.ok(db.findApiTokenByHash(hashToken(t), farFuture), 'NULL never expires');
+});
+
+test('requireAuth turns an expired token into the same bare 401 as a bad Basic', () => {
+  const t = generateToken();
+  db.createApiToken('expired-ci', hashToken(t), Date.now() - 1);
+  const mw = requireAuth({
+    user: 'ops',
+    pass: 'hunter2',
+    findTokenByHash: (h) => db.findApiTokenByHash(h),
+    markTokenUsed: () => { throw new Error('must not mark an expired token as used'); },
+  });
+  const { req, res } = fakeExchange(`Bearer ${t}`);
+  let passed = false;
+  mw(req, res, () => { passed = true; });
+  assert.ok(!passed);
+  assert.equal(res.statusCode, 401);
+  assert.equal(res.body.error, 'Authentication required');
+});

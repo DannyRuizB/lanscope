@@ -117,6 +117,14 @@
           <ul id="token-list" class="token-list"></ul>
           <form id="token-form" class="token-form">
             <input id="token-name" type="text" placeholder="Name (e.g. backup-cron)" maxlength="64" autocomplete="off" />
+            <!-- v1.29.0: optional expiry, the v1.22 mute-snooze idea applied
+                 to credentials. Empty keeps the v1.25 behaviour (never). -->
+            <select id="token-ttl" title="Expiry — an expired token stops opening the door but stays listed, so a broken cron has an answer">
+              <option value="" selected>Never expires</option>
+              <option value="30">Expires in 30 days</option>
+              <option value="90">Expires in 90 days</option>
+              <option value="365">Expires in 1 year</option>
+            </select>
             <button type="submit" class="ghost small">+ Create</button>
           </form>
           <p id="token-status" class="muted config-io-status" hidden></p>
@@ -607,7 +615,7 @@
     </div>
 
     <footer class="bottombar">
-      <span>v1.28.0</span>
+      <span>v1.29.0</span>
       <span>·</span>
       <span>MIT</span>
       <span>·</span>
