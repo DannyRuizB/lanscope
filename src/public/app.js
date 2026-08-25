@@ -3825,6 +3825,7 @@ const tokenEls = {
   form: document.getElementById("token-form"),
   name: document.getElementById("token-name"),
   ttl: document.getElementById("token-ttl"),
+  scope: document.getElementById("token-scope"),
   status: document.getElementById("token-status"),
 };
 
@@ -3843,6 +3844,9 @@ async function loadTokens() {
       const used = t.last_used_at
         ? `last used ${new Date(t.last_used_at).toLocaleDateString()}`
         : "never used";
+      // v1.30.0: scope. Only "read" is ever stored — null means full access,
+      // which is the norm and needs no label.
+      const scope = t.scope === "read" ? " · read-only" : "";
       // v1.29.0: an expired token stays listed (a broken cron deserves an
       // answer) but the server refuses it — say so where the operator looks.
       const expiry = !t.expires_at
@@ -3852,7 +3856,7 @@ async function loadTokens() {
           : ` · expires ${new Date(t.expires_at).toLocaleDateString()}`;
       return (
         `<li><span class="token-name" title="${escapeHtml(t.name)}">${escapeHtml(t.name)}</span>` +
-        `<span class="token-meta">${used}${expiry}</span>` +
+        `<span class="token-meta">${used}${scope}${expiry}</span>` +
         `<button class="ghost small token-revoke" data-id="${t.id}" title="Revoke this token — scripts using it stop working immediately" aria-label="Revoke token ${escapeHtml(t.name)}">×</button></li>`
       );
     })
@@ -3867,6 +3871,7 @@ tokenEls.form?.addEventListener("submit", async (ev) => {
     const ttl = tokenEls.ttl?.value || "";
     const body = { name };
     if (ttl !== "") body.expires_in_days = parseInt(ttl, 10);
+    if (tokenEls.scope?.value === "read") body.scope = "read";
     const r = await fetchJson("/api/tokens", {
       method: "POST",
       headers: { "content-type": "application/json" },
@@ -3874,6 +3879,7 @@ tokenEls.form?.addEventListener("submit", async (ev) => {
     });
     tokenEls.name.value = "";
     if (tokenEls.ttl) tokenEls.ttl.value = "";
+    if (tokenEls.scope) tokenEls.scope.value = "";
     // The plaintext exists only in this response — the prompt is the one
     // chance to copy it (a prompt beats a status line: selectable, modal,
     // and it doesn't linger on screen afterwards).

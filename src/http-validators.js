@@ -340,6 +340,20 @@ function validateTokenTtlDays(v) {
   return { value: n };
 }
 
+// v1.30.0 — token scope. Two grades only: full (the v1.25 behaviour) and
+// "read" (GET-only, the right grade for a Prometheus scraper or a dashboard).
+// Absent means full, and a spelled-out "full" collapses to the same null —
+// one spelling of "everything", the mute-types precedent.
+function validateTokenScope(v) {
+  if (v === undefined || v === null || v === "") return { value: null };
+  if (typeof v !== "string" || !["full", "read"].includes(v)) {
+    return {
+      error: 'scope must be "full" or "read" (omit it for a full-access token)',
+    };
+  }
+  return { value: v === "read" ? "read" : null };
+}
+
 module.exports = {
   validateConfigDoc,
   validateSectionsParam,
@@ -347,6 +361,7 @@ module.exports = {
   validateScheduleName,
   validateTokenName,
   validateTokenTtlDays,
+  validateTokenScope,
   validateCronExpr,
   validateKeepLast,
   validateLatencyAlertMs,

@@ -20,7 +20,7 @@ const {
   parseBearerHeader,
   requireAuth,
 } = require('../src/auth');
-const { validateTokenName } = require('../src/http-validators');
+const { validateTokenName, validateTokenScope } = require('../src/http-validators');
 
 // ----- validator ------------------------------------------------------------
 
@@ -31,6 +31,18 @@ test('validateTokenName trims, requires content and caps the length', () => {
   assert.ok(validateTokenName('   ').error);
   assert.ok(validateTokenName('x'.repeat(65)).error);
   assert.deepEqual(validateTokenName('x'.repeat(64)), { value: 'x'.repeat(64) });
+});
+
+test('validateTokenScope: absent and "full" collapse to null, only "read" is stored', () => {
+  // One spelling of "everything" — the mute-types precedent.
+  assert.deepEqual(validateTokenScope(undefined), { value: null });
+  assert.deepEqual(validateTokenScope(null), { value: null });
+  assert.deepEqual(validateTokenScope(''), { value: null });
+  assert.deepEqual(validateTokenScope('full'), { value: null });
+  assert.deepEqual(validateTokenScope('read'), { value: 'read' });
+  for (const bad of ['admin', 'READ', 'write', 42, {}, ['read']]) {
+    assert.ok(validateTokenScope(bad).error, `should reject ${JSON.stringify(bad)}`);
+  }
 });
 
 // ----- token material -------------------------------------------------------
@@ -70,7 +82,7 @@ test('parseBearerHeader accepts only well-shaped lanscope tokens', () => {
 
 // ----- middleware -----------------------------------------------------------
 
-function fakeExchange(authorization) {
+function fakeExchange(authorization, method = 'GET') {
   const res = {
     headers: {},
     statusCode: null,
@@ -79,7 +91,7 @@ function fakeExchange(authorization) {
     status(c) { this.statusCode = c; return this; },
     json(b) { this.body = b; return this; },
   };
-  return { req: { headers: authorization ? { authorization } : {} }, res };
+  return { req: { method, headers: authorization ? { authorization } : {} }, res };
 }
 
 function b64(s) {
@@ -117,6 +129,52 @@ test('requireAuth rejects unknown or revoked tokens with the same 401 as Basic',
   assert.equal(res.statusCode, 401);
   assert.match(res.headers['WWW-Authenticate'], /^Basic realm=/);
   assert.equal(res.body.error, 'Authentication required');
+});
+
+test('a read-scope token can ask anything but change nothing (named 403, use stamped)', () => {
+  const t = generateToken();
+  let touched = 0;
+  const mw = requireAuth({
+    user: 'ops',
+    pass: 'hunter2',
+    findTokenByHash: (h) => (h === hashToken(t) ? { id: 3, name: 'scraper', scope: 'read' } : null),
+    markTokenUsed: () => { touched++; },
+  });
+  // The whole DEMO_MODE trio passes...
+  for (const method of ['GET', 'HEAD', 'OPTIONS']) {
+    const { req, res } = fakeExchange(`Bearer ${t}`, method);
+    let passed = false;
+    mw(req, res, () => { passed = true; });
+    assert.ok(passed, `${method} should pass`);
+  }
+  // ...and every write is refused with a NAMED 403 — not the bare 401: the
+  // caller proved identity, and "your token is read-only" is the answer to
+  // why the cron broke. The refused write still stamps last_used_at.
+  for (const method of ['POST', 'PUT', 'PATCH', 'DELETE']) {
+    const { req, res } = fakeExchange(`Bearer ${t}`, method);
+    let passed = false;
+    mw(req, res, () => { passed = true; });
+    assert.ok(!passed, `${method} must not pass`);
+    assert.equal(res.statusCode, 403);
+    assert.match(res.body.error, /read-only/);
+  }
+  assert.equal(touched, 7, 'all seven presentations are uses');
+});
+
+test('a full token (scope null — every pre-v1.30 row) still opens every method', () => {
+  const t = generateToken();
+  const mw = requireAuth({
+    user: 'ops',
+    pass: 'hunter2',
+    findTokenByHash: (h) => (h === hashToken(t) ? { id: 4, name: 'admin-cron', scope: null } : null),
+    markTokenUsed: () => {},
+  });
+  for (const method of ['GET', 'POST', 'DELETE']) {
+    const { req, res } = fakeExchange(`Bearer ${t}`, method);
+    let passed = false;
+    mw(req, res, () => { passed = true; });
+    assert.ok(passed, `${method} should pass for a full token`);
+  }
 });
 
 test('requireAuth still honours the Basic credential alongside tokens', () => {
@@ -162,6 +220,26 @@ test('create/list/find/touch/delete round-trip, and the hash never leaves', () =
   assert.ok(db.deleteApiToken(created.id));
   assert.ok(!db.deleteApiToken(created.id), 'second delete finds nothing');
   assert.equal(db.findApiTokenByHash(hashToken(t)), null, 'a revoked token stops matching');
+});
+
+test('scope round-trips through create, list and the auth lookup; default is full (null)', () => {
+  const tRead = generateToken();
+  const tFull = generateToken();
+  const read = db.createApiToken('scope-scraper', hashToken(tRead), null, 'read');
+  const full = db.createApiToken('scope-admin', hashToken(tFull));
+  assert.equal(read.scope, 'read');
+  assert.equal(full.scope, null, 'omitting scope means full — every pre-v1.30 row reads the same');
+
+  const byName = Object.fromEntries(db.listApiTokens().map((r) => [r.name, r]));
+  assert.equal(byName['scope-scraper'].scope, 'read');
+  assert.equal(byName['scope-admin'].scope, null);
+
+  // The middleware decides from the lookup row — scope must ride along.
+  assert.equal(db.findApiTokenByHash(hashToken(tRead)).scope, 'read');
+  assert.equal(db.findApiTokenByHash(hashToken(tFull)).scope, null);
+
+  db.deleteApiToken(read.id);
+  db.deleteApiToken(full.id);
 });
 
 test('token names are unique — a duplicate insert throws', () => {

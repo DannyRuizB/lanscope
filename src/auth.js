@@ -87,7 +87,22 @@ function requireAuth({ user, pass, findTokenByHash, markTokenUsed }) {
     if (token) {
       const row = findTokenByHash(hashToken(token));
       if (row) {
+        // A refused write below is still a USE — the token authenticated
+        // fine — and last_used_at answers "is anyone holding this token?",
+        // so the stamp comes first.
         markTokenUsed(row.id);
+        // v1.30.0 — scope. A read-only token may ask anything but change
+        // nothing: the same GET/HEAD/OPTIONS trio DEMO_MODE lets through.
+        // Deliberately a NAMED 403, not the bare 401: the single bare 401
+        // is for invalid credentials (nothing to enumerate); this caller
+        // proved identity, and "your token is read-only" is the answer to
+        // why the cron broke — the visible-expiry philosophy applied to
+        // writes.
+        if (row.scope === "read" && !["GET", "HEAD", "OPTIONS"].includes(req.method)) {
+          return res.status(403).json({
+            error: 'this token is read-only (scope "read") — it can GET everything but change nothing',
+          });
+        }
         return next();
       }
       // A malformed, revoked or EXPIRED token falls through to the same 401
