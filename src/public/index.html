@@ -125,6 +125,12 @@
               <option value="90">Expires in 90 days</option>
               <option value="365">Expires in 1 year</option>
             </select>
+            <!-- v1.30.0: scope. Read-only is the right grade for a scraper
+                 or dashboard — a leak can look, never launch a scan. -->
+            <select id="token-scope" title="Scope — a read-only token can GET everything but change nothing (the right grade for Prometheus or a dashboard)">
+              <option value="" selected>Full access</option>
+              <option value="read">Read-only</option>
+            </select>
             <button type="submit" class="ghost small">+ Create</button>
           </form>
           <p id="token-status" class="muted config-io-status" hidden></p>
@@ -615,7 +621,7 @@
     </div>
 
     <footer class="bottombar">
-      <span>v1.29.0</span>
+      <span>v1.30.0</span>
       <span>·</span>
       <span>MIT</span>
       <span>·</span>

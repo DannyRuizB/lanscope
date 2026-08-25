@@ -28,6 +28,7 @@ const {
   validateSectionsParam,
   validateTokenName,
   validateTokenTtlDays,
+  validateTokenScope,
 } = require("./http-validators");
 const {
   scanToCsv, exportFilename, historyToCsv, historyFilename, alertsToCsv, alertsFilename,
@@ -621,10 +622,15 @@ app.post("/api/tokens", (req, res) => {
   const ttlV = validateTokenTtlDays((req.body || {}).expires_in_days);
   if (ttlV.error) return res.status(400).json({ error: ttlV.error });
   const expiresAt = ttlV.value == null ? null : Date.now() + ttlV.value * 86400000;
+  // v1.30.0 — optional scope: "read" mints a token that can GET everything
+  // but change nothing (the right grade for a Prometheus scraper). Absent
+  // or "full" stores NULL — full access, every earlier token's behaviour.
+  const scopeV = validateTokenScope((req.body || {}).scope);
+  if (scopeV.error) return res.status(400).json({ error: scopeV.error });
   const token = generateToken();
   let created;
   try {
-    created = db.createApiToken(nameV.value, hashToken(token), expiresAt);
+    created = db.createApiToken(nameV.value, hashToken(token), expiresAt, scopeV.value);
   } catch (e) {
     if (String(e.message).includes("UNIQUE")) {
       return res.status(400).json({ error: `a token named "${nameV.value}" already exists` });
@@ -633,7 +639,7 @@ app.post("/api/tokens", (req, res) => {
   }
   // The plaintext appears in this response and nowhere else — only its
   // sha256 is stored. Copy it now or mint a new one.
-  res.status(201).json({ id: created.id, name: created.name, token, expires_at: expiresAt });
+  res.status(201).json({ id: created.id, name: created.name, token, expires_at: expiresAt, scope: scopeV.value });
 });
 
 app.delete("/api/tokens/:id", (req, res) => {
