@@ -19,6 +19,7 @@ const els = {
   deleteBtn: $("#delete-scan"),
   advTiming: $("#adv-timing"),
   advScanType: $("#adv-scantype"),
+  advVersion: $("#adv-version"),
   advPortsTop: $("#adv-ports-top"),
   advPortsRange: $("#adv-ports-range"),
   advNseDefault: $("#adv-nse-default"),
@@ -1878,12 +1879,13 @@ async function runPortscan(hostId) {
   try {
     const timing = els.advTiming?.value || "T4";
     const scanType = els.advScanType?.value || "connect";
+    const versionDetection = els.advVersion?.value || "light";
     const ports = currentPortsSpec();
     const scripts = currentScriptsSpec();
     const data = await fetchJson(`/api/hosts/${hostId}/portscan`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ timing, scanType, ports, scripts }),
+      body: JSON.stringify({ timing, scanType, versionDetection, ports, scripts }),
     });
     if (lastScan) {
       const h = lastScan.hosts.find((x) => x.id === hostId);
@@ -1926,11 +1928,12 @@ async function runUdpscan(hostId) {
   setStatus("UDP scan running — this can take several minutes.");
   try {
     const timing = els.advTiming?.value || "T4";
+    const versionDetection = els.advVersion?.value || "light";
     const ports = currentPortsSpec();
     const data = await fetchJson(`/api/hosts/${hostId}/udp-portscan`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ timing, ports }),
+      body: JSON.stringify({ timing, versionDetection, ports }),
     });
     if (lastScan) {
       const h = lastScan.hosts.find((x) => x.id === hostId);

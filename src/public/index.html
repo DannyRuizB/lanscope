@@ -182,6 +182,16 @@
               <span class="adv-hint">Connect completes the TCP handshake. SYN is stealthier and faster but loses the closed/filtered distinction.</span>
             </label>
 
+            <label class="adv-field" for="adv-version">
+              <span class="adv-label">Version detection</span>
+              <select id="adv-version" name="adv-version">
+                <option value="light" selected>Light — fast probes only (default)</option>
+                <option value="standard">Standard — nmap's default intensity</option>
+                <option value="all">All — every probe, best on odd ports</option>
+              </select>
+              <span class="adv-hint">How hard <code>-sV</code> works to name the product and version behind a port. Light is quickest; All tries every probe (slower) and pins services on non-standard ports.</span>
+            </label>
+
             <div class="adv-field">
               <span class="adv-label">Ports</span>
               <div class="adv-ports-row">

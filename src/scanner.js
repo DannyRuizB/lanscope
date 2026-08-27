@@ -43,6 +43,32 @@ function validateScanType(t) {
   return { value: t, error: null };
 }
 
+// v1.32.0 — service/version detection intensity. `-sV` runs probes to
+// name the product and version behind an open port; how many probes it
+// tries is the intensity. Three levels expose nmap's own knob without a
+// free-form integer:
+//   light    → --version-light (intensity 2): the fast probes only — the
+//              historical default, so absent/null maps here and every
+//              existing scan is unchanged.
+//   standard → bare -sV (nmap's default intensity 7): more probes, slower.
+//   all      → --version-all (intensity 9): every probe nmap has, slowest
+//              but best at pinning odd services on non-standard ports.
+// Returns { args: ["--version-light"] | [] | ["--version-all"], error }.
+const VERSION_DETECTION_ARGS = {
+  light: ["--version-light"],
+  standard: [],
+  all: ["--version-all"],
+};
+function validateVersionDetection(v) {
+  if (v === undefined || v === null || v === "") {
+    return { args: ["--version-light"], error: null };
+  }
+  if (typeof v !== "string" || !(v in VERSION_DETECTION_ARGS)) {
+    return { args: null, error: "versionDetection must be 'light', 'standard' or 'all'" };
+  }
+  return { args: VERSION_DETECTION_ARGS[v], error: null };
+}
+
 // NSE script categories we expose. Curated allowlist: "default" (the same set
 // nmap runs with -sC, includes banner/http-title/ssh-hostkey…) and "safe"
 // (broader but still classified by nmap as not intrusive). Categories like
@@ -296,6 +322,9 @@ function runPortScan(ip, opts = {}) {
   const portsArgs = opts.portsArgs || PORTS_DEFAULT_ARGS;
   const scanFlag = SCAN_TYPE_FLAG[opts.scanType || PORTSCAN_DEFAULT_SCAN_TYPE];
   const scriptsArgs = opts.scriptsArgs || [];
+  // Default preserves the historical --version-light when the caller says
+  // nothing (validateVersionDetection maps absent → light).
+  const versionArgs = opts.versionArgs || ["--version-light"];
   // NSE adds variable wall time per script (banner waits, http probes,
   // ssh handshakes…). Bump the per-scan timeout when scripts are enabled
   // so a top-1000 + safe doesn't get killed mid-run.
@@ -321,7 +350,7 @@ function runPortScan(ip, opts = {}) {
         scanFlag,
         "-sV",
         `-${timing}`,
-        "--version-light",
+        ...versionArgs,
         "--reason",
         ...scriptsArgs,
         "-oX",
@@ -348,6 +377,7 @@ function runPortScan(ip, opts = {}) {
 }
 
 function runUdpPortScan(ip, opts = {}) {
+  const versionArgs = opts.versionArgs || ["--version-light"];
   const timing = opts.timing || PORTSCAN_DEFAULT_TIMING;
   const portsArgs = opts.portsArgs || PORTS_DEFAULT_ARGS;
   return new Promise((resolve, reject) => {
@@ -365,7 +395,7 @@ function runUdpPortScan(ip, opts = {}) {
         "-sU",
         "-sV",
         `-${timing}`,
-        "--version-light",
+        ...versionArgs,
         "--reason",
         "-oX",
         "-",
@@ -436,6 +466,7 @@ module.exports = {
   validateIpv4,
   validateTiming,
   validatePortsSpec,
+  validateVersionDetection,
   validateScanType,
   validateScripts,
   validateDiscovery,
