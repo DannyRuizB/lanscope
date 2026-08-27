@@ -131,6 +131,10 @@
               <option value="" selected>Full access</option>
               <option value="read">Read-only</option>
             </select>
+            <!-- v1.31.0: network binding. Off its CIDR the token is refused
+                 like garbage (bare 401) — a leak walks away with nothing. -->
+            <input id="token-cidr" type="text" placeholder="Bind to CIDR (optional, e.g. 192.168.1.0/24)" maxlength="18" autocomplete="off"
+                   title="Network binding — the token only opens the door from inside this IPv4 network; presented from anywhere else it gets the same 401 as an invalid one" />
             <button type="submit" class="ghost small">+ Create</button>
           </form>
           <p id="token-status" class="muted config-io-status" hidden></p>

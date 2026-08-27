@@ -19,8 +19,10 @@ const {
   hashToken,
   parseBearerHeader,
   requireAuth,
+  ipInCidr,
+  clientAddress,
 } = require('../src/auth');
-const { validateTokenName, validateTokenScope } = require('../src/http-validators');
+const { validateTokenName, validateTokenScope, validateTokenCidr } = require('../src/http-validators');
 
 // ----- validator ------------------------------------------------------------
 
@@ -82,7 +84,7 @@ test('parseBearerHeader accepts only well-shaped lanscope tokens', () => {
 
 // ----- middleware -----------------------------------------------------------
 
-function fakeExchange(authorization, method = 'GET') {
+function fakeExchange(authorization, method = 'GET', remoteAddress = '127.0.0.1') {
   const res = {
     headers: {},
     statusCode: null,
@@ -91,7 +93,14 @@ function fakeExchange(authorization, method = 'GET') {
     status(c) { this.statusCode = c; return this; },
     json(b) { this.body = b; return this; },
   };
-  return { req: { method, headers: authorization ? { authorization } : {} }, res };
+  return {
+    req: {
+      method,
+      headers: authorization ? { authorization } : {},
+      socket: { remoteAddress },
+    },
+    res,
+  };
 }
 
 function b64(s) {
@@ -311,4 +320,102 @@ test('requireAuth turns an expired token into the same bare 401 as a bad Basic',
   assert.ok(!passed);
   assert.equal(res.statusCode, 401);
   assert.equal(res.body.error, 'Authentication required');
+});
+
+// ----- network binding (v1.31.0) ---------------------------------------------
+
+test('validateTokenCidr: CIDR normalized, bare IP becomes /32, junk refused, absent stays null', () => {
+  assert.deepEqual(validateTokenCidr('192.168.1.0/24'), { value: '192.168.1.0/24' });
+  assert.deepEqual(validateTokenCidr(' 10.0.0.5 '), { value: '10.0.0.5/32' });
+  assert.deepEqual(validateTokenCidr(undefined), { value: null });
+  assert.deepEqual(validateTokenCidr(''), { value: null });
+  assert.ok(validateTokenCidr('300.1.1.1/24').error, 'octet above 255');
+  assert.ok(validateTokenCidr('10.0.0.0/33').error, 'prefix above 32');
+  assert.ok(validateTokenCidr('fe80::1/64').error, 'IPv6 is refused at mint, not silently dead');
+  assert.ok(validateTokenCidr('not-a-cidr').error);
+  assert.ok(validateTokenCidr(42).error);
+});
+
+test('ipInCidr: membership math, /32 exactness, /0 everything, garbage fails closed', () => {
+  assert.ok(ipInCidr('192.168.1.77', '192.168.1.0/24'));
+  assert.ok(!ipInCidr('192.168.2.1', '192.168.1.0/24'));
+  assert.ok(ipInCidr('10.0.0.5', '10.0.0.5/32'));
+  assert.ok(!ipInCidr('10.0.0.6', '10.0.0.5/32'));
+  assert.ok(ipInCidr('8.8.8.8', '0.0.0.0/0'));
+  // host bits set in the stored network are masked, not fatal
+  assert.ok(ipInCidr('192.168.1.9', '192.168.1.55/24'));
+  // fail closed: an IPv6 peer or malformed value is never "inside"
+  assert.ok(!ipInCidr('fe80::1', '192.168.1.0/24'));
+  assert.ok(!ipInCidr('192.168.1.1', 'garbage'));
+});
+
+test('clientAddress unmaps ::ffff: and treats ::1 as loopback', () => {
+  assert.equal(clientAddress({ socket: { remoteAddress: '::ffff:192.168.1.4' } }), '192.168.1.4');
+  assert.equal(clientAddress({ socket: { remoteAddress: '::1' } }), '127.0.0.1');
+  assert.equal(clientAddress({ socket: { remoteAddress: '10.1.2.3' } }), '10.1.2.3');
+  assert.equal(clientAddress({ socket: { remoteAddress: 'fe80::1' } }), 'fe80::1');
+});
+
+test('a bound token opens the door from inside its CIDR and stamps the use', () => {
+  const t = generateToken();
+  db.createApiToken('lan-cron', hashToken(t), null, null, '192.168.1.0/24');
+  let marked = false;
+  const mw = requireAuth({
+    user: 'ops',
+    pass: 'hunter2',
+    findTokenByHash: (h) => db.findApiTokenByHash(h),
+    markTokenUsed: () => { marked = true; },
+  });
+  const { req, res } = fakeExchange(`Bearer ${t}`, 'GET', '192.168.1.50');
+  let passed = false;
+  mw(req, res, () => { passed = true; });
+  assert.ok(passed, 'inside the CIDR the token works');
+  assert.ok(marked, 'a legitimate use stamps last_used_at');
+});
+
+test('off its network the bound token gets the bare 401 and no stamp - garbage, not a hint', () => {
+  const t = generateToken();
+  db.createApiToken('theft-bait', hashToken(t), null, null, '192.168.1.0/24');
+  const mw = requireAuth({
+    user: 'ops',
+    pass: 'hunter2',
+    findTokenByHash: (h) => db.findApiTokenByHash(h),
+    markTokenUsed: () => { throw new Error('a refused off-net attempt must not stamp the token'); },
+  });
+  // the IPv4-mapped form is what a dual-stack listener actually reports
+  const { req, res } = fakeExchange(`Bearer ${t}`, 'GET', '::ffff:203.0.113.9');
+  let passed = false;
+  mw(req, res, () => { passed = true; });
+  assert.ok(!passed);
+  assert.equal(res.statusCode, 401);
+  assert.equal(res.body.error, 'Authentication required', 'the same bare 401 as a forged token');
+});
+
+test('an unbound token keeps behaving unchanged from anywhere (NULL = bound nowhere)', () => {
+  const t = generateToken();
+  db.createApiToken('roaming-cron', hashToken(t));
+  const listed = db.listApiTokens().find((x) => x.name === 'roaming-cron');
+  assert.equal(listed.bound_cidr, null);
+  const mw = requireAuth({
+    user: 'ops',
+    pass: 'hunter2',
+    findTokenByHash: (h) => db.findApiTokenByHash(h),
+    markTokenUsed: () => {},
+  });
+  const { req, res } = fakeExchange(`Bearer ${t}`, 'GET', '::ffff:203.0.113.9');
+  let passed = false;
+  mw(req, res, () => { passed = true; });
+  assert.ok(passed, 'no binding, no border');
+  assert.equal(res.statusCode, null);
+});
+
+test('binding round-trips through create, list and the lookup row', () => {
+  const t = generateToken();
+  const created = db.createApiToken('bound-scraper', hashToken(t), null, 'read', '10.0.0.0/8');
+  assert.equal(created.bound_cidr, '10.0.0.0/8');
+  const listed = db.listApiTokens().find((x) => x.name === 'bound-scraper');
+  assert.equal(listed.bound_cidr, '10.0.0.0/8');
+  const row = db.findApiTokenByHash(hashToken(t));
+  assert.equal(row.bound_cidr, '10.0.0.0/8');
+  assert.equal(row.scope, 'read', 'binding composes with scope');
 });

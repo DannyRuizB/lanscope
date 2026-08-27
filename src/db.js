@@ -212,6 +212,12 @@ if (!columnExists("api_tokens", "expires_at")) {
   // token keeps behaving unchanged (the v1.22 mute-expiry recipe).
   db.exec(`ALTER TABLE api_tokens ADD COLUMN expires_at INTEGER`);
 }
+if (!columnExists("api_tokens", "bound_cidr")) {
+  // v1.31.0 — network binding. Nullable: NULL means bound nowhere, valid
+  // from anywhere — every earlier token keeps behaving unchanged. The
+  // expiry/scope soft-ALTER recipe, third application.
+  db.exec(`ALTER TABLE api_tokens ADD COLUMN bound_cidr TEXT`);
+}
 if (!columnExists("api_tokens", "scope")) {
   // v1.30 token scope — NULL means full access (the only spelling of it,
   // the mute-types precedent), so every v1.25/v1.29 token keeps opening
@@ -1518,19 +1524,19 @@ function importConfig(
 // once at creation and never touches the database. The list never returns
 // the hash either: knowing it wouldn't open the door (the middleware hashes
 // the presented token), but there is no reason to hand out oracle material.
-function createApiToken(name, tokenHash, expiresAt = null, scope = null) {
+function createApiToken(name, tokenHash, expiresAt = null, scope = null, boundCidr = null) {
   const info = db
     .prepare(
-      `INSERT INTO api_tokens (name, token_hash, created_at, expires_at, scope) VALUES (?, ?, ?, ?, ?)`
+      `INSERT INTO api_tokens (name, token_hash, created_at, expires_at, scope, bound_cidr) VALUES (?, ?, ?, ?, ?, ?)`
     )
-    .run(name, tokenHash, Date.now(), expiresAt, scope);
-  return { id: info.lastInsertRowid, name, expires_at: expiresAt, scope };
+    .run(name, tokenHash, Date.now(), expiresAt, scope, boundCidr);
+  return { id: info.lastInsertRowid, name, expires_at: expiresAt, scope, bound_cidr: boundCidr };
 }
 
 function listApiTokens() {
   return db
     .prepare(
-      `SELECT id, name, created_at, last_used_at, expires_at, scope FROM api_tokens ORDER BY created_at, id`
+      `SELECT id, name, created_at, last_used_at, expires_at, scope, bound_cidr FROM api_tokens ORDER BY created_at, id`
     )
     .all();
 }
@@ -1549,7 +1555,7 @@ function findApiTokenByHash(hash, now = Date.now()) {
   return (
     db
       .prepare(
-        `SELECT id, name, scope FROM api_tokens
+        `SELECT id, name, scope, bound_cidr FROM api_tokens
          WHERE token_hash = ? AND (expires_at IS NULL OR expires_at > ?)`
       )
       .get(hash, now) || null

@@ -29,6 +29,7 @@ const {
   validateTokenName,
   validateTokenTtlDays,
   validateTokenScope,
+  validateTokenCidr,
 } = require("./http-validators");
 const {
   scanToCsv, exportFilename, historyToCsv, historyFilename, alertsToCsv, alertsFilename,
@@ -627,10 +628,15 @@ app.post("/api/tokens", (req, res) => {
   // or "full" stores NULL — full access, every earlier token's behaviour.
   const scopeV = validateTokenScope((req.body || {}).scope);
   if (scopeV.error) return res.status(400).json({ error: scopeV.error });
+  // v1.31.0 — optional network binding: the token only opens the door when
+  // presented from inside this IPv4 CIDR. Off its network it gets the same
+  // bare 401 as garbage (see auth.js for why that inverts scope's 403).
+  const cidrV = validateTokenCidr((req.body || {}).bound_cidr);
+  if (cidrV.error) return res.status(400).json({ error: cidrV.error });
   const token = generateToken();
   let created;
   try {
-    created = db.createApiToken(nameV.value, hashToken(token), expiresAt, scopeV.value);
+    created = db.createApiToken(nameV.value, hashToken(token), expiresAt, scopeV.value, cidrV.value);
   } catch (e) {
     if (String(e.message).includes("UNIQUE")) {
       return res.status(400).json({ error: `a token named "${nameV.value}" already exists` });
@@ -639,7 +645,7 @@ app.post("/api/tokens", (req, res) => {
   }
   // The plaintext appears in this response and nowhere else — only its
   // sha256 is stored. Copy it now or mint a new one.
-  res.status(201).json({ id: created.id, name: created.name, token, expires_at: expiresAt, scope: scopeV.value });
+  res.status(201).json({ id: created.id, name: created.name, token, expires_at: expiresAt, scope: scopeV.value, bound_cidr: cidrV.value });
 });
 
 app.delete("/api/tokens/:id", (req, res) => {

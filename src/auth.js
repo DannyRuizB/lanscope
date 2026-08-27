@@ -77,6 +77,45 @@ function parseBearerHeader(header) {
   return TOKEN_RE.test(m[1]) ? m[1] : null;
 }
 
+// ===== Network binding (v1.31.0) =====
+// The peer address as the binding sees it. IPv4-mapped IPv6 (::ffff:a.b.c.d,
+// what a dual-stack listener reports for every v4 client) is unmapped, and
+// ::1 is treated as the loopback it is. A genuinely-IPv6 peer keeps its
+// address and simply never matches a v4 CIDR — the mint validator says so.
+// Behind a reverse proxy this is the PROXY's address, deliberately: a
+// forwarded header is attacker-writable, and a binding that trusts it
+// would be theatre.
+function clientAddress(req) {
+  const raw = (req.socket && req.socket.remoteAddress) || "";
+  if (raw.startsWith("::ffff:")) return raw.slice(7);
+  if (raw === "::1") return "127.0.0.1";
+  return raw;
+}
+
+function ipv4ToInt(ip) {
+  const m = String(ip).match(/^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/);
+  if (!m) return null;
+  const o = m.slice(1).map(Number);
+  if (o.some((x) => x > 255)) return null;
+  return ((o[0] << 24) | (o[1] << 16) | (o[2] << 8) | o[3]) >>> 0;
+}
+
+// True when the IPv4 address falls inside the CIDR. Anything unparseable —
+// an IPv6 peer, a malformed stored value — is NOT in the network: the
+// binding fails closed.
+function ipInCidr(ip, cidr) {
+  const [net, prefixStr] = String(cidr).split("/");
+  const ipInt = ipv4ToInt(ip);
+  const netInt = ipv4ToInt(net);
+  const prefix = Number(prefixStr);
+  if (ipInt === null || netInt === null || !Number.isInteger(prefix) || prefix < 0 || prefix > 32) {
+    return false;
+  }
+  if (prefix === 0) return true;
+  const mask = (0xffffffff << (32 - prefix)) >>> 0;
+  return (ipInt & mask) === (netInt & mask);
+}
+
 // Combined middleware: a valid API token OR the Basic credential opens the
 // door. Token first — it's cheap to rule out (regex + one indexed lookup)
 // and API clients never see the browser's Basic prompt semantics change.
@@ -87,6 +126,17 @@ function requireAuth({ user, pass, findTokenByHash, markTokenUsed }) {
     if (token) {
       const row = findTokenByHash(hashToken(token));
       if (row) {
+        // v1.31.0 — network binding, enforced BEFORE the use-stamp and with
+        // the bare 401, deliberately inverting the scope decision: expiry
+        // and scope favour debuggability once identity is proven, but a
+        // binding is an anti-theft control — presented off its network, the
+        // token must be indistinguishable from garbage. No named error that
+        // confirms the token works, no last_used_at stamp a thief can trip.
+        // The owner's answer to "why did my cron break" is the binding
+        // shown in the token list.
+        if (row.bound_cidr && !ipInCidr(clientAddress(req), row.bound_cidr)) {
+          return basic(req, res, next);
+        }
         // A refused write below is still a USE — the token authenticated
         // fine — and last_used_at answers "is anyone holding this token?",
         // so the stamp comes first.
@@ -121,4 +171,6 @@ module.exports = {
   hashToken,
   parseBearerHeader,
   requireAuth,
+  clientAddress,
+  ipInCidr,
 };
