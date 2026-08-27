@@ -38,6 +38,21 @@ test('validateScanType accepts connect/syn only', () => {
   assert.match(S.validateScanType('xmas').error, /connect.*syn/);
 });
 
+test('validateVersionDetection maps the three levels and defaults absent to light', () => {
+  // Absent/null/empty must reproduce the historical --version-light so every
+  // pre-v1.32 scan is byte-identical.
+  assert.deepEqual(S.validateVersionDetection(undefined), { args: ['--version-light'], error: null });
+  assert.deepEqual(S.validateVersionDetection(null), { args: ['--version-light'], error: null });
+  assert.deepEqual(S.validateVersionDetection(''), { args: ['--version-light'], error: null });
+  assert.deepEqual(S.validateVersionDetection('light'), { args: ['--version-light'], error: null });
+  assert.deepEqual(S.validateVersionDetection('standard'), { args: [], error: null });
+  assert.deepEqual(S.validateVersionDetection('all'), { args: ['--version-all'], error: null });
+  for (const bad of ['intense', 'LIGHT', '9', 9, {}, ['all']]) {
+    assert.equal(S.validateVersionDetection(bad).args, null, `should reject ${JSON.stringify(bad)}`);
+    assert.match(S.validateVersionDetection(bad).error, /light.*standard.*all/);
+  }
+});
+
 test('validateScripts allowlists default/safe and rejects everything else', () => {
   assert.deepEqual(S.validateScripts(undefined), { args: [], error: null });
   assert.deepEqual(S.validateScripts([]), { args: [], error: null });

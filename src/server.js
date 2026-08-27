@@ -7,6 +7,7 @@ const {
   validateTiming,
   validatePortsSpec,
   validateScanType,
+  validateVersionDetection,
   validateScripts,
   validateDiscovery,
   runPortScan,
@@ -258,12 +259,16 @@ app.post("/api/hosts/:id/portscan", async (req, res) => {
   const scripts = validateScripts(req.body?.scripts);
   if (scripts.error) return res.status(400).json({ error: scripts.error });
 
+  const versionDet = validateVersionDetection(req.body?.versionDetection);
+  if (versionDet.error) return res.status(400).json({ error: versionDet.error });
+
   try {
     const result = await runPortScan(host.ip, {
       timing: timing.value,
       portsArgs: portsSpec.args,
       scanType: scanType.value,
       scriptsArgs: scripts.args,
+      versionArgs: versionDet.args,
     });
     const saved = db.saveHostPorts(id, result.ports, result.host_scripts);
     const refreshed = db.getHost(id);
@@ -314,10 +319,14 @@ app.post("/api/hosts/:id/udp-portscan", async (req, res) => {
   const portsSpec = validatePortsSpec(req.body?.ports);
   if (portsSpec.error) return res.status(400).json({ error: portsSpec.error });
 
+  const versionDet = validateVersionDetection(req.body?.versionDetection);
+  if (versionDet.error) return res.status(400).json({ error: versionDet.error });
+
   try {
     const ports = await runUdpPortScan(host.ip, {
       timing: timing.value,
       portsArgs: portsSpec.args,
+      versionArgs: versionDet.args,
     });
     const saved = db.saveHostUdpPorts(id, ports);
     const refreshed = db.getHost(id);
