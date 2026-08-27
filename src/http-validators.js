@@ -354,6 +354,29 @@ function validateTokenScope(v) {
   return { value: v === "read" ? "read" : null };
 }
 
+// v1.31.0 — network binding. An IPv4 CIDR ("192.168.1.0/24") or a bare IPv4
+// address (normalized to /32). Absent stays NULL — bound nowhere, valid from
+// anywhere: every earlier token's behaviour, the expiry/scope recipe again.
+// IPv4 only, on purpose: the binding compares against the socket's peer
+// address, and the auth layer unmaps ::ffff: and treats ::1 as loopback —
+// a genuinely-IPv6 client never matches a v4 CIDR, and the mint should not
+// pretend otherwise.
+function validateTokenCidr(v) {
+  if (v === undefined || v === null || v === "") return { value: null };
+  if (typeof v !== "string") {
+    return { error: 'bound_cidr must be a string like "192.168.1.0/24"' };
+  }
+  const m = v.trim().match(/^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})(?:\/(\d{1,2}))?$/);
+  if (!m) {
+    return { error: 'bound_cidr must be an IPv4 CIDR ("192.168.1.0/24") or a single IPv4 address' };
+  }
+  const octets = m.slice(1, 5).map(Number);
+  if (octets.some((o) => o > 255)) return { error: "bound_cidr has an octet above 255" };
+  const prefix = m[5] === undefined ? 32 : Number(m[5]);
+  if (prefix > 32) return { error: "bound_cidr prefix must be between 0 and 32" };
+  return { value: `${octets.join(".")}/${prefix}` };
+}
+
 module.exports = {
   validateConfigDoc,
   validateSectionsParam,
@@ -362,6 +385,7 @@ module.exports = {
   validateTokenName,
   validateTokenTtlDays,
   validateTokenScope,
+  validateTokenCidr,
   validateCronExpr,
   validateKeepLast,
   validateLatencyAlertMs,

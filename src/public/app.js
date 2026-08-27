@@ -3826,6 +3826,7 @@ const tokenEls = {
   name: document.getElementById("token-name"),
   ttl: document.getElementById("token-ttl"),
   scope: document.getElementById("token-scope"),
+  cidr: document.getElementById("token-cidr"),
   status: document.getElementById("token-status"),
 };
 
@@ -3847,6 +3848,9 @@ async function loadTokens() {
       // v1.30.0: scope. Only "read" is ever stored — null means full access,
       // which is the norm and needs no label.
       const scope = t.scope === "read" ? " · read-only" : "";
+      // v1.31.0: network binding. The list is where the owner learns why a
+      // relocated cron broke — off its CIDR the server says only 401.
+      const bound = t.bound_cidr ? ` · bound to ${escapeHtml(t.bound_cidr)}` : "";
       // v1.29.0: an expired token stays listed (a broken cron deserves an
       // answer) but the server refuses it — say so where the operator looks.
       const expiry = !t.expires_at
@@ -3856,7 +3860,7 @@ async function loadTokens() {
           : ` · expires ${new Date(t.expires_at).toLocaleDateString()}`;
       return (
         `<li><span class="token-name" title="${escapeHtml(t.name)}">${escapeHtml(t.name)}</span>` +
-        `<span class="token-meta">${used}${scope}${expiry}</span>` +
+        `<span class="token-meta">${used}${scope}${bound}${expiry}</span>` +
         `<button class="ghost small token-revoke" data-id="${t.id}" title="Revoke this token — scripts using it stop working immediately" aria-label="Revoke token ${escapeHtml(t.name)}">×</button></li>`
       );
     })
@@ -3872,6 +3876,8 @@ tokenEls.form?.addEventListener("submit", async (ev) => {
     const body = { name };
     if (ttl !== "") body.expires_in_days = parseInt(ttl, 10);
     if (tokenEls.scope?.value === "read") body.scope = "read";
+    const cidr = (tokenEls.cidr?.value || "").trim();
+    if (cidr !== "") body.bound_cidr = cidr;
     const r = await fetchJson("/api/tokens", {
       method: "POST",
       headers: { "content-type": "application/json" },
@@ -3880,6 +3886,7 @@ tokenEls.form?.addEventListener("submit", async (ev) => {
     tokenEls.name.value = "";
     if (tokenEls.ttl) tokenEls.ttl.value = "";
     if (tokenEls.scope) tokenEls.scope.value = "";
+    if (tokenEls.cidr) tokenEls.cidr.value = "";
     // The plaintext exists only in this response — the prompt is the one
     // chance to copy it (a prompt beats a status line: selectable, modal,
     // and it doesn't linger on screen afterwards).
