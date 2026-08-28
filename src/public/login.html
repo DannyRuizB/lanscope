@@ -1,0 +1,79 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>LanScope - Sign in</title>
+  <link rel="stylesheet" href="styles.css" />
+  <style>
+    .login-wrap { min-height: 100vh; display: flex; align-items: center; justify-content: center; padding: 1.5rem; }
+    .login-card {
+      width: 100%; max-width: 22rem; background: var(--surface);
+      border: 1px solid var(--border); border-radius: 12px; padding: 1.75rem;
+    }
+    .login-card h1 { margin: 0 0 0.25rem; font-size: 1.35rem; color: var(--text-strong); }
+    .login-card p.sub { margin: 0 0 1.25rem; color: var(--text-mute); font-size: 0.85rem; }
+    .login-card label { display: block; margin: 0 0 0.9rem; font-size: 0.8rem; color: var(--text-mute); }
+    .login-card input {
+      width: 100%; margin-top: 0.3rem; padding: 0.55rem 0.7rem; border-radius: 8px;
+      border: 1px solid var(--border-strong); background: var(--surface-2); color: var(--text);
+      font-family: inherit; font-size: 0.95rem;
+    }
+    .login-card button {
+      width: 100%; padding: 0.6rem; border: none; border-radius: 8px; cursor: pointer;
+      background: var(--accent); color: var(--accent-fg); font-weight: 600; font-size: 0.95rem;
+    }
+    .login-card button:disabled { opacity: 0.6; cursor: default; }
+    .login-err { color: var(--danger); font-size: 0.82rem; margin: 0.9rem 0 0; min-height: 1.1em; }
+  </style>
+</head>
+<body>
+  <div class="login-wrap">
+    <form class="login-card" id="login-form">
+      <h1>LanScope</h1>
+      <p class="sub">Sign in to continue.</p>
+      <label>Username
+        <input id="username" name="username" autocomplete="username" autofocus required />
+      </label>
+      <label>Password
+        <input id="password" name="password" type="password" autocomplete="current-password" required />
+      </label>
+      <button type="submit" id="submit">Sign in</button>
+      <p class="login-err" id="err" role="alert"></p>
+    </form>
+  </div>
+  <script>
+    // If a session is already valid, or auth is off entirely, there is
+    // nothing to log into - go straight to the app.
+    fetch("/api/session").then((r) => r.json()).then((s) => {
+      if (!s.authEnabled || s.authenticated) window.location.replace("/");
+    }).catch(() => {});
+
+    const form = document.getElementById("login-form");
+    const err = document.getElementById("err");
+    const submit = document.getElementById("submit");
+    form.addEventListener("submit", async (e) => {
+      e.preventDefault();
+      err.textContent = "";
+      submit.disabled = true;
+      try {
+        const res = await fetch("/api/login", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            username: document.getElementById("username").value,
+            password: document.getElementById("password").value,
+          }),
+        });
+        if (res.ok) { window.location.replace("/"); return; }
+        const body = await res.json().catch(() => ({}));
+        err.textContent = body.error || "Sign in failed.";
+      } catch {
+        err.textContent = "Sign in failed - is the server reachable?";
+      } finally {
+        submit.disabled = false;
+      }
+    });
+  </script>
+</body>
+</html>

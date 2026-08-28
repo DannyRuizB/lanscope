@@ -61,6 +61,18 @@ jobs:
           echo
           grep -q '"demoMode":false' /tmp/config.json
 
+          echo "--- /api/session + /login (v1.34.0, auth off here) ---"
+          # The container runs without AUTH_USER, so sessions are a no-op:
+          # session reports auth disabled, login refuses with 400, and the
+          # login page is served (it lives above the auth gate).
+          curl -fsS http://localhost:3030/api/session | tee /tmp/session.json
+          echo
+          grep -q '"authEnabled":false' /tmp/session.json
+          code=$(curl -s -o /dev/null -w '%{http_code}' -X POST http://localhost:3030/api/login \
+            -H 'Content-Type: application/json' -d '{"username":"x","password":"y"}')
+          [ "$code" = "400" ] || { echo "::error::login with auth off should 400, got $code"; exit 1; }
+          curl -fsS -o /dev/null http://localhost:3030/login
+
           echo "--- /api/scans ---"
           curl -fsS http://localhost:3030/api/scans | tee /tmp/scans.json
           echo

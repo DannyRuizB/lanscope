@@ -77,3 +77,64 @@ test('basicAuth rejects wrong password, wrong user, and missing header with 401 
     assert.equal(res.body.error, 'Authentication required');
   }
 });
+
+// ===== Session cookies (v1.34.0) =====
+const {
+  makeSessionCookie, verifySessionCookie, readCookie, requireAuth,
+} = require('../src/auth');
+
+test('a fresh session cookie verifies back to its user', () => {
+  const c = makeSessionCookie({ user: 'admin', ttlMs: 3600e3, pass: 'p@ss' });
+  assert.equal(verifySessionCookie({ value: c, pass: 'p@ss' }), 'admin');
+});
+
+test('a tampered payload or a wrong key fails to verify (one shape: null)', () => {
+  const c = makeSessionCookie({ user: 'admin', ttlMs: 3600e3, pass: 'p@ss' });
+  const [payload, mac] = c.split('.');
+  // Flip the payload, keep the MAC: signature no longer matches.
+  const forged = `${payload}x.${mac}`;
+  assert.equal(verifySessionCookie({ value: forged, pass: 'p@ss' }), null);
+  // Right cookie, wrong signing key (a rotated password).
+  assert.equal(verifySessionCookie({ value: c, pass: 'different' }), null);
+  // Garbage.
+  assert.equal(verifySessionCookie({ value: 'not-a-cookie', pass: 'p@ss' }), null);
+  assert.equal(verifySessionCookie({ value: '', pass: 'p@ss' }), null);
+});
+
+test('an expired session cookie is rejected (exp is baked in and signed)', () => {
+  const now = 1_000_000_000_000;
+  const c = makeSessionCookie({ user: 'admin', ttlMs: 1000, pass: 'p@ss', now });
+  assert.equal(verifySessionCookie({ value: c, pass: 'p@ss', now: now + 500 }), 'admin');
+  assert.equal(verifySessionCookie({ value: c, pass: 'p@ss', now: now + 1500 }), null);
+});
+
+test('SESSION_SECRET overrides the password-derived key (survives a rotation)', () => {
+  const c = makeSessionCookie({ user: 'admin', ttlMs: 3600e3, pass: 'p1', secret: 'fixed-secret' });
+  // Password changed, but the fixed secret still validates.
+  assert.equal(verifySessionCookie({ value: c, pass: 'p2', secret: 'fixed-secret' }), 'admin');
+  // ...and without the secret (password-derived) it does not.
+  assert.equal(verifySessionCookie({ value: c, pass: 'p2' }), null);
+});
+
+test('readCookie picks the named cookie out of a header, ignores the rest', () => {
+  const h = 'theme=dark; lanscope_session=abc.def; other=1';
+  assert.equal(readCookie(h, 'lanscope_session'), 'abc.def');
+  assert.equal(readCookie(h, 'missing'), null);
+  assert.equal(readCookie(undefined, 'lanscope_session'), null);
+});
+
+test('requireAuth accepts a valid session cookie and rejects a forged one', () => {
+  const mw = requireAuth({
+    user: 'admin', pass: 'p@ss',
+    findTokenByHash: () => null, markTokenUsed: () => {},
+  });
+  const good = makeSessionCookie({ user: 'admin', ttlMs: 3600e3, pass: 'p@ss' });
+  let nexted = false;
+  mw({ headers: { cookie: `lanscope_session=${good}` } }, { set() {}, status() { return { json() {} }; } }, () => { nexted = true; });
+  assert.ok(nexted, 'valid cookie should call next()');
+
+  let status = 0;
+  const res = { set() {}, status(c) { status = c; return { json() {} }; } };
+  mw({ headers: { cookie: 'lanscope_session=forged.nope' }, method: 'GET' }, res, () => { status = 200; });
+  assert.equal(status, 401, 'a forged cookie with no other credential gets the 401');
+});

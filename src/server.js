@@ -44,7 +44,10 @@ const { executeCidrScan } = require("./runner");
 const { detectSensitivePortsForHost } = require("./alerts");
 const scheduler = require("./scheduler");
 const notifier = require("./notifier");
-const { requireAuth, generateToken, hashToken } = require("./auth");
+const {
+  requireAuth, generateToken, hashToken,
+  safeEqual, makeSessionCookie, verifySessionCookie, readCookie, SESSION_COOKIE,
+} = require("./auth");
 const { buildMetrics } = require("./metrics");
 const PKG_VERSION = require("../package.json").version;
 
@@ -69,8 +72,61 @@ if (DEMO_MODE) {
   }
 }
 
+// v1.34.0 — session login. Derived from the admin password unless
+// SESSION_SECRET overrides (so rotating AUTH_PASS logs everyone out); the
+// login lasts SESSION_TTL_HOURS (default 12).
+const SESSION_SECRET = process.env.SESSION_SECRET || "";
+const SESSION_TTL_HOURS = (() => {
+  const raw = Number(process.env.SESSION_TTL_HOURS);
+  return Number.isInteger(raw) && raw > 0 && raw <= 720 ? raw : 12;
+})();
+
 const app = express();
 app.use(express.json({ limit: "32kb" }));
+
+// The login page, the session probe and the login/logout endpoints live
+// ABOVE requireAuth on purpose: you cannot present a credential through a
+// door that is itself locked. They validate the credential themselves, so
+// opening them changes nothing. (In demo mode AUTH_USER is empty, so login
+// is a no-op there — the DEMO_MODE 403 gate below still guards writes.)
+app.get("/api/session", (req, res) => {
+  const authenticated = AUTH_USER !== "" &&
+    verifySessionCookie({ value: readCookie(req.headers.cookie, SESSION_COOKIE), pass: AUTH_PASS, secret: SESSION_SECRET }) !== null;
+  res.json({ authEnabled: AUTH_USER !== "", authenticated });
+});
+
+app.get("/login", (req, res) => {
+  res.sendFile(path.join(__dirname, "public", "login.html"));
+});
+
+app.post("/api/login", (req, res) => {
+  if (AUTH_USER === "") {
+    return res.status(400).json({ error: "authentication is disabled (set AUTH_USER/AUTH_PASS) — nothing to log in to" });
+  }
+  const { username, password } = req.body || {};
+  // Evaluate both unconditionally — a wrong username costs the same as a
+  // wrong password (the basicAuth discipline).
+  const userOk = safeEqual(String(username ?? ""), AUTH_USER);
+  const passOk = safeEqual(String(password ?? ""), AUTH_PASS);
+  if (!userOk || !passOk) {
+    return res.status(401).json({ error: "invalid username or password" });
+  }
+  const cookie = makeSessionCookie({
+    user: AUTH_USER, ttlMs: SESSION_TTL_HOURS * 3600 * 1000, pass: AUTH_PASS, secret: SESSION_SECRET,
+  });
+  // HttpOnly (no JS can read it — XSS can't steal it), SameSite=Lax (a
+  // cross-site POST can't ride it), Path=/. Not Secure-flagged: LanScope
+  // runs on plain HTTP in the homelab case, and a Secure cookie would be
+  // dropped there — pair with TLS as SECURITY.md already advises for Basic.
+  res.setHeader("Set-Cookie",
+    `${SESSION_COOKIE}=${cookie}; HttpOnly; SameSite=Lax; Path=/; Max-Age=${SESSION_TTL_HOURS * 3600}`);
+  res.json({ ok: true });
+});
+
+app.post("/api/logout", (req, res) => {
+  res.setHeader("Set-Cookie", `${SESSION_COOKIE}=; HttpOnly; SameSite=Lax; Path=/; Max-Age=0`);
+  res.json({ ok: true });
+});
 
 // Auth sits ABOVE the static files on purpose: the UI itself is the
 // inventory of your network — there is nothing here worth serving to an
@@ -82,6 +138,7 @@ if (AUTH_USER) {
     requireAuth({
       user: AUTH_USER,
       pass: AUTH_PASS,
+      secret: SESSION_SECRET,
       findTokenByHash: db.findApiTokenByHash,
       markTokenUsed: db.touchApiToken,
     })
