@@ -34,7 +34,11 @@ const {
 } = require("./http-validators");
 const {
   scanToCsv, exportFilename, historyToCsv, historyFilename, alertsToCsv, alertsFilename,
+  diffToCsv, diffFilename,
 } = require("./export");
+// The same classification module the browser runs (dual-export pattern):
+// the diff export and the compare view agree by construction.
+const { diffScans } = require("./public/scan-diff");
 const { sendWake } = require("./wol");
 const { executeCidrScan } = require("./runner");
 const { detectSensitivePortsForHost } = require("./alerts");
@@ -151,6 +155,53 @@ app.get("/api/scans/:id/export", (req, res) => {
     db.listLabels(scan.cidr).filter((l) => l.label).map((l) => [l.ip, l.label])
   );
   res.type("text/csv; charset=utf-8").send(scanToCsv(scan, labelsByIp));
+});
+
+// v1.33.0 — download the compare view's diff between two scans of the same
+// network. The classification comes from the SAME ScanDiff module the
+// browser runs (src/public/scan-diff.js), so what you download is what the
+// compare view showed — by construction, not by a parallel implementation
+// that drifts. GET on purpose, like every export: the ⬇ anchors in the diff
+// banner are plain links and they work on the read-only demo.
+app.get("/api/scans/:id/diff/export", (req, res) => {
+  const id = parseInt(req.params.id, 10);
+  if (!Number.isInteger(id) || id <= 0) return res.status(400).json({ error: "invalid id" });
+  const base = parseInt(req.query.base, 10);
+  if (!Number.isInteger(base) || base <= 0) return res.status(400).json({ error: "invalid base scan id" });
+  const format = req.query.format || "csv";
+  if (format !== "csv" && format !== "json") {
+    return res.status(400).json({ error: "invalid format, use csv|json" });
+  }
+  if (base === id) return res.status(400).json({ error: "base and target are the same scan" });
+  const scan = db.getScan(id);
+  if (!scan) return res.status(404).json({ error: "scan not found" });
+  const baseScan = db.getScan(base);
+  if (!baseScan) return res.status(404).json({ error: "base scan not found" });
+  if (baseScan.cidr !== scan.cidr) {
+    return res.status(400).json({ error: "scans belong to different networks" });
+  }
+
+  const diff = diffScans(baseScan, scan);
+  res.setHeader("Content-Disposition", `attachment; filename="${diffFilename(baseScan, scan, format)}"`);
+  if (format === "json") {
+    // byIp is a Map for the UI's row classes — not JSON material; the four
+    // arrays are the report.
+    return res.json({
+      cidr: scan.cidr,
+      base_scan_id: baseScan.id,
+      scan_id: scan.id,
+      base_started_at: baseScan.started_at,
+      started_at: scan.started_at,
+      appeared: diff.appeared,
+      disappeared: diff.disappeared,
+      changed: diff.changed,
+      unchanged: diff.unchanged,
+    });
+  }
+  const labelsByIp = Object.fromEntries(
+    db.listLabels(scan.cidr).filter((l) => l.label).map((l) => [l.ip, l.label])
+  );
+  res.type("text/csv; charset=utf-8").send(diffToCsv(diff, labelsByIp));
 });
 
 app.delete("/api/scans/:id", (req, res) => {
