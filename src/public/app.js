@@ -3127,6 +3127,18 @@ document.addEventListener("keydown", (e) => {
       const sec = document.getElementById("tokens-section");
       if (sec) sec.hidden = false;
       loadTokens().catch((e) => console.warn("tokens load failed:", e));
+      // v1.34.0 — a Log out button appears only when a session cookie (not
+      // Basic/token) is what got us in: logging out of Basic is meaningless
+      // (the browser re-sends it), so /api/session tells us which it was.
+      fetchJson("/api/session").then((s) => {
+        const btn = document.getElementById("logout-btn");
+        if (!btn || !s.authenticated) return;
+        btn.hidden = false;
+        btn.addEventListener("click", async () => {
+          try { await fetchJson("/api/logout", { method: "POST" }); } catch (e) { /* ignore */ }
+          window.location.replace("/login");
+        });
+      }).catch(() => {});
     }
   } catch (e) {
     console.warn("config fetch failed:", e);

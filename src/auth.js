@@ -45,6 +45,68 @@ function basicAuth({ user, pass }) {
   };
 }
 
+// ===== Session cookies (v1.34.0) =====
+// Basic Auth works but the browser experience is a native prompt with no
+// log-out and a fresh challenge on every 401. A signed session cookie gives
+// a real login form and a real log-out — and stays STATELESS (no sessions
+// table): the cookie carries its own {user, expiry} payload plus an HMAC, so
+// a tampered or expired cookie is rejected by the signature check alone.
+//
+// The signing key is derived from the admin password, so rotating AUTH_PASS
+// invalidates every outstanding session for free (a SESSION_SECRET override
+// exists for anyone who wants sessions to survive a password change).
+const SESSION_COOKIE = "lanscope_session";
+
+function sessionKey({ pass, secret }) {
+  return crypto.createHash("sha256").update(`lanscope-session\0${secret || pass}`).digest();
+}
+
+function b64url(buf) {
+  return Buffer.from(buf).toString("base64").replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+}
+
+// A cookie is `<b64url(payload)>.<b64url(hmac)>`, payload = {u, exp} (exp in
+// epoch-ms). ttlMs bounds how long the login lasts.
+function makeSessionCookie({ user, ttlMs, pass, secret, now = Date.now() }) {
+  const payload = b64url(JSON.stringify({ u: user, exp: now + ttlMs }));
+  const mac = b64url(crypto.createHmac("sha256", sessionKey({ pass, secret })).update(payload).digest());
+  return `${payload}.${mac}`;
+}
+
+// Verify signature FIRST (constant-time), then expiry, then the username.
+// Returns the user on success, null on anything wrong — one failure shape.
+function verifySessionCookie({ value, pass, secret, now = Date.now() }) {
+  if (typeof value !== "string" || !value.includes(".")) return null;
+  const dot = value.indexOf(".");
+  const payload = value.slice(0, dot);
+  const mac = value.slice(dot + 1);
+  const expected = b64url(crypto.createHmac("sha256", sessionKey({ pass, secret })).update(payload).digest());
+  const macBuf = Buffer.from(mac);
+  const expBuf = Buffer.from(expected);
+  if (macBuf.length !== expBuf.length || !crypto.timingSafeEqual(macBuf, expBuf)) return null;
+  let data;
+  try {
+    data = JSON.parse(Buffer.from(payload.replace(/-/g, "+").replace(/_/g, "/"), "base64").toString("utf8"));
+  } catch {
+    return null;
+  }
+  if (!data || typeof data.u !== "string" || typeof data.exp !== "number") return null;
+  if (now >= data.exp) return null;
+  return data.u;
+}
+
+// Pull one cookie value out of a Cookie header. No dependency: split on ';',
+// match our name, return the raw value (or null).
+function readCookie(header, name) {
+  if (typeof header !== "string") return null;
+  for (const part of header.split(";")) {
+    const eq = part.indexOf("=");
+    if (eq === -1) continue;
+    if (part.slice(0, eq).trim() === name) return part.slice(eq + 1).trim();
+  }
+  return null;
+}
+
 // ===== API tokens (v1.25.0) =====
 // Basic Auth guards the browser, but handing the admin password to every
 // cron job and script that polls the API is how the password ends up in
@@ -119,9 +181,21 @@ function ipInCidr(ip, cidr) {
 // Combined middleware: a valid API token OR the Basic credential opens the
 // door. Token first — it's cheap to rule out (regex + one indexed lookup)
 // and API clients never see the browser's Basic prompt semantics change.
-function requireAuth({ user, pass, findTokenByHash, markTokenUsed }) {
+function requireAuth({ user, pass, secret, findTokenByHash, markTokenUsed }) {
   const basic = basicAuth({ user, pass });
   return (req, res, next) => {
+    // v1.34.0 — a valid session cookie opens the door too (the browser's
+    // login-form path). A session is always full-access — it IS the admin
+    // credential, re-presented — so no scope/binding logic, just verify and
+    // pass. Checked before the token/Basic paths because a logged-in browser
+    // sends it on every request.
+    const cookieUser = verifySessionCookie({
+      value: readCookie(req.headers.cookie, SESSION_COOKIE),
+      pass,
+      secret,
+    });
+    if (cookieUser !== null) return next();
+
     const token = parseBearerHeader(req.headers.authorization);
     if (token) {
       const row = findTokenByHash(hashToken(token));
@@ -173,4 +247,8 @@ module.exports = {
   requireAuth,
   clientAddress,
   ipInCidr,
+  SESSION_COOKIE,
+  makeSessionCookie,
+  verifySessionCookie,
+  readCookie,
 };
