@@ -3135,7 +3135,7 @@ document.addEventListener("keydown", (e) => {
         if (!btn || !s.authenticated) return;
         btn.hidden = false;
         btn.addEventListener("click", async () => {
-          try { await fetchJson("/api/logout", { method: "POST" }); } catch (e) { /* ignore */ }
+          try { await fetchJson("/api/logout", { method: "POST" }); } catch { /* ignore */ }
           window.location.replace("/login");
         });
       }).catch(() => {});
