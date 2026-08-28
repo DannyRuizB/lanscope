@@ -199,7 +199,54 @@ function alertsToCsv(alerts) {
       JSON.stringify(a.payload ?? {}),
     ].map(csvField).join(","));
   }
-  return "﻿" + lines.join("\r\n") + "\r\n";
+  return "\uFEFF" + lines.join("\r\n") + "\r\n";
+}
+
+// Scan diff export (v1.33.0): one row per host the compare view classified,
+// state first. A diff report is the WHOLE picture — appeared, disappeared,
+// changed AND unchanged (the no-limit principle of the alert export) — and
+// the changed rows carry the reasons plus the base-side values, so the file
+// shows WHAT changed, not just that something did. Disappeared rows are the
+// base scan's hosts: the base side is the only place they still exist.
+const DIFF_CSV_COLUMNS = [
+  "state",
+  "ip",
+  "label",
+  "mac",
+  "vendor",
+  "hostname",
+  "reasons",
+  "base_mac",
+  "base_hostname",
+];
+
+function diffRow(state, host, labelsByIp, reasons, base) {
+  return [
+    state,
+    host.ip,
+    labelsByIp[host.ip] || "",
+    host.mac,
+    host.vendor,
+    host.hostname,
+    (reasons || []).join(" "),
+    base ? base.mac : "",
+    base ? base.hostname : "",
+  ];
+}
+
+function diffToCsv(diff, labelsByIp = {}) {
+  const lines = [DIFF_CSV_COLUMNS.join(",")];
+  for (const h of diff.appeared) lines.push(diffRow("appeared", h, labelsByIp).map(csvField).join(","));
+  for (const h of diff.disappeared) lines.push(diffRow("disappeared", h, labelsByIp).map(csvField).join(","));
+  for (const c of diff.changed) lines.push(diffRow("changed", c.host, labelsByIp, c.reasons, c.base).map(csvField).join(","));
+  for (const h of diff.unchanged) lines.push(diffRow("unchanged", h, labelsByIp).map(csvField).join(","));
+  return "\uFEFF" + lines.join("\r\n") + "\r\n";
+}
+
+// lanscope_diff_12-vs-15_192-168-1-0_24.csv — base first, like the banner.
+function diffFilename(baseScan, newScan, format) {
+  const cidr = String(newScan.cidr).replace(/[^A-Za-z0-9_-]+/g, "-");
+  return `lanscope_diff_${baseScan.id}-vs-${newScan.id}_${cidr}.${format}`;
 }
 
 // lanscope_alerts_192-168-1-0_24.csv, or lanscope_alerts_all.csv with no
@@ -213,5 +260,5 @@ function alertsFilename(filters, format) {
 
 module.exports = {
   scanToCsv, exportFilename, csvField, historyToCsv, historyFilename,
-  alertsToCsv, alertsFilename, alertDetail,
+  alertsToCsv, alertsFilename, alertDetail, diffToCsv, diffFilename,
 };

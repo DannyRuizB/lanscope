@@ -83,6 +83,14 @@ jobs:
           code=$(curl -s -o /dev/null -w '%{http_code}' "http://localhost:3030/api/alerts/export?format=xml")
           [ "$code" = "400" ] || { echo "::error::bad format should 400, got $code"; exit 1; }
 
+          echo "--- /api/scans/:id/diff/export (v1.33.0) ---"
+          # An empty install has no scans: the diff export must refuse
+          # cleanly (404 on missing scans, 400 on base == target), never 500.
+          code=$(curl -s -o /dev/null -w '%{http_code}' "http://localhost:3030/api/scans/1/diff/export?base=2&format=csv")
+          [ "$code" = "404" ] || { echo "::error::diff export on missing scans should 404, got $code"; exit 1; }
+          code=$(curl -s -o /dev/null -w '%{http_code}' "http://localhost:3030/api/scans/1/diff/export?base=1")
+          [ "$code" = "400" ] || { echo "::error::base == target should 400, got $code"; exit 1; }
+
           echo "--- /api/schedules ---"
           curl -fsS http://localhost:3030/api/schedules | grep -q '"schedules":'
 

@@ -47,6 +47,8 @@ const els = {
   compareList: $("#compare-list"),
   diffBanner: $("#diff-banner"),
   diffBannerText: $("#diff-banner-text"),
+  diffExportCsv: $("#diff-export-csv"),
+  diffExportJson: $("#diff-export-json"),
   diffExit: $("#diff-exit"),
   baselineBtn: $("#baseline-btn"),
   timelineBtn: $("#timeline-btn"),
@@ -1250,16 +1252,9 @@ function attachSortHandlers() {
 let viewMode = localStorage.getItem("lanscope-view") || "table";
 let cy = null;
 
-function osBucketKey(host) {
-  if (!host.osscanned_at) return "unknown";
-  const top = (host.os_matches || [])[0];
-  if (!top) return "unknown";
-  const f = (top.family || "").toLowerCase();
-  if (f.includes("windows")) return "windows";
-  if (f.includes("linux")) return "linux";
-  if (f.includes("mac") || f.includes("ios") || f.includes("apple")) return "apple";
-  return "other";
-}
+// osBucketKey lives in scan-diff.js now (shared with the server's diff
+// export — the dual-export pattern of host-search.js).
+const { osBucketKey } = window.ScanDiff;
 
 const OS_LABELS = {
   windows: "Windows",
@@ -1609,52 +1604,10 @@ let compareSuppressed = false;  // user exited diff for the current scan view; c
 let baselinesByCidr = new Map();// cidr -> { cidr, scan_id, set_at, started_at, host_count }
 let baselineAutoFetching = null; // in-flight scan id for the baseline being loaded (race guard)
 
-function hostChangeReasons(b, n) {
-  const reasons = [];
-  if ((b.mac || "") !== (n.mac || "")) reasons.push("mac");
-  if ((b.hostname || "") !== (n.hostname || "")) reasons.push("hostname");
-  if (b.osscanned_at && n.osscanned_at) {
-    const bk = osBucketKey(b);
-    const nk = osBucketKey(n);
-    if (bk !== nk && bk !== "unknown" && nk !== "unknown") reasons.push("os");
-  }
-  return reasons;
-}
-
-function diffScans(baseScan, newScan) {
-  const baseUp = (baseScan?.hosts || []).filter((h) => h.status === "up");
-  const newUp  = (newScan?.hosts  || []).filter((h) => h.status === "up");
-  const baseByIp = new Map(baseUp.map((h) => [h.ip, h]));
-  const newByIp  = new Map(newUp.map((h) => [h.ip, h]));
-  const appeared = [];
-  const disappeared = [];
-  const changed = [];
-  const unchanged = [];
-  const byIp = new Map(); // ip -> { state, reasons? }
-  for (const n of newUp) {
-    const b = baseByIp.get(n.ip);
-    if (!b) {
-      appeared.push(n);
-      byIp.set(n.ip, { state: "appeared" });
-    } else {
-      const reasons = hostChangeReasons(b, n);
-      if (reasons.length) {
-        changed.push({ host: n, base: b, reasons });
-        byIp.set(n.ip, { state: "changed", reasons });
-      } else {
-        unchanged.push(n);
-        byIp.set(n.ip, { state: "unchanged" });
-      }
-    }
-  }
-  for (const b of baseUp) {
-    if (!newByIp.has(b.ip)) {
-      disappeared.push(b);
-      byIp.set(b.ip, { state: "disappeared" });
-    }
-  }
-  return { appeared, disappeared, changed, unchanged, byIp };
-}
+// diffScans / hostChangeReasons live in scan-diff.js now, shared with the
+// server's diff export: what the ⬇ anchors download is what this view
+// classified, by construction.
+const { diffScans } = window.ScanDiff;
 
 function diffActive() {
   return !!(compareBaseScan && lastScan && compareBaseScan.cidr === lastScan.cidr && compareBaseScan.id !== lastScan.id);
@@ -1822,6 +1775,8 @@ function renderDiffBanner() {
     els.diffBanner.hidden = true;
     els.diffBannerText.textContent = "";
     els.diffBanner.classList.remove("baseline");
+    if (els.diffExportCsv) els.diffExportCsv.hidden = true;
+    if (els.diffExportJson) els.diffExportJson.hidden = true;
     return;
   }
   const baseTime = fmtTime(compareBaseScan.started_at);
@@ -1837,6 +1792,18 @@ function renderDiffBanner() {
   els.diffBanner.hidden = false;
   els.diffBanner.classList.toggle("baseline", compareIsBaseline);
   els.diffBannerText.innerHTML = parts.join(" · ");
+  // v1.33.0 — the diff you are looking at, as a file. Plain anchors (GET),
+  // so they work on the read-only demo; re-pointed on every render.
+  const diffUrl = (fmt) =>
+    `/api/scans/${lastScan.id}/diff/export?base=${compareBaseScan.id}&format=${fmt}`;
+  if (els.diffExportCsv) {
+    els.diffExportCsv.href = diffUrl("csv");
+    els.diffExportCsv.hidden = false;
+  }
+  if (els.diffExportJson) {
+    els.diffExportJson.href = diffUrl("json");
+    els.diffExportJson.hidden = false;
+  }
 }
 
 async function setCompareBase(scanId) {
