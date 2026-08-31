@@ -45,9 +45,10 @@ const { detectSensitivePortsForHost } = require("./alerts");
 const scheduler = require("./scheduler");
 const notifier = require("./notifier");
 const {
-  requireAuth, generateToken, hashToken,
+  requireAuth, generateToken, hashToken, clientAddress,
   safeEqual, makeSessionCookie, verifySessionCookie, readCookie, SESSION_COOKIE,
 } = require("./auth");
+const { createLoginThrottle } = require("./login-throttle");
 const { buildMetrics } = require("./metrics");
 const PKG_VERSION = require("../package.json").version;
 
@@ -81,6 +82,23 @@ const SESSION_TTL_HOURS = (() => {
   return Number.isInteger(raw) && raw > 0 && raw <= 720 ? raw : 12;
 })();
 
+// v1.35.0 — login throttling. Failed form logins per client address: after
+// LOGIN_MAX_ATTEMPTS failures (default 5) the address waits out the rest of
+// its LOGIN_WINDOW_MINUTES window (default 15). See src/login-throttle.js
+// for the decisions (in-memory on purpose, refuse-before-evaluate, form only).
+const LOGIN_MAX_ATTEMPTS = (() => {
+  const raw = Number(process.env.LOGIN_MAX_ATTEMPTS);
+  return Number.isInteger(raw) && raw > 0 && raw <= 1000 ? raw : 5;
+})();
+const LOGIN_WINDOW_MINUTES = (() => {
+  const raw = Number(process.env.LOGIN_WINDOW_MINUTES);
+  return Number.isInteger(raw) && raw > 0 && raw <= 1440 ? raw : 15;
+})();
+const loginThrottle = createLoginThrottle({
+  maxAttempts: LOGIN_MAX_ATTEMPTS,
+  windowMs: LOGIN_WINDOW_MINUTES * 60_000,
+});
+
 const app = express();
 app.use(express.json({ limit: "32kb" }));
 
@@ -103,14 +121,29 @@ app.post("/api/login", (req, res) => {
   if (AUTH_USER === "") {
     return res.status(400).json({ error: "authentication is disabled (set AUTH_USER/AUTH_PASS) — nothing to log in to" });
   }
+  // v1.35.0 — throttle check BEFORE the credential is evaluated: a limited
+  // address gets a cheap refusal and its window never stretches. Named 429,
+  // not the bare 401: the caller may be the admin behind a typo streak, and
+  // "try again in N s" is the answer to "why can't I log in" — an attacker
+  // learns nothing they couldn't measure anyway.
+  const addr = clientAddress(req);
+  const gate = loginThrottle.check(addr);
+  if (gate.limited) {
+    res.setHeader("Retry-After", String(gate.retryAfterSec));
+    return res.status(429).json({
+      error: `too many failed logins — try again in ${gate.retryAfterSec} s`,
+    });
+  }
   const { username, password } = req.body || {};
   // Evaluate both unconditionally — a wrong username costs the same as a
   // wrong password (the basicAuth discipline).
   const userOk = safeEqual(String(username ?? ""), AUTH_USER);
   const passOk = safeEqual(String(password ?? ""), AUTH_PASS);
   if (!userOk || !passOk) {
+    loginThrottle.recordFailure(addr);
     return res.status(401).json({ error: "invalid username or password" });
   }
+  loginThrottle.recordSuccess(addr);
   const cookie = makeSessionCookie({
     user: AUTH_USER, ttlMs: SESSION_TTL_HOURS * 3600 * 1000, pass: AUTH_PASS, secret: SESSION_SECRET,
   });
