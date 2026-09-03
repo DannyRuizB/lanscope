@@ -158,6 +158,28 @@ function validateExclude(exclude) {
   return { args: ["--exclude", [...seen].join(",")], error: null };
 }
 
+// v1.37.0 — packet-rate cap (`--max-rate`). Network etiquette as an option:
+// an office AP or an old access switch can fold under nmap's T4 burst, and an
+// IDS tuned for "more than N SYNs a second" fires on a sweep long before it
+// fires on an attacker. An enum, not a free integer (its own range validation
+// would be a second source of truth): "unlimited" (absent, the historical
+// default — nmap's own pacing) or a packets-per-second cap. Applied to every
+// nmap invocation lanscope makes for the sweep and the per-host TCP/UDP scans;
+// the OS scan is left alone (a handful of packets by design).
+const RATE_ARGS = {
+  unlimited: [],
+  "500": ["--max-rate", "500"],
+  "100": ["--max-rate", "100"],
+  "25": ["--max-rate", "25"],
+};
+function validateRate(v) {
+  if (v === undefined || v === null || v === "") return { args: [], error: null };
+  if (typeof v !== "string" || !Object.prototype.hasOwnProperty.call(RATE_ARGS, v)) {
+    return { args: null, error: "rate must be 'unlimited', '500', '100' or '25' (packets per second)" };
+  }
+  return { args: RATE_ARGS[v], error: null };
+}
+
 // Range spec: comma-separated list of `N` or `N-M`, no spaces, no other chars.
 // Each port in [1,65535], N<=M, max 100 tokens to keep argv sane.
 const RANGE_SPEC_RE = /^(\d+(-\d+)?)(,\d+(-\d+)?)*$/;
@@ -285,6 +307,8 @@ function runPingSweep(cidr, opts = {}) {
   const discoveryArgs = opts.discoveryArgs || [];
   // excludeArgs (v1.36): [] or ["--exclude", "a,b,c"], validated upstream.
   const excludeArgs = opts.excludeArgs || [];
+  // rateArgs (v1.37): [] or ["--max-rate", "N"], validated upstream.
+  const rateArgs = opts.rateArgs || [];
   return new Promise((resolve, reject) => {
     // -sn: ping scan, no port scan
     // -n: no DNS resolution from nmap (we get rDNS via PTR if available; -n is faster)
@@ -296,7 +320,7 @@ function runPingSweep(cidr, opts = {}) {
     //   ["-PE","-PS","-PA","-PR"]. Empty array = nmap defaults.
     execFile(
       "nmap",
-      ["-sn", "-T4", ...discoveryArgs, ...excludeArgs, "-oX", "-", cidr],
+      ["-sn", "-T4", ...discoveryArgs, ...excludeArgs, ...rateArgs, "-oX", "-", cidr],
       { maxBuffer: 16 * 1024 * 1024, timeout: 120_000 },
       (err, stdout, stderr) => {
         if (err) {
@@ -359,6 +383,8 @@ function runPortScan(ip, opts = {}) {
   // Default preserves the historical --version-light when the caller says
   // nothing (validateVersionDetection maps absent → light).
   const versionArgs = opts.versionArgs || ["--version-light"];
+  // rateArgs (v1.37): [] or ["--max-rate", "N"] — validated upstream.
+  const rateArgs = opts.rateArgs || [];
   // NSE adds variable wall time per script (banner waits, http probes,
   // ssh handshakes…). Bump the per-scan timeout when scripts are enabled
   // so a top-1000 + safe doesn't get killed mid-run.
@@ -384,6 +410,7 @@ function runPortScan(ip, opts = {}) {
         scanFlag,
         "-sV",
         `-${timing}`,
+        ...rateArgs,
         ...versionArgs,
         "--reason",
         ...scriptsArgs,
@@ -412,6 +439,7 @@ function runPortScan(ip, opts = {}) {
 
 function runUdpPortScan(ip, opts = {}) {
   const versionArgs = opts.versionArgs || ["--version-light"];
+  const rateArgs = opts.rateArgs || [];
   const timing = opts.timing || PORTSCAN_DEFAULT_TIMING;
   const portsArgs = opts.portsArgs || PORTS_DEFAULT_ARGS;
   return new Promise((resolve, reject) => {
@@ -429,6 +457,7 @@ function runUdpPortScan(ip, opts = {}) {
         "-sU",
         "-sV",
         `-${timing}`,
+        ...rateArgs,
         ...versionArgs,
         "--reason",
         "-oX",
@@ -505,6 +534,7 @@ module.exports = {
   validateScripts,
   validateDiscovery,
   validateExclude,
+  validateRate,
   runPingSweep,
   runPortScan,
   runUdpPortScan,
