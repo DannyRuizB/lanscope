@@ -254,7 +254,8 @@
               <span class="adv-label">Exclude hosts</span>
               <input type="text" id="adv-exclude" name="adv-exclude" autocomplete="off" spellcheck="false"
                      placeholder="192.168.1.1, 192.168.1.20-29, 192.168.1.64/26" />
-              <span class="adv-hint">Never probe these during the CIDR sweep (<code>--exclude</code>): the PLC, the printer that reboots on a SYN, the box you were told to leave alone. IPv4 addresses, CIDRs or last-octet ranges, comma-separated. Sweep only — per-host scans target one host you chose.</span>
+              <button type="button" id="adv-exclude-save" class="adv-inline-btn" title="Remember this list for the network in the CIDR field: every sweep of it, manual or scheduled, spares these hosts">Remember for this network</button>
+              <span class="adv-hint">Never probe these during the CIDR sweep (<code>--exclude</code>): the PLC, the printer that reboots on a SYN, the box you were told to leave alone. IPv4 addresses, CIDRs or last-octet ranges, comma-separated. Sweep only — per-host scans target one host you chose. <em>Remember for this network</em> stores the list per CIDR (it is loaded back into this field when you type that CIDR, and schedules honour it too); an empty list forgets it.</span>
             </label>
 
             <div class="adv-field">
@@ -655,7 +656,7 @@
     </div>
 
     <footer class="bottombar">
-      <span>v1.37.0</span>
+      <span>v1.38.0</span>
       <span>·</span>
       <span>MIT</span>
       <span>·</span>

@@ -10,7 +10,7 @@
 const cron = require("node-cron");
 const db = require("./db");
 const alerts = require("./alerts");
-const { validateDiscovery, validateExclude, validateRate } = require("./scanner");
+const { validateDiscovery, validateExclude, validateRate, mergeExcludes } = require("./scanner");
 const { executeCidrScan } = require("./runner");
 const notifier = require("./notifier");
 
@@ -79,9 +79,14 @@ async function runScheduled(schedule) {
     return { status: "error", error: optsV.error };
   }
 
+  // v1.38.0 — the network's remembered exclusions join the schedule's own.
+  const merged = validateExclude(mergeExcludes(
+    db.getNetworkExclusions(schedule.cidr),
+    (schedule.scan_options && Array.isArray(schedule.scan_options.exclude)) ? schedule.scan_options.exclude : [],
+  ));
   const result = await executeCidrScan(schedule.cidr, {
     discoveryArgs: optsV.args,
-    excludeArgs: optsV.excludeArgs,
+    excludeArgs: merged.error ? optsV.excludeArgs : merged.args,
     rateArgs: optsV.rateArgs,
     scheduleId: schedule.id,
   });

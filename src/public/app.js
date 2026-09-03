@@ -30,6 +30,7 @@ const els = {
   advDiscoPA: $("#adv-disco-pa"),
   advDiscoPR: $("#adv-disco-pr"),
   advExclude: $("#adv-exclude"),
+  advExcludeSave: $("#adv-exclude-save"),
   advRate: $("#adv-rate"),
   bulkPortscan: $("#bulk-portscan"),
   bulkOsscan: $("#bulk-osscan"),
@@ -113,6 +114,15 @@ function currentExcludeSpec() {
   return list.length ? list : undefined;
 }
 
+function bindExclusionsSave() {
+  if (els.advExcludeSave) els.advExcludeSave.addEventListener("click", saveExclusions);
+  // Typing a CIDR brings that network's remembered list into the field.
+  if (els.cidr) els.cidr.addEventListener("change", () => {
+    const cidr = els.cidr.value.trim();
+    if (/^\d{1,3}(\.\d{1,3}){3}\/\d{1,2}$/.test(cidr)) ensureExclusions(cidr);
+  });
+}
+
 function bindDiscoverySkipToggle() {
   const skip = els.advDiscoSkip;
   if (!skip) return;
@@ -125,6 +135,7 @@ function bindDiscoverySkipToggle() {
   sync();
 }
 bindDiscoverySkipToggle();
+bindExclusionsSave();
 
 let activeScanId = null;
 
@@ -328,7 +339,43 @@ function muteChipTitle(mute) {
 }
 let hostLabelsCidr = null;
 
+// v1.38.0 — the network's remembered exclusions, loaded into the Exclude
+// field when a CIDR comes into view. Only overwrites what the user has not
+// typed: a field the user edited (or that already holds this list) is left.
+let exclusionsCidr = null;
+async function ensureExclusions(cidr) {
+  if (exclusionsCidr === cidr || !els.advExclude) return;
+  exclusionsCidr = cidr;
+  try {
+    const data = await fetchJson(`/api/exclusions?cidr=${encodeURIComponent(cidr)}`);
+    const remembered = (data.targets || []).join(", ");
+    if (remembered && !els.advExclude.value.trim()) els.advExclude.value = remembered;
+  } catch {
+    /* no remembered list, or the server is older */
+  }
+}
+
+async function saveExclusions() {
+  const cidr = els.cidr?.value?.trim();
+  if (!cidr) { setStatus("Type the network's CIDR first — the list is remembered per network.", true); return; }
+  const targets = currentExcludeSpec() || [];
+  try {
+    const data = await fetchJson("/api/exclusions", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ cidr, targets }),
+    });
+    exclusionsCidr = cidr;
+    setStatus(data.targets.length
+      ? `Remembered ${data.targets.length} excluded target(s) for ${cidr} — every sweep of it, manual or scheduled, spares them.`
+      : `Forgot the exclusions for ${cidr}.`);
+  } catch (e) {
+    setStatus(`Could not remember exclusions: ${e.message}`, true);
+  }
+}
+
 async function ensureLabels(cidr) {
+  ensureExclusions(cidr);
   if (hostLabelsCidr === cidr) return;
   hostLabelsCidr = cidr; // set before the await so re-renders don't re-fetch
   hostLabels = new Map();
