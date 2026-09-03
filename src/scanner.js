@@ -126,6 +126,38 @@ function validateDiscovery(discovery) {
   return { args: [...seen].map((t) => `-${t}`), error: null };
 }
 
+// v1.36.0 — sweep exclusions (`--exclude`). Optional; null/undefined means no
+// exclusion. Accepts an array of up to 64 strings, each a dotted-quad IPv4, an
+// IPv4 CIDR, or nmap's last-octet range form (`10.0.0.1-20`). Anything else —
+// hostnames, IPv6, wildcards, ranges in other octets — is refused: the joined
+// string lands in the nmap argv, so the allowlist is strict. Blank entries are
+// dropped, duplicates collapse. Returns { args: [] | ["--exclude", "a,b"],
+// error: string | null }. Same shape as validateDiscovery, and the scheduler's
+// scan_options validator reuses it so a schedule can carry exclusions too.
+const EXCLUDE_MAX = 64;
+const LAST_OCTET_RANGE_RE = /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})-(\d{1,3})$/;
+function validateExclude(exclude) {
+  if (exclude === undefined || exclude === null) return { args: [], error: null };
+  if (!Array.isArray(exclude)) return { args: null, error: "exclude must be an array of hosts" };
+  if (exclude.length > EXCLUDE_MAX) return { args: null, error: `exclude lists at most ${EXCLUDE_MAX} entries` };
+  const seen = new Set();
+  for (const raw of exclude) {
+    if (typeof raw !== "string") return { args: null, error: "exclude entries must be strings" };
+    const e = raw.trim();
+    if (!e) continue;
+    if (validateIpv4(e) === null || validateCidr(e) === null) { seen.add(e); continue; }
+    const m = e.match(LAST_OCTET_RANGE_RE);
+    if (m) {
+      const octets = m.slice(1, 5).map(Number);
+      const hi = Number(m[5]);
+      if (octets.every((o) => o <= 255) && hi <= 255 && octets[3] <= hi) { seen.add(e); continue; }
+    }
+    return { args: null, error: `exclude entry not allowed: ${e}` };
+  }
+  if (seen.size === 0) return { args: [], error: null };
+  return { args: ["--exclude", [...seen].join(",")], error: null };
+}
+
 // Range spec: comma-separated list of `N` or `N-M`, no spaces, no other chars.
 // Each port in [1,65535], N<=M, max 100 tokens to keep argv sane.
 const RANGE_SPEC_RE = /^(\d+(-\d+)?)(,\d+(-\d+)?)*$/;
@@ -251,6 +283,8 @@ function parseHosts(xml) {
 
 function runPingSweep(cidr, opts = {}) {
   const discoveryArgs = opts.discoveryArgs || [];
+  // excludeArgs (v1.36): [] or ["--exclude", "a,b,c"], validated upstream.
+  const excludeArgs = opts.excludeArgs || [];
   return new Promise((resolve, reject) => {
     // -sn: ping scan, no port scan
     // -n: no DNS resolution from nmap (we get rDNS via PTR if available; -n is faster)
@@ -262,7 +296,7 @@ function runPingSweep(cidr, opts = {}) {
     //   ["-PE","-PS","-PA","-PR"]. Empty array = nmap defaults.
     execFile(
       "nmap",
-      ["-sn", "-T4", ...discoveryArgs, "-oX", "-", cidr],
+      ["-sn", "-T4", ...discoveryArgs, ...excludeArgs, "-oX", "-", cidr],
       { maxBuffer: 16 * 1024 * 1024, timeout: 120_000 },
       (err, stdout, stderr) => {
         if (err) {
@@ -470,6 +504,7 @@ module.exports = {
   validateScanType,
   validateScripts,
   validateDiscovery,
+  validateExclude,
   runPingSweep,
   runPortScan,
   runUdpPortScan,

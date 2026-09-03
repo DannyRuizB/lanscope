@@ -270,3 +270,18 @@ test('a full document scoped to labels imports only labels, leaving the rest', (
   assert.equal(db.listAllMutes().length, muteBefore, 'the mute in the doc was scoped out');
   assert.equal(db.listAllLabels().find((l) => l.ip === '10.27.0.5').label, 'ScopedCam');
 });
+
+// v1.36.0 — the schedule scan_options validator honours `exclude` next to
+// `discovery`, and reports both halves for the runner.
+test('validateScheduleScanOptions: exclude rides in scan_options, validated by the sweep allowlist', () => {
+  assert.deepEqual(scheduler.validateScheduleScanOptions(null), { args: [], excludeArgs: [] });
+  assert.deepEqual(scheduler.validateScheduleScanOptions({}), { args: [], excludeArgs: [] });
+  assert.deepEqual(
+    scheduler.validateScheduleScanOptions({ discovery: { skipPing: true }, exclude: ['10.0.0.1', '10.0.0.0/30'] }),
+    { args: ['-Pn'], excludeArgs: ['--exclude', '10.0.0.1,10.0.0.0/30'] },
+  );
+  assert.deepEqual(scheduler.validateScheduleScanOptions({ exclude: [] }), { args: [], excludeArgs: [] });
+  assert.match(scheduler.validateScheduleScanOptions({ exclude: ['printer.local'] }).error, /^exclude: exclude entry not allowed: printer.local/);
+  assert.match(scheduler.validateScheduleScanOptions({ exclude: '10.0.0.1' }).error, /^exclude: exclude must be an array/);
+  assert.match(scheduler.validateScheduleScanOptions({ discovery: 'x' }).error, /^discovery:/);
+});

@@ -131,3 +131,37 @@ test('validatePortsSpec accepts single-port / multi-token ranges and a stringifi
     error: null,
   });
 });
+
+// v1.36.0 — sweep exclusions. The joined list reaches nmap's argv, so the
+// allowlist is strict and every rejection names the offending entry.
+test('validateExclude: absent means no --exclude; blanks and duplicates collapse', () => {
+  assert.deepEqual(S.validateExclude(undefined), { args: [], error: null });
+  assert.deepEqual(S.validateExclude(null), { args: [], error: null });
+  assert.deepEqual(S.validateExclude([]), { args: [], error: null });
+  assert.deepEqual(S.validateExclude(['', '  ']), { args: [], error: null });
+  assert.deepEqual(S.validateExclude([' 10.0.0.1 ', '10.0.0.1', '10.0.0.0/30']), { args: ['--exclude', '10.0.0.1,10.0.0.0/30'], error: null });
+});
+
+test('validateExclude: dotted quads, CIDRs and last-octet ranges are allowed', () => {
+  assert.deepEqual(S.validateExclude(['192.168.1.1']).args, ['--exclude', '192.168.1.1']);
+  assert.deepEqual(S.validateExclude(['192.168.1.64/26']).args, ['--exclude', '192.168.1.64/26']);
+  assert.deepEqual(S.validateExclude(['192.168.1.20-29']).args, ['--exclude', '192.168.1.20-29']);
+  assert.deepEqual(S.validateExclude(['10.0.0.5-5']).args, ['--exclude', '10.0.0.5-5'], 'a one-host range is a valid range');
+  assert.deepEqual(S.validateExclude(['10.0.0.0-255']).args, ['--exclude', '10.0.0.0-255']);
+});
+
+test('validateExclude: hostnames, IPv6, wildcards, bad octets and inverted ranges are refused by name', () => {
+  for (const bad of ['printer.local', 'fe80::1', '192.168.1.*', '192.168.1.300', '192.168.1.0/33', '192.168.1.20-300', '192.168.1.29-20', '192.168.1-20.5', '10.0.0.1;rm -rf /', '--top-ports']) {
+    const r = S.validateExclude([bad]);
+    assert.equal(r.args, null, `expected rejection for ${bad}`);
+    assert.match(r.error, new RegExp(`not allowed: ${bad.replace(/[.*+?^${}()|[\]\\;/-]/g, '\\$&')}`));
+  }
+});
+
+test('validateExclude: shape errors — not an array, non-string entries, too many', () => {
+  assert.match(S.validateExclude('10.0.0.1').error, /must be an array/);
+  assert.match(S.validateExclude({ host: '10.0.0.1' }).error, /must be an array/);
+  assert.match(S.validateExclude([10]).error, /must be strings/);
+  assert.match(S.validateExclude(Array.from({ length: 65 }, (_, i) => `10.0.0.${i}`)).error, /at most 64/);
+  assert.equal(S.validateExclude(Array.from({ length: 64 }, (_, i) => `10.0.0.${i}`)).error, null);
+});
