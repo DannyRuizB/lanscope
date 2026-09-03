@@ -29,6 +29,7 @@ const els = {
   advDiscoPS: $("#adv-disco-ps"),
   advDiscoPA: $("#adv-disco-pa"),
   advDiscoPR: $("#adv-disco-pr"),
+  advExclude: $("#adv-exclude"),
   bulkPortscan: $("#bulk-portscan"),
   bulkOsscan: $("#bulk-osscan"),
   bulkUdpscan: $("#bulk-udpscan"),
@@ -94,6 +95,15 @@ function currentDiscoverySpec() {
   if (els.advDiscoPA?.checked) pingTypes.push("PA");
   if (els.advDiscoPR?.checked) pingTypes.push("PR");
   return pingTypes.length ? { pingTypes } : {};
+}
+
+// v1.36.0 — the Exclude hosts field: comma/space separated, blanks dropped.
+// Validation is the server's job (the list reaches nmap's argv there); the
+// client only splits. Returns undefined when empty so the key is omitted.
+function currentExcludeSpec() {
+  const raw = els.advExclude?.value || "";
+  const list = raw.split(/[,\s]+/).map((s) => s.trim()).filter(Boolean);
+  return list.length ? list : undefined;
 }
 
 function bindDiscoverySkipToggle() {
@@ -1974,10 +1984,11 @@ async function runScan(cidr) {
   setStatus(`Scanning ${cidr}… this can take a few seconds.`);
   try {
     const discovery = currentDiscoverySpec();
+    const exclude = currentExcludeSpec();
     const scan = await fetchJson("/api/scan", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ cidr, discovery }),
+      body: JSON.stringify({ cidr, discovery, exclude }),
     });
     activeScanId = scan.id;
     setStatus(`Done. ${scan.hosts.length} host${scan.hosts.length === 1 ? "" : "s"} responded.`);

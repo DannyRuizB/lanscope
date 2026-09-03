@@ -239,6 +239,13 @@
               <span class="adv-hint">Run nmap NSE scripts during the TCP scan. Default = the <code>-sC</code> set (banners, http-title, ssh-hostkey…). Safe = broader, still classified non-intrusive. Both unchecked = no scripts. <strong>Adds time</strong> to the scan.</span>
             </div>
 
+            <label class="adv-field" for="adv-exclude">
+              <span class="adv-label">Exclude hosts</span>
+              <input type="text" id="adv-exclude" name="adv-exclude" autocomplete="off" spellcheck="false"
+                     placeholder="192.168.1.1, 192.168.1.20-29, 192.168.1.64/26" />
+              <span class="adv-hint">Never probe these during the CIDR sweep (<code>--exclude</code>): the PLC, the printer that reboots on a SYN, the box you were told to leave alone. IPv4 addresses, CIDRs or last-octet ranges, comma-separated. Sweep only — per-host scans target one host you chose.</span>
+            </label>
+
             <div class="adv-field">
               <span class="adv-label">Host discovery</span>
               <div class="adv-checks-row">
@@ -637,7 +644,7 @@
     </div>
 
     <footer class="bottombar">
-      <span>v1.35.0</span>
+      <span>v1.36.0</span>
       <span>·</span>
       <span>MIT</span>
       <span>·</span>

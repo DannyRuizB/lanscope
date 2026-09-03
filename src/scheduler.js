@@ -10,7 +10,7 @@
 const cron = require("node-cron");
 const db = require("./db");
 const alerts = require("./alerts");
-const { validateDiscovery } = require("./scanner");
+const { validateDiscovery, validateExclude } = require("./scanner");
 const { executeCidrScan } = require("./runner");
 const notifier = require("./notifier");
 
@@ -36,19 +36,27 @@ async function runDigest() {
 }
 
 // Same shape as validateDiscovery() exposes, but scoped to the persisted
-// `scan_options` blob. Today only `discovery` is honoured. Lives here so
-// server.js (HTTP) and scheduler ticks share one validator.
+// `scan_options` blob. `discovery` (v0.10) and `exclude` (v1.36) are honoured;
+// unknown keys ride along untouched. Lives here so server.js (HTTP) and
+// scheduler ticks share one validator. Returns { args, excludeArgs } or { error }.
 function validateScheduleScanOptions(opts) {
-  if (opts == null) return { args: [] };
+  if (opts == null) return { args: [], excludeArgs: [] };
   if (typeof opts !== "object" || Array.isArray(opts)) {
     return { error: "scan_options must be an object" };
   }
+  let args = [];
   if (Object.prototype.hasOwnProperty.call(opts, "discovery")) {
     const disc = validateDiscovery(opts.discovery);
     if (disc.error) return { error: `discovery: ${disc.error}` };
-    return { args: disc.args };
+    args = disc.args;
   }
-  return { args: [] };
+  let excludeArgs = [];
+  if (Object.prototype.hasOwnProperty.call(opts, "exclude")) {
+    const ex = validateExclude(opts.exclude);
+    if (ex.error) return { error: `exclude: ${ex.error}` };
+    excludeArgs = ex.args;
+  }
+  return { args, excludeArgs };
 }
 
 // Run one schedule end-to-end: validate options, execute, record the run.
@@ -66,6 +74,7 @@ async function runScheduled(schedule) {
 
   const result = await executeCidrScan(schedule.cidr, {
     discoveryArgs: optsV.args,
+    excludeArgs: optsV.excludeArgs,
     scheduleId: schedule.id,
   });
 

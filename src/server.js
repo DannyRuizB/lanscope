@@ -10,6 +10,7 @@ const {
   validateVersionDetection,
   validateScripts,
   validateDiscovery,
+  validateExclude,
   runPortScan,
   runUdpPortScan,
   runOsScan,
@@ -370,8 +371,11 @@ app.post("/api/scan", async (req, res) => {
 
   const discovery = validateDiscovery(req.body?.discovery);
   if (discovery.error) return res.status(400).json({ error: discovery.error });
+  // v1.36.0 — never probe these (the PLC, the printer that reboots on a SYN).
+  const exclude = validateExclude(req.body?.exclude);
+  if (exclude.error) return res.status(400).json({ error: exclude.error });
 
-  const result = await executeCidrScan(cidr, { discoveryArgs: discovery.args });
+  const result = await executeCidrScan(cidr, { discoveryArgs: discovery.args, excludeArgs: exclude.args });
   if (result.busy) {
     return res.status(409).json({ error: "another scan is already in progress" });
   }
