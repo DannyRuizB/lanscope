@@ -165,3 +165,24 @@ test('validateExclude: shape errors — not an array, non-string entries, too ma
   assert.match(S.validateExclude(Array.from({ length: 65 }, (_, i) => `10.0.0.${i}`)).error, /at most 64/);
   assert.equal(S.validateExclude(Array.from({ length: 64 }, (_, i) => `10.0.0.${i}`)).error, null);
 });
+
+// v1.37.0 — packet-rate cap. An enum: exactly four spellings reach nmap.
+test('validateRate: absent or unlimited means no flag; the three presets map to --max-rate', () => {
+  assert.deepEqual(S.validateRate(undefined), { args: [], error: null });
+  assert.deepEqual(S.validateRate(null), { args: [], error: null });
+  assert.deepEqual(S.validateRate(''), { args: [], error: null });
+  assert.deepEqual(S.validateRate('unlimited'), { args: [], error: null });
+  assert.deepEqual(S.validateRate('500'), { args: ['--max-rate', '500'], error: null });
+  assert.deepEqual(S.validateRate('100'), { args: ['--max-rate', '100'], error: null });
+  assert.deepEqual(S.validateRate('25'), { args: ['--max-rate', '25'], error: null });
+});
+
+test('validateRate: free integers, other strings, numbers and prototype keys are refused', () => {
+  for (const bad of ['50', '1000', '0', 'fast', 'MAX', 'toString', 'constructor', '--max-rate 10']) {
+    const r = S.validateRate(bad);
+    assert.equal(r.args, null, `expected rejection for ${bad}`);
+    assert.match(r.error, /rate must be/);
+  }
+  assert.match(S.validateRate(100).error, /rate must be/, 'a number, not the string');
+  assert.match(S.validateRate(['100']).error, /rate must be/);
+});

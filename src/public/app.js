@@ -30,6 +30,7 @@ const els = {
   advDiscoPA: $("#adv-disco-pa"),
   advDiscoPR: $("#adv-disco-pr"),
   advExclude: $("#adv-exclude"),
+  advRate: $("#adv-rate"),
   bulkPortscan: $("#bulk-portscan"),
   bulkOsscan: $("#bulk-osscan"),
   bulkUdpscan: $("#bulk-udpscan"),
@@ -100,6 +101,12 @@ function currentDiscoverySpec() {
 // v1.36.0 — the Exclude hosts field: comma/space separated, blanks dropped.
 // Validation is the server's job (the list reaches nmap's argv there); the
 // client only splits. Returns undefined when empty so the key is omitted.
+// v1.37.0 — the packet-rate cap. "unlimited" (the default) is sent as-is;
+// the server maps it to no flag at all, so old servers and new clients agree.
+function currentRate() {
+  return els.advRate?.value || "unlimited";
+}
+
 function currentExcludeSpec() {
   const raw = els.advExclude?.value || "";
   const list = raw.split(/[,\s]+/).map((s) => s.trim()).filter(Boolean);
@@ -1862,7 +1869,7 @@ async function runPortscan(hostId) {
     const data = await fetchJson(`/api/hosts/${hostId}/portscan`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ timing, scanType, versionDetection, ports, scripts }),
+      body: JSON.stringify({ timing, scanType, versionDetection, ports, scripts, rate: currentRate() }),
     });
     if (lastScan) {
       const h = lastScan.hosts.find((x) => x.id === hostId);
@@ -1910,7 +1917,7 @@ async function runUdpscan(hostId) {
     const data = await fetchJson(`/api/hosts/${hostId}/udp-portscan`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ timing, versionDetection, ports }),
+      body: JSON.stringify({ timing, versionDetection, ports, rate: currentRate() }),
     });
     if (lastScan) {
       const h = lastScan.hosts.find((x) => x.id === hostId);
@@ -1988,7 +1995,7 @@ async function runScan(cidr) {
     const scan = await fetchJson("/api/scan", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ cidr, discovery, exclude }),
+      body: JSON.stringify({ cidr, discovery, exclude, rate: currentRate() }),
     });
     activeScanId = scan.id;
     setStatus(`Done. ${scan.hosts.length} host${scan.hosts.length === 1 ? "" : "s"} responded.`);

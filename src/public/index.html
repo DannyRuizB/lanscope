@@ -239,6 +239,17 @@
               <span class="adv-hint">Run nmap NSE scripts during the TCP scan. Default = the <code>-sC</code> set (banners, http-title, ssh-hostkey…). Safe = broader, still classified non-intrusive. Both unchecked = no scripts. <strong>Adds time</strong> to the scan.</span>
             </div>
 
+            <label class="adv-field" for="adv-rate">
+              <span class="adv-label">Packet rate cap</span>
+              <select id="adv-rate" name="adv-rate">
+                <option value="unlimited" selected>Unlimited — nmap's own pacing (default)</option>
+                <option value="500">500 pps — gentle on a busy LAN</option>
+                <option value="100">100 pps — polite: old switches, Wi-Fi APs</option>
+                <option value="25">25 pps — quiet: below most IDS burst thresholds</option>
+              </select>
+              <span class="adv-hint">Caps how many packets per second nmap sends (<code>--max-rate</code>), for the sweep and the TCP/UDP scans. An office AP or an aging access switch can fold under a full-speed sweep, and an IDS tuned for "N SYNs a second" fires on a scanner long before it fires on an attacker. Slower is quieter.</span>
+            </label>
+
             <label class="adv-field" for="adv-exclude">
               <span class="adv-label">Exclude hosts</span>
               <input type="text" id="adv-exclude" name="adv-exclude" autocomplete="off" spellcheck="false"
@@ -644,7 +655,7 @@
     </div>
 
     <footer class="bottombar">
-      <span>v1.36.0</span>
+      <span>v1.37.0</span>
       <span>·</span>
       <span>MIT</span>
       <span>·</span>

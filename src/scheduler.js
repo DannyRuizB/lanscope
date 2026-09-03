@@ -10,7 +10,7 @@
 const cron = require("node-cron");
 const db = require("./db");
 const alerts = require("./alerts");
-const { validateDiscovery, validateExclude } = require("./scanner");
+const { validateDiscovery, validateExclude, validateRate } = require("./scanner");
 const { executeCidrScan } = require("./runner");
 const notifier = require("./notifier");
 
@@ -36,11 +36,12 @@ async function runDigest() {
 }
 
 // Same shape as validateDiscovery() exposes, but scoped to the persisted
-// `scan_options` blob. `discovery` (v0.10) and `exclude` (v1.36) are honoured;
-// unknown keys ride along untouched. Lives here so server.js (HTTP) and
-// scheduler ticks share one validator. Returns { args, excludeArgs } or { error }.
+// `scan_options` blob. `discovery` (v0.10), `exclude` (v1.36) and `rate`
+// (v1.37) are honoured; unknown keys ride along untouched. Lives here so
+// server.js (HTTP) and scheduler ticks share one validator. Returns
+// { args, excludeArgs, rateArgs } or { error }.
 function validateScheduleScanOptions(opts) {
-  if (opts == null) return { args: [], excludeArgs: [] };
+  if (opts == null) return { args: [], excludeArgs: [], rateArgs: [] };
   if (typeof opts !== "object" || Array.isArray(opts)) {
     return { error: "scan_options must be an object" };
   }
@@ -56,7 +57,13 @@ function validateScheduleScanOptions(opts) {
     if (ex.error) return { error: `exclude: ${ex.error}` };
     excludeArgs = ex.args;
   }
-  return { args, excludeArgs };
+  let rateArgs = [];
+  if (Object.prototype.hasOwnProperty.call(opts, "rate")) {
+    const r = validateRate(opts.rate);
+    if (r.error) return { error: `rate: ${r.error}` };
+    rateArgs = r.args;
+  }
+  return { args, excludeArgs, rateArgs };
 }
 
 // Run one schedule end-to-end: validate options, execute, record the run.
@@ -75,6 +82,7 @@ async function runScheduled(schedule) {
   const result = await executeCidrScan(schedule.cidr, {
     discoveryArgs: optsV.args,
     excludeArgs: optsV.excludeArgs,
+    rateArgs: optsV.rateArgs,
     scheduleId: schedule.id,
   });
 

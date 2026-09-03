@@ -274,13 +274,15 @@ test('a full document scoped to labels imports only labels, leaving the rest', (
 // v1.36.0 — the schedule scan_options validator honours `exclude` next to
 // `discovery`, and reports both halves for the runner.
 test('validateScheduleScanOptions: exclude rides in scan_options, validated by the sweep allowlist', () => {
-  assert.deepEqual(scheduler.validateScheduleScanOptions(null), { args: [], excludeArgs: [] });
-  assert.deepEqual(scheduler.validateScheduleScanOptions({}), { args: [], excludeArgs: [] });
+  assert.deepEqual(scheduler.validateScheduleScanOptions(null), { args: [], excludeArgs: [], rateArgs: [] });
+  assert.deepEqual(scheduler.validateScheduleScanOptions({}), { args: [], excludeArgs: [], rateArgs: [] });
   assert.deepEqual(
-    scheduler.validateScheduleScanOptions({ discovery: { skipPing: true }, exclude: ['10.0.0.1', '10.0.0.0/30'] }),
-    { args: ['-Pn'], excludeArgs: ['--exclude', '10.0.0.1,10.0.0.0/30'] },
+    scheduler.validateScheduleScanOptions({ discovery: { skipPing: true }, exclude: ['10.0.0.1', '10.0.0.0/30'], rate: '100' }),
+    { args: ['-Pn'], excludeArgs: ['--exclude', '10.0.0.1,10.0.0.0/30'], rateArgs: ['--max-rate', '100'] },
   );
-  assert.deepEqual(scheduler.validateScheduleScanOptions({ exclude: [] }), { args: [], excludeArgs: [] });
+  assert.deepEqual(scheduler.validateScheduleScanOptions({ exclude: [] }), { args: [], excludeArgs: [], rateArgs: [] });
+  assert.deepEqual(scheduler.validateScheduleScanOptions({ rate: 'unlimited' }), { args: [], excludeArgs: [], rateArgs: [] });
+  assert.match(scheduler.validateScheduleScanOptions({ rate: '50' }).error, /^rate: rate must be/);
   assert.match(scheduler.validateScheduleScanOptions({ exclude: ['printer.local'] }).error, /^exclude: exclude entry not allowed: printer.local/);
   assert.match(scheduler.validateScheduleScanOptions({ exclude: '10.0.0.1' }).error, /^exclude: exclude must be an array/);
   assert.match(scheduler.validateScheduleScanOptions({ discovery: 'x' }).error, /^discovery:/);

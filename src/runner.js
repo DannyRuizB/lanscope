@@ -17,14 +17,14 @@ function isScanInFlight() {
   return scanInFlight;
 }
 
-async function executeCidrScan(cidr, { discoveryArgs = [], excludeArgs = [], scheduleId = null } = {}) {
+async function executeCidrScan(cidr, { discoveryArgs = [], excludeArgs = [], rateArgs = [], scheduleId = null } = {}) {
   if (scanInFlight) {
     return { busy: true, scanId: null, scan: null, error: null };
   }
   scanInFlight = true;
   const scanId = db.startScan(cidr, scheduleId);
   try {
-    const hosts = await runPingSweep(cidr, { discoveryArgs, excludeArgs });
+    const hosts = await runPingSweep(cidr, { discoveryArgs, excludeArgs, rateArgs });
     db.finishScan(scanId, hosts);
     let alerts = [];
     try {
