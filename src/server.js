@@ -11,6 +11,7 @@ const {
   validateScripts,
   validateDiscovery,
   validateExclude,
+  mergeExcludes,
   validateRate,
   runPortScan,
   runUdpPortScan,
@@ -372,8 +373,14 @@ app.post("/api/scan", async (req, res) => {
 
   const discovery = validateDiscovery(req.body?.discovery);
   if (discovery.error) return res.status(400).json({ error: discovery.error });
-  // v1.36.0 — never probe these (the PLC, the printer that reboots on a SYN).
-  const exclude = validateExclude(req.body?.exclude);
+  // v1.36.0 — never probe these (the PLC, the printer that reboots on a SYN);
+  // v1.38.0 — merged with the list remembered for this network, so a sweep
+  // from any client (or with an empty field) still spares them.
+  const requested = req.body?.exclude;
+  if (requested !== undefined && requested !== null && !Array.isArray(requested)) {
+    return res.status(400).json({ error: "exclude must be an array of hosts" });
+  }
+  const exclude = validateExclude(mergeExcludes(db.getNetworkExclusions(cidr), requested || []));
   if (exclude.error) return res.status(400).json({ error: exclude.error });
   // v1.37.0 — packet-rate cap: be gentle with the AP and quiet for the IDS.
   const rate = validateRate(req.body?.rate);
@@ -568,6 +575,27 @@ app.delete("/api/inventory/:cidr", (req, res) => {
 
 // v1.3.0 — host labels: user-assigned friendly name + notes, keyed by
 // (cidr, ip) so they follow the device across every scan of that network.
+// v1.38.0 — network exclusions: the hosts a network's sweeps must never
+// touch, remembered per CIDR so manual sweeps and schedules share one list.
+// PUT is an idempotent replace; an empty list clears it. The same allowlist
+// as the per-request field (validateExclude) guards what gets stored.
+app.get("/api/exclusions", (req, res) => {
+  const cidr = req.query.cidr;
+  const errorMsg = validateCidr(cidr);
+  if (errorMsg) return res.status(400).json({ error: errorMsg });
+  res.json({ cidr, targets: db.getNetworkExclusions(cidr) });
+});
+
+app.put("/api/exclusions", (req, res) => {
+  const { cidr, targets } = req.body || {};
+  const cidrError = validateCidr(cidr);
+  if (cidrError) return res.status(400).json({ error: cidrError });
+  const v = validateExclude(targets === undefined ? [] : targets);
+  if (v.error) return res.status(400).json({ error: v.error });
+  const stored = db.setNetworkExclusions(cidr, mergeExcludes(targets || []));
+  res.json({ cidr, targets: stored });
+});
+
 app.get("/api/labels", (req, res) => {
   const cidr = req.query.cidr;
   const errorMsg = validateCidr(cidr);

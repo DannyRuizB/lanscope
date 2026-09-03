@@ -134,6 +134,14 @@ db.exec(`
     UNIQUE (cidr, ip)
   );
 
+  -- v1.38.0: hosts a network's sweeps must never touch, kept per CIDR so
+  -- manual sweeps and schedules share one list (targets = JSON array).
+  CREATE TABLE IF NOT EXISTS network_exclusions (
+    cidr       TEXT PRIMARY KEY,
+    targets    TEXT NOT NULL,
+    updated_at INTEGER NOT NULL
+  );
+
   CREATE TABLE IF NOT EXISTS api_tokens (
     id           INTEGER PRIMARY KEY AUTOINCREMENT,
     name         TEXT NOT NULL UNIQUE,
@@ -1315,6 +1323,32 @@ function pruneAckedAlerts(cutoffMs) {
 // ----- Host labels (v1.3.0): user-assigned friendly name + notes ----------
 // Keyed by (cidr, ip), NOT by host row: a label follows the device across
 // every scan of that network, past and future.
+// v1.38.0 — network exclusions: one JSON list per CIDR. An empty list is a
+// delete, so "no row" and "nothing excluded" are the same state.
+function getNetworkExclusions(cidr) {
+  const row = db.prepare(`SELECT targets FROM network_exclusions WHERE cidr = ?`).get(cidr);
+  if (!row) return [];
+  try {
+    const parsed = JSON.parse(row.targets);
+    return Array.isArray(parsed) ? parsed.map(String) : [];
+  } catch {
+    return [];
+  }
+}
+
+function setNetworkExclusions(cidr, targets) {
+  const list = Array.isArray(targets) ? targets.map(String) : [];
+  if (list.length === 0) {
+    db.prepare(`DELETE FROM network_exclusions WHERE cidr = ?`).run(cidr);
+    return [];
+  }
+  db.prepare(
+    `INSERT INTO network_exclusions (cidr, targets, updated_at) VALUES (?, ?, ?)
+     ON CONFLICT(cidr) DO UPDATE SET targets = excluded.targets, updated_at = excluded.updated_at`,
+  ).run(cidr, JSON.stringify(list), Date.now());
+  return list;
+}
+
 function listLabels(cidr) {
   return db
     .prepare(`SELECT * FROM host_labels WHERE cidr = ? ORDER BY ip`)
@@ -1571,6 +1605,8 @@ function touchApiToken(id) {
 }
 
 module.exports = {
+  getNetworkExclusions,
+  setNetworkExclusions,
   startScan,
   finishScan,
   failScan,

@@ -180,6 +180,24 @@ function validateRate(v) {
   return { args: RATE_ARGS[v], error: null };
 }
 
+// v1.38.0 — the persisted per-network list and the request's own list are
+// merged (union, first occurrence wins, blanks dropped) BEFORE validation, so
+// one validateExclude call judges the whole argv contribution.
+function mergeExcludes(...lists) {
+  const seen = new Set();
+  const out = [];
+  for (const list of lists) {
+    if (!Array.isArray(list)) continue;
+    for (const raw of list) {
+      const e = String(raw).trim();
+      if (!e || seen.has(e)) continue;
+      seen.add(e);
+      out.push(e);
+    }
+  }
+  return out;
+}
+
 // Range spec: comma-separated list of `N` or `N-M`, no spaces, no other chars.
 // Each port in [1,65535], N<=M, max 100 tokens to keep argv sane.
 const RANGE_SPEC_RE = /^(\d+(-\d+)?)(,\d+(-\d+)?)*$/;
@@ -534,6 +552,7 @@ module.exports = {
   validateScripts,
   validateDiscovery,
   validateExclude,
+  mergeExcludes,
   validateRate,
   runPingSweep,
   runPortScan,
