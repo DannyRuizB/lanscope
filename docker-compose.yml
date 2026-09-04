@@ -1,7 +1,7 @@
 services:
   lanscope:
     build: .
-    image: ghcr.io/dannyruizb/lanscope:1.41.0
+    image: ghcr.io/dannyruizb/lanscope:1.42.0
     container_name: lanscope
     network_mode: host
     cap_add:
