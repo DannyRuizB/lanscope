@@ -189,6 +189,13 @@ if (!columnExists("hosts", "latency_ms")) {
 if (!columnExists("hosts", "udp_portscanned_at")) {
   db.exec(`ALTER TABLE hosts ADD COLUMN udp_portscanned_at INTEGER`);
 }
+// v1.41.0 — did the last TCP / UDP port scan hit --host-timeout? (1 = yes)
+if (!columnExists("hosts", "port_timedout")) {
+  db.exec(`ALTER TABLE hosts ADD COLUMN port_timedout INTEGER`);
+}
+if (!columnExists("hosts", "udp_port_timedout")) {
+  db.exec(`ALTER TABLE hosts ADD COLUMN udp_port_timedout INTEGER`);
+}
 // v0.10.0 — origin tracking. NULL means "manual" (POST /api/scan or seed).
 if (!columnExists("scans", "schedule_id")) {
   db.exec(
@@ -328,11 +335,11 @@ const stmts = {
        FROM scans WHERE id = ?`,
   ),
   getHostsByScan: db.prepare(
-    `SELECT id, ip, mac, vendor, hostname, status, reason, latency_ms, portscanned_at, osscanned_at, udp_portscanned_at
+    `SELECT id, ip, mac, vendor, hostname, status, reason, latency_ms, portscanned_at, osscanned_at, udp_portscanned_at, port_timedout, udp_port_timedout
        FROM hosts WHERE scan_id = ? ORDER BY ip`,
   ),
   getHost: db.prepare(
-    `SELECT id, scan_id, ip, mac, vendor, hostname, status, reason, latency_ms, portscanned_at, osscanned_at, udp_portscanned_at
+    `SELECT id, scan_id, ip, mac, vendor, hostname, status, reason, latency_ms, portscanned_at, osscanned_at, udp_portscanned_at, port_timedout, udp_port_timedout
        FROM hosts WHERE id = ?`,
   ),
   deleteScan: db.prepare(`DELETE FROM scans WHERE id = ?`),
@@ -356,6 +363,8 @@ const stmts = {
   markHostUdpPortscanned: db.prepare(
     `UPDATE hosts SET udp_portscanned_at = ? WHERE id = ?`,
   ),
+  setHostPortTimedout: db.prepare(`UPDATE hosts SET port_timedout = ? WHERE id = ?`),
+  setHostUdpPortTimedout: db.prepare(`UPDATE hosts SET udp_port_timedout = ? WHERE id = ?`),
   getUdpPortsByHost: db.prepare(
     `SELECT port, protocol, state, state_reason, service, product, version, extra
        FROM host_ports WHERE host_id = ? AND protocol = 'udp' ORDER BY port`,
@@ -782,6 +791,14 @@ function saveHostPorts(hostId, ports, hostScripts) {
   }));
   const host_scripts = stmts.getHostScriptsByHost.all(hostId);
   return { ports: ports2, host_scripts };
+}
+
+// v1.41.0 — record whether the scan that produced these ports hit
+// --host-timeout. Kept apart from the ports themselves: an empty list with the
+// flag set is "unknown", an empty list without it is "nothing listening".
+function setPortScanTimedOut(hostId, protocol, timedOut) {
+  const stmt = protocol === "udp" ? stmts.setHostUdpPortTimedout : stmts.setHostPortTimedout;
+  stmt.run(timedOut ? 1 : 0, hostId);
 }
 
 function saveHostUdpPorts(hostId, ports) {
@@ -1649,6 +1666,7 @@ module.exports = {
   getHost,
   saveHostPorts,
   saveHostUdpPorts,
+  setPortScanTimedOut,
   saveHostOsMatches,
   listBaselines,
   getBaselineByCidr,

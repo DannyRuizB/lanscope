@@ -436,6 +436,7 @@ app.post("/api/hosts/:id/portscan", async (req, res) => {
       hostTimeoutArgs: hostTimeout.args,
     });
     const saved = db.saveHostPorts(id, result.ports, result.host_scripts);
+    db.setPortScanTimedOut(id, "tcp", result.timed_out);
     const refreshed = db.getHost(id);
     // v1.18.0 — the watchlist is checked HERE, right after the ports land:
     // a discovery sweep only pings, so this is the first moment anything
@@ -462,6 +463,7 @@ app.post("/api/hosts/:id/portscan", async (req, res) => {
       host_id: id,
       ip: host.ip,
       portscanned_at: refreshed.portscanned_at,
+      port_timedout: refreshed.port_timedout,
       ports: saved.ports,
       host_scripts: saved.host_scripts,
       sensitive_port_alerts: exposure.length,
@@ -492,7 +494,7 @@ app.post("/api/hosts/:id/udp-portscan", async (req, res) => {
   if (hostTimeout.error) return res.status(400).json({ error: hostTimeout.error });
 
   try {
-    const ports = await runUdpPortScan(host.ip, {
+    const { ports, timed_out: udpTimedOut } = await runUdpPortScan(host.ip, {
       timing: timing.value,
       portsArgs: portsSpec.args,
       versionArgs: versionDet.args,
@@ -500,11 +502,13 @@ app.post("/api/hosts/:id/udp-portscan", async (req, res) => {
       hostTimeoutArgs: hostTimeout.args,
     });
     const saved = db.saveHostUdpPorts(id, ports);
+    db.setPortScanTimedOut(id, "udp", udpTimedOut);
     const refreshed = db.getHost(id);
     res.json({
       host_id: id,
       ip: host.ip,
       udp_portscanned_at: refreshed.udp_portscanned_at,
+      udp_port_timedout: refreshed.udp_port_timedout,
       udp_ports: saved,
     });
   } catch (e) {

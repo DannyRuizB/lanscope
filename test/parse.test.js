@@ -191,3 +191,14 @@ test('parseOsMatches flattens osmatch + osclass into one record', () => {
     },
   ]);
 });
+
+// v1.41.0 — measured (nmap 7.98, --host-timeout 5s on an unroutable address): the
+// host element carries timedout="true" and no <ports> at all, so without the flag
+// it reads exactly like a clean host.
+test('parseTimedOut reads the timedout attribute nmap sets when --host-timeout fires', () => {
+  const timedOut = '<?xml version="1.0"?><nmaprun><host starttime="1788518949" endtime="1788518954" timedout="true"><status state="up" reason="user-set" reason_ttl="0"/><address addr="10.255.255.1" addrtype="ipv4"/></host><runstats><hosts up="1" down="0" total="1"/></runstats></nmaprun>';
+  const clean = '<?xml version="1.0"?><nmaprun><host starttime="1" endtime="2"><status state="up" reason="syn-ack"/><address addr="10.0.0.1" addrtype="ipv4"/><ports><port protocol="tcp" portid="22"><state state="open" reason="syn-ack"/></port></ports></host></nmaprun>';
+  assert.equal(S.parseTimedOut(timedOut), true);
+  assert.equal(S.parseTimedOut(clean), false);
+  assert.equal(S.parseTimedOut('<?xml version="1.0"?><nmaprun><runstats><hosts up="0" down="1" total="1"/></runstats></nmaprun>'), false, 'no host element: not timed out');
+});
