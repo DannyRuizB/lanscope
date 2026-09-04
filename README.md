@@ -61,7 +61,7 @@ mkdir -p ~/lanscope && cd ~/lanscope
 cat > docker-compose.yml <<'YAML'
 services:
   lanscope:
-    image: ghcr.io/dannyruizb/lanscope:1.38.0
+    image: ghcr.io/dannyruizb/lanscope:1.39.0
     container_name: lanscope
     network_mode: host
     cap_add:
