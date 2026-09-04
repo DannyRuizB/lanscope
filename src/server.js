@@ -13,6 +13,7 @@ const {
   validateExclude,
   mergeExcludes,
   validateRate,
+  validateHostTimeout,
   runPortScan,
   runUdpPortScan,
   runOsScan,
@@ -385,8 +386,10 @@ app.post("/api/scan", async (req, res) => {
   // v1.37.0 — packet-rate cap: be gentle with the AP and quiet for the IDS.
   const rate = validateRate(req.body?.rate);
   if (rate.error) return res.status(400).json({ error: rate.error });
+  const hostTimeout = validateHostTimeout(req.body?.host_timeout);
+  if (hostTimeout.error) return res.status(400).json({ error: hostTimeout.error });
 
-  const result = await executeCidrScan(cidr, { discoveryArgs: discovery.args, excludeArgs: exclude.args, rateArgs: rate.args });
+  const result = await executeCidrScan(cidr, { discoveryArgs: discovery.args, excludeArgs: exclude.args, rateArgs: rate.args, hostTimeoutArgs: hostTimeout.args });
   if (result.busy) {
     return res.status(409).json({ error: "another scan is already in progress" });
   }
@@ -419,6 +422,8 @@ app.post("/api/hosts/:id/portscan", async (req, res) => {
   if (versionDet.error) return res.status(400).json({ error: versionDet.error });
   const rate = validateRate(req.body?.rate);
   if (rate.error) return res.status(400).json({ error: rate.error });
+  const hostTimeout = validateHostTimeout(req.body?.host_timeout);
+  if (hostTimeout.error) return res.status(400).json({ error: hostTimeout.error });
 
   try {
     const result = await runPortScan(host.ip, {
@@ -428,6 +433,7 @@ app.post("/api/hosts/:id/portscan", async (req, res) => {
       scriptsArgs: scripts.args,
       versionArgs: versionDet.args,
       rateArgs: rate.args,
+      hostTimeoutArgs: hostTimeout.args,
     });
     const saved = db.saveHostPorts(id, result.ports, result.host_scripts);
     const refreshed = db.getHost(id);
@@ -482,6 +488,8 @@ app.post("/api/hosts/:id/udp-portscan", async (req, res) => {
   if (versionDet.error) return res.status(400).json({ error: versionDet.error });
   const rate = validateRate(req.body?.rate);
   if (rate.error) return res.status(400).json({ error: rate.error });
+  const hostTimeout = validateHostTimeout(req.body?.host_timeout);
+  if (hostTimeout.error) return res.status(400).json({ error: hostTimeout.error });
 
   try {
     const ports = await runUdpPortScan(host.ip, {
@@ -489,6 +497,7 @@ app.post("/api/hosts/:id/udp-portscan", async (req, res) => {
       portsArgs: portsSpec.args,
       versionArgs: versionDet.args,
       rateArgs: rate.args,
+      hostTimeoutArgs: hostTimeout.args,
     });
     const saved = db.saveHostUdpPorts(id, ports);
     const refreshed = db.getHost(id);

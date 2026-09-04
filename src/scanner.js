@@ -180,6 +180,30 @@ function validateRate(v) {
   return { args: RATE_ARGS[v], error: null };
 }
 
+// v1.40.0 — per-host timeout (`--host-timeout`). A filtered host — a firewall
+// that drops instead of rejecting, an address behind a black-hole route —
+// makes nmap wait out every retransmission on every port. MEASURED (nmap
+// 7.98): a 200-port scan of an unroutable address took 21.6 s with no cap
+// and stopped at 10.6 s with `--host-timeout 10s` ("Skipping host ... due
+// to host timeout"); across a /24 of filtered addresses that is the
+// difference between a sweep and an afternoon. An enum, like the rate cap
+// (its own range validation would be a second source of truth): "none"
+// (absent, the historical default) or a duration nmap understands. Applied
+// wherever the rate cap is: the sweep and the per-host TCP/UDP scans.
+const HOST_TIMEOUT_ARGS = {
+  none: [],
+  "30s": ["--host-timeout", "30s"],
+  "2m": ["--host-timeout", "2m"],
+  "5m": ["--host-timeout", "5m"],
+};
+function validateHostTimeout(v) {
+  if (v === undefined || v === null || v === "") return { args: [], error: null };
+  if (typeof v !== "string" || !Object.prototype.hasOwnProperty.call(HOST_TIMEOUT_ARGS, v)) {
+    return { args: null, error: "host_timeout must be 'none', '30s', '2m' or '5m'" };
+  }
+  return { args: HOST_TIMEOUT_ARGS[v], error: null };
+}
+
 // v1.38.0 — the persisted per-network list and the request's own list are
 // merged (union, first occurrence wins, blanks dropped) BEFORE validation, so
 // one validateExclude call judges the whole argv contribution.
@@ -327,6 +351,8 @@ function runPingSweep(cidr, opts = {}) {
   const excludeArgs = opts.excludeArgs || [];
   // rateArgs (v1.37): [] or ["--max-rate", "N"], validated upstream.
   const rateArgs = opts.rateArgs || [];
+  // hostTimeoutArgs (v1.40): [] or ["--host-timeout", "D"], validated upstream.
+  const hostTimeoutArgs = opts.hostTimeoutArgs || [];
   return new Promise((resolve, reject) => {
     // -sn: ping scan, no port scan
     // -n: no DNS resolution from nmap (we get rDNS via PTR if available; -n is faster)
@@ -338,7 +364,7 @@ function runPingSweep(cidr, opts = {}) {
     //   ["-PE","-PS","-PA","-PR"]. Empty array = nmap defaults.
     execFile(
       "nmap",
-      ["-sn", "-T4", ...discoveryArgs, ...excludeArgs, ...rateArgs, "-oX", "-", cidr],
+      ["-sn", "-T4", ...discoveryArgs, ...excludeArgs, ...rateArgs, ...hostTimeoutArgs, "-oX", "-", cidr],
       { maxBuffer: 16 * 1024 * 1024, timeout: 120_000 },
       (err, stdout, stderr) => {
         if (err) {
@@ -403,6 +429,8 @@ function runPortScan(ip, opts = {}) {
   const versionArgs = opts.versionArgs || ["--version-light"];
   // rateArgs (v1.37): [] or ["--max-rate", "N"] — validated upstream.
   const rateArgs = opts.rateArgs || [];
+  // hostTimeoutArgs (v1.40): [] or ["--host-timeout", "D"], validated upstream.
+  const hostTimeoutArgs = opts.hostTimeoutArgs || [];
   // NSE adds variable wall time per script (banner waits, http probes,
   // ssh handshakes…). Bump the per-scan timeout when scripts are enabled
   // so a top-1000 + safe doesn't get killed mid-run.
@@ -428,7 +456,7 @@ function runPortScan(ip, opts = {}) {
         scanFlag,
         "-sV",
         `-${timing}`,
-        ...rateArgs,
+        ...rateArgs, ...hostTimeoutArgs,
         ...versionArgs,
         "--reason",
         ...scriptsArgs,
@@ -458,6 +486,8 @@ function runPortScan(ip, opts = {}) {
 function runUdpPortScan(ip, opts = {}) {
   const versionArgs = opts.versionArgs || ["--version-light"];
   const rateArgs = opts.rateArgs || [];
+  // hostTimeoutArgs (v1.40): [] or ["--host-timeout", "D"], validated upstream.
+  const hostTimeoutArgs = opts.hostTimeoutArgs || [];
   const timing = opts.timing || PORTSCAN_DEFAULT_TIMING;
   const portsArgs = opts.portsArgs || PORTS_DEFAULT_ARGS;
   return new Promise((resolve, reject) => {
@@ -475,7 +505,7 @@ function runUdpPortScan(ip, opts = {}) {
         "-sU",
         "-sV",
         `-${timing}`,
-        ...rateArgs,
+        ...rateArgs, ...hostTimeoutArgs,
         ...versionArgs,
         "--reason",
         "-oX",
@@ -554,6 +584,7 @@ module.exports = {
   validateExclude,
   mergeExcludes,
   validateRate,
+  validateHostTimeout,
   runPingSweep,
   runPortScan,
   runUdpPortScan,

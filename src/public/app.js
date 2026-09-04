@@ -32,6 +32,7 @@ const els = {
   advExclude: $("#adv-exclude"),
   advExcludeSave: $("#adv-exclude-save"),
   advRate: $("#adv-rate"),
+  advHostTimeout: $("#adv-host-timeout"),
   bulkPortscan: $("#bulk-portscan"),
   bulkOsscan: $("#bulk-osscan"),
   bulkUdpscan: $("#bulk-udpscan"),
@@ -106,6 +107,11 @@ function currentDiscoverySpec() {
 // the server maps it to no flag at all, so old servers and new clients agree.
 function currentRate() {
   return els.advRate?.value || "unlimited";
+}
+// v1.40.0 — the per-host timeout. "none" (the default) is sent as-is; the
+// server maps each preset to the exact --host-timeout flag.
+function currentHostTimeout() {
+  return els.advHostTimeout?.value || "none";
 }
 
 function currentExcludeSpec() {
@@ -1916,7 +1922,7 @@ async function runPortscan(hostId) {
     const data = await fetchJson(`/api/hosts/${hostId}/portscan`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ timing, scanType, versionDetection, ports, scripts, rate: currentRate() }),
+      body: JSON.stringify({ timing, scanType, versionDetection, ports, scripts, rate: currentRate(), host_timeout: currentHostTimeout() }),
     });
     if (lastScan) {
       const h = lastScan.hosts.find((x) => x.id === hostId);
@@ -1964,7 +1970,7 @@ async function runUdpscan(hostId) {
     const data = await fetchJson(`/api/hosts/${hostId}/udp-portscan`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ timing, versionDetection, ports, rate: currentRate() }),
+      body: JSON.stringify({ timing, versionDetection, ports, rate: currentRate(), host_timeout: currentHostTimeout() }),
     });
     if (lastScan) {
       const h = lastScan.hosts.find((x) => x.id === hostId);
@@ -2042,7 +2048,7 @@ async function runScan(cidr) {
     const scan = await fetchJson("/api/scan", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ cidr, discovery, exclude, rate: currentRate() }),
+      body: JSON.stringify({ cidr, discovery, exclude, rate: currentRate(), host_timeout: currentHostTimeout() }),
     });
     activeScanId = scan.id;
     setStatus(`Done. ${scan.hosts.length} host${scan.hosts.length === 1 ? "" : "s"} responded.`);
