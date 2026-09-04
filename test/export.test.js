@@ -88,7 +88,7 @@ test("scanToCsv aggregates only open TCP ports and open UDP ports", () => {
   assert.ok(router.includes("22 80")); // 443 is closed → out
   assert.ok(router.includes("22/ssh (OpenSSH 9.2); 80/http"));
   assert.ok(!router.includes("443"));
-  assert.ok(router.endsWith(",53")); // udp 161 is open|filtered → out
+  assert.ok(router.endsWith(",53,,")); // udp 161 is open|filtered → out; v1.41 adds two empty timed-out columns
 });
 
 test("scanToCsv quotes the vendor that carries a comma", () => {
@@ -98,7 +98,7 @@ test("scanToCsv quotes the vendor that carries a comma", () => {
 
 test("scanToCsv leaves unknown fields empty on bare hosts", () => {
   const rows = scanToCsv(fixtureScan()).split("\r\n");
-  assert.equal(rows[2], "192.168.1.50,,,,,up,,,,,,");
+  assert.equal(rows[2], "192.168.1.50,,,,,up,,,,,,,,"); // v1.41: two trailing timed-out columns
 });
 
 test("scanToCsv carries latency_ms when the host has one (v1.4.0)", () => {
@@ -265,4 +265,17 @@ test("alertsFilename names the scope: the CIDR when filtered, 'all' when not", (
   assert.equal(alertsFilename({ cidr: "192.168.1.0/24" }, "csv"), "lanscope_alerts_192-168-1-0-24.csv");
   assert.equal(alertsFilename({}, "json"), "lanscope_alerts_all.json");
   assert.equal(alertsFilename(null, "csv"), "lanscope_alerts_all.csv");
+});
+
+test("scanToCsv marks a port scan that hit --host-timeout (v1.41.0): unknown, not clean", () => {
+  const scan = { id: 9, cidr: "10.0.0.0/24", started_at: "2026-09-04T10:00:00Z" };
+  const hosts = [
+    { ip: "10.0.0.5", status: "up", ports: [], udp_ports: [], os_matches: [], port_timedout: 1, udp_port_timedout: 0 },
+    { ip: "10.0.0.6", status: "up", ports: [], udp_ports: [], os_matches: [], port_timedout: 0, udp_port_timedout: 1 },
+  ];
+  const csv = scanToCsv({ ...scan, hosts }, {});
+  const rows = csv.split("\r\n");
+  assert.ok(rows[0].endsWith("tcp_scan_timed_out,udp_scan_timed_out"));
+  assert.ok(rows[1].endsWith(",yes,"), `tcp timed out -> yes: ${rows[1]}`);
+  assert.ok(rows[2].endsWith(",,yes"), `udp timed out -> yes: ${rows[2]}`);
 });

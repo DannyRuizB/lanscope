@@ -784,8 +784,13 @@ function renderUdpStateCell(p) {
 function renderUdpPortsTable(host) {
   const ports = host.udp_ports || [];
   const toolbar = rescanToolbar(host, "udp");
+  // v1.41.0 — a scan that hit --host-timeout is not a clean host: say so.
+  const udpTimedOut = !!host.udp_port_timedout;
+  const udpNote = udpTimedOut
+    ? `<div class="ports-empty ports-timedout">&#9201; The UDP scan hit the per-host timeout${ports.length ? ` after ${ports.length} port(s)` : ""}: the rest is <strong>unknown</strong>, not closed. Re-scan with a longer or no timeout.</div>`
+    : "";
   if (!ports.length) {
-    return `${toolbar}<div class="ports-empty">No UDP ports detected.</div>`;
+    return `${toolbar}${udpNote || '<div class="ports-empty">No UDP ports detected.</div>'}`;
   }
   const rows = ports
     .map(
@@ -847,12 +852,18 @@ function renderPortRow(host, p) {
 function renderPortsTable(host) {
   const ports = host.ports || [];
   const toolbar = rescanToolbar(host, "ports");
+  // v1.41.0 — a scan that hit --host-timeout is not a clean host: say so.
+  const tcpTimedOut = !!host.port_timedout;
+  const tcpNote = tcpTimedOut
+    ? `<div class="ports-empty ports-timedout">&#9201; The scan hit the per-host timeout${ports.length ? ` after ${ports.length} port(s)` : ""}: the rest is <strong>unknown</strong>, not closed. Re-scan with a longer or no timeout.</div>`
+    : "";
   if (!ports.length && !(host.host_scripts || []).length) {
-    return `${toolbar}<div class="ports-empty">No accessible ports detected on top 100.</div>`;
+    return `${toolbar}${tcpNote || '<div class="ports-empty">No accessible ports detected on top 100.</div>'}`;
   }
   const rows = ports.map((p) => renderPortRow(host, p)).join("");
   return `
     ${toolbar}
+    ${tcpNote}
     ${renderHostScriptsBlock(host)}
     <table class="ports-table">
       <thead>

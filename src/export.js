@@ -16,6 +16,8 @@ const CSV_COLUMNS = [
   "tcp_open_ports",
   "tcp_services",
   "udp_open_ports",
+  "tcp_scan_timed_out",
+  "udp_scan_timed_out",
 ];
 
 // RFC 4180: quote a field when it carries a comma, a quote or a line break,
@@ -54,6 +56,8 @@ function hostToRow(host, labelsByIp = {}) {
     openTcp.map((p) => p.port).join(" "),
     services,
     openUdp.map((p) => p.port).join(" "),
+    host.port_timedout ? "yes" : "",
+    host.udp_port_timedout ? "yes" : "",
   ];
 }
 

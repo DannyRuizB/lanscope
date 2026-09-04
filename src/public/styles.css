@@ -2136,3 +2136,6 @@ li.is-baseline .scan-cidr {
 
 /* v1.38.0 — the "Remember for this network" button under the Exclude field */
 .adv-inline-btn { margin-top: 0.35rem; align-self: flex-start; font-size: 0.85em; padding: 0.25rem 0.6rem; }
+
+/* v1.41.0 — a port scan that hit --host-timeout: unknown, not clean */
+.ports-timedout { color: var(--warn, #b7791f); border: 1px dashed currentColor; }

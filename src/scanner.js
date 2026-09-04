@@ -474,6 +474,7 @@ function runPortScan(ip, opts = {}) {
           resolve({
             ports: parsePorts(stdout),
             host_scripts: parseHostScripts(stdout),
+            timed_out: parseTimedOut(stdout),
           });
         } catch (e) {
           reject(new Error(`failed to parse nmap output: ${e.message}`));
@@ -519,13 +520,23 @@ function runUdpPortScan(ip, opts = {}) {
           return reject(new Error(`nmap failed: ${msg}`));
         }
         try {
-          resolve(parsePorts(stdout));
+          resolve({ ports: parsePorts(stdout), timed_out: parseTimedOut(stdout) });
         } catch (e) {
           reject(new Error(`failed to parse nmap output: ${e.message}`));
         }
       },
     );
   });
+}
+
+// v1.41.0 — a host that hit --host-timeout comes back in the XML as
+// <host ... timedout="true"> with NO <ports> element (measured, nmap 7.98):
+// stored as-is it reads exactly like a clean host with nothing open. The
+// flag is what tells "nothing listening" from "nmap gave up".
+function parseTimedOut(xml) {
+  const doc = xmlParser.parse(xml);
+  const host = doc?.nmaprun?.host?.[0];
+  return String(host?.timedout ?? "").toLowerCase() === "true";
 }
 
 function parseOsMatches(xml) {
@@ -585,6 +596,7 @@ module.exports = {
   mergeExcludes,
   validateRate,
   validateHostTimeout,
+  parseTimedOut,
   runPingSweep,
   runPortScan,
   runUdpPortScan,
