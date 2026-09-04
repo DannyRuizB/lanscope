@@ -275,14 +275,14 @@ test('a full document scoped to labels imports only labels, leaving the rest', (
 // v1.36.0 — the schedule scan_options validator honours `exclude` next to
 // `discovery`, and reports both halves for the runner.
 test('validateScheduleScanOptions: exclude rides in scan_options, validated by the sweep allowlist', () => {
-  assert.deepEqual(scheduler.validateScheduleScanOptions(null), { args: [], excludeArgs: [], rateArgs: [] });
-  assert.deepEqual(scheduler.validateScheduleScanOptions({}), { args: [], excludeArgs: [], rateArgs: [] });
+  assert.deepEqual(scheduler.validateScheduleScanOptions(null), { args: [], excludeArgs: [], rateArgs: [], hostTimeoutArgs: [] });
+  assert.deepEqual(scheduler.validateScheduleScanOptions({}), { args: [], excludeArgs: [], rateArgs: [], hostTimeoutArgs: [] });
   assert.deepEqual(
     scheduler.validateScheduleScanOptions({ discovery: { skipPing: true }, exclude: ['10.0.0.1', '10.0.0.0/30'], rate: '100' }),
-    { args: ['-Pn'], excludeArgs: ['--exclude', '10.0.0.1,10.0.0.0/30'], rateArgs: ['--max-rate', '100'] },
+    { args: ['-Pn'], excludeArgs: ['--exclude', '10.0.0.1,10.0.0.0/30'], rateArgs: ['--max-rate', '100'], hostTimeoutArgs: [] },
   );
-  assert.deepEqual(scheduler.validateScheduleScanOptions({ exclude: [] }), { args: [], excludeArgs: [], rateArgs: [] });
-  assert.deepEqual(scheduler.validateScheduleScanOptions({ rate: 'unlimited' }), { args: [], excludeArgs: [], rateArgs: [] });
+  assert.deepEqual(scheduler.validateScheduleScanOptions({ exclude: [] }), { args: [], excludeArgs: [], rateArgs: [], hostTimeoutArgs: [] });
+  assert.deepEqual(scheduler.validateScheduleScanOptions({ rate: 'unlimited' }), { args: [], excludeArgs: [], rateArgs: [], hostTimeoutArgs: [] });
   assert.match(scheduler.validateScheduleScanOptions({ rate: '50' }).error, /^rate: rate must be/);
   assert.match(scheduler.validateScheduleScanOptions({ exclude: ['printer.local'] }).error, /^exclude: exclude entry not allowed: printer.local/);
   assert.match(scheduler.validateScheduleScanOptions({ exclude: '10.0.0.1' }).error, /^exclude: exclude must be an array/);
@@ -348,4 +348,14 @@ test('a document without an exclusions key (pre-v1.39 backup) leaves the remembe
   const r = db.importConfig(validateConfigDoc(validDoc(), DEPS).value);
   assert.equal(r.imported.exclusions, 0);
   assert.deepEqual(db.getNetworkExclusions('10.4.0.0/24'), ['10.4.0.1']);
+});
+
+test('validateScheduleScanOptions: host_timeout rides in scan_options through the same enum, and a bad value names the key', () => {
+  assert.deepEqual(scheduler.validateScheduleScanOptions({ host_timeout: '2m' }).hostTimeoutArgs, ['--host-timeout', '2m']);
+  assert.deepEqual(scheduler.validateScheduleScanOptions({ rate: '100' }).hostTimeoutArgs, [], 'absent = no flag');
+  assert.match(scheduler.validateScheduleScanOptions({ host_timeout: '10s' }).error, /^host_timeout: /);
+  // A schedule that carries it survives the config export/import validation.
+  const v = validateConfigDoc({ lanscope_config: 1, schedules: [{ name: 'Bounded sweep', cidr: '10.3.0.0/24', cron_expr: '0 3 * * *', enabled: true, scan_options: { host_timeout: '30s', rate: '100' } }] }, DEPS);
+  assert.equal(v.error, undefined);
+  assert.deepEqual(v.value.schedules[0].scan_options, { host_timeout: '30s', rate: '100' });
 });

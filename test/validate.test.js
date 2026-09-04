@@ -186,3 +186,15 @@ test('validateRate: free integers, other strings, numbers and prototype keys are
   assert.match(S.validateRate(100).error, /rate must be/, 'a number, not the string');
   assert.match(S.validateRate(['100']).error, /rate must be/);
 });
+
+test('validateHostTimeout: absent or none means no flag; the three presets map to --host-timeout; anything else is refused', () => {
+  assert.deepEqual(S.validateHostTimeout(undefined), { args: [], error: null });
+  assert.deepEqual(S.validateHostTimeout(''), { args: [], error: null });
+  assert.deepEqual(S.validateHostTimeout('none'), { args: [], error: null });
+  assert.deepEqual(S.validateHostTimeout('30s'), { args: ['--host-timeout', '30s'], error: null });
+  assert.deepEqual(S.validateHostTimeout('2m'), { args: ['--host-timeout', '2m'], error: null });
+  assert.deepEqual(S.validateHostTimeout('5m'), { args: ['--host-timeout', '5m'], error: null });
+  for (const bad of ['10s', '1h', 30, '30s; rm -rf /', ['30s']]) {
+    assert.match(S.validateHostTimeout(bad).error, /host_timeout must be/);
+  }
+});

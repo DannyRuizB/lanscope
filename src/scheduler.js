@@ -10,7 +10,7 @@
 const cron = require("node-cron");
 const db = require("./db");
 const alerts = require("./alerts");
-const { validateDiscovery, validateExclude, validateRate, mergeExcludes } = require("./scanner");
+const { validateDiscovery, validateExclude, validateRate, validateHostTimeout, mergeExcludes } = require("./scanner");
 const { executeCidrScan } = require("./runner");
 const notifier = require("./notifier");
 
@@ -41,7 +41,7 @@ async function runDigest() {
 // server.js (HTTP) and scheduler ticks share one validator. Returns
 // { args, excludeArgs, rateArgs } or { error }.
 function validateScheduleScanOptions(opts) {
-  if (opts == null) return { args: [], excludeArgs: [], rateArgs: [] };
+  if (opts == null) return { args: [], excludeArgs: [], rateArgs: [], hostTimeoutArgs: [] };
   if (typeof opts !== "object" || Array.isArray(opts)) {
     return { error: "scan_options must be an object" };
   }
@@ -63,7 +63,13 @@ function validateScheduleScanOptions(opts) {
     if (r.error) return { error: `rate: ${r.error}` };
     rateArgs = r.args;
   }
-  return { args, excludeArgs, rateArgs };
+  let hostTimeoutArgs = [];
+  if (Object.prototype.hasOwnProperty.call(opts, "host_timeout")) {
+    const h = validateHostTimeout(opts.host_timeout);
+    if (h.error) return { error: `host_timeout: ${h.error}` };
+    hostTimeoutArgs = h.args;
+  }
+  return { args, excludeArgs, rateArgs, hostTimeoutArgs };
 }
 
 // Run one schedule end-to-end: validate options, execute, record the run.
@@ -88,6 +94,7 @@ async function runScheduled(schedule) {
     discoveryArgs: optsV.args,
     excludeArgs: merged.error ? optsV.excludeArgs : merged.args,
     rateArgs: optsV.rateArgs,
+    hostTimeoutArgs: optsV.hostTimeoutArgs,
     scheduleId: schedule.id,
   });
 

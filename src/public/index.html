@@ -250,6 +250,16 @@
               </select>
               <span class="adv-hint">Caps how many packets per second nmap sends (<code>--max-rate</code>), for the sweep and the TCP/UDP scans. An office AP or an aging access switch can fold under a full-speed sweep, and an IDS tuned for "N SYNs a second" fires on a scanner long before it fires on an attacker. Slower is quieter.</span>
             </label>
+            <label class="adv-field" for="adv-host-timeout">
+              <span class="adv-label">Per-host timeout</span>
+              <select id="adv-host-timeout" name="adv-host-timeout">
+                <option value="none" selected>None — nmap waits out every retransmission (default)</option>
+                <option value="30s">30 s — give up fast on filtered hosts</option>
+                <option value="2m">2 min — patient, still bounded</option>
+                <option value="5m">5 min — for slow links and big port lists</option>
+              </select>
+              <span class="adv-hint">Caps how long nmap spends on any one host (<code>--host-timeout</code>): a firewall that drops instead of rejecting makes every port wait out its retransmissions. Measured: a 200-port scan of an unroutable address took 21.6 s uncapped and stopped at 10.6 s with a 10 s cap. Hosts that hit the cap are reported as skipped, not as clean.</span>
+            </label>
 
             <label class="adv-field" for="adv-exclude">
               <span class="adv-label">Exclude hosts</span>
