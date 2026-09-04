@@ -3735,7 +3735,7 @@ const configEls = {
 // the canonical full export (no query at all, same URL as ever); a subset
 // rides ?sections=; none checked disables the anchor — an empty backup is
 // a mistake, not a document.
-const configScopeBoxes = ["labels", "mutes", "schedules", "channels"].map((s) => ({
+const configScopeBoxes = ["labels", "mutes", "schedules", "channels", "exclusions"].map((s) => ({
   section: s,
   el: document.getElementById(`cfg-sec-${s}`),
 }));
@@ -3756,7 +3756,7 @@ function updateExportScope() {
     ? "/api/config/export"
     : `/api/config/export?sections=${picked.join(",")}`;
   configEls.exportBtn.title = all
-    ? "Download labels, mutes, schedules and notification channels as one JSON backup"
+    ? "Download labels, mutes, schedules, notification channels and remembered exclusions as one JSON backup"
     : `Download only ${picked.join(", ")} as a JSON backup`;
 }
 
@@ -3784,6 +3784,10 @@ function configPlanSentence(r) {
   }
   if (i.schedules) parts.push(`${i.schedules} schedules`);
   if (i.channels) parts.push(`${i.channels} channels`);
+  if (i.exclusions) {
+    const upd = p.exclusions ? p.exclusions.updated.length : 0;
+    parts.push(`${i.exclusions} exclusion lists (${p.exclusions ? p.exclusions.created : i.exclusions} new` + (upd ? `, ${upd} replaced` : "") + ")");
+  }
   const skipped = r.skipped.schedules.concat(r.skipped.channels);
   const tail = skipped.length
     ? ` — skipping ${skipped.length} by name (${skipped.join(", ")})`
@@ -3792,7 +3796,7 @@ function configPlanSentence(r) {
 }
 
 // The section checkboxes scope BOTH directions (v1.27): on import they pick
-// which sections of the file get restored. All four checked = the whole
+// which sections of the file get restored. All five checked = the whole
 // document (no ?sections=, the classic behaviour); a subset rides ?sections=;
 // none checked is a mistake the caller catches before we get here.
 function currentSectionsParam() {

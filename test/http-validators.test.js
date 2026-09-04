@@ -141,7 +141,10 @@ test('validateSectionsParam: subset comes back deduped in canonical order', () =
 });
 
 test('validateSectionsParam: the full set collapses to null (mute-types precedent)', () => {
-  assert.equal(V.validateSectionsParam('channels,schedules,mutes,labels').value, null);
+  assert.equal(V.validateSectionsParam('exclusions,channels,schedules,mutes,labels').value, null);
+  // v1.39.0 made exclusions the fifth section: the old four-name spelling is
+  // now a subset, and a pre-v1.39 client asking for it gets exactly those four.
+  assert.deepEqual(V.validateSectionsParam('channels,schedules,mutes,labels').value, ['labels', 'mutes', 'schedules', 'channels']);
 });
 
 test('validateSectionsParam: unknown section named in the error', () => {
