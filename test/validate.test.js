@@ -198,3 +198,15 @@ test('validateHostTimeout: absent or none means no flag; the three presets map t
     assert.match(S.validateHostTimeout(bad).error, /host_timeout must be/);
   }
 });
+
+test('validateMaxRetries: absent or default means no flag; the three presets map to --max-retries; anything else is refused', () => {
+  assert.deepEqual(S.validateMaxRetries(undefined), { args: [], error: null });
+  assert.deepEqual(S.validateMaxRetries(''), { args: [], error: null });
+  assert.deepEqual(S.validateMaxRetries('default'), { args: [], error: null });
+  assert.deepEqual(S.validateMaxRetries('3'), { args: ['--max-retries', '3'], error: null });
+  assert.deepEqual(S.validateMaxRetries('1'), { args: ['--max-retries', '1'], error: null });
+  assert.deepEqual(S.validateMaxRetries('0'), { args: ['--max-retries', '0'], error: null });
+  for (const bad of ['2', '10', 5, '0; rm -rf /', ['0']]) {
+    assert.match(S.validateMaxRetries(bad).error, /max_retries must be/);
+  }
+});

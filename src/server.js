@@ -14,6 +14,7 @@ const {
   mergeExcludes,
   validateRate,
   validateHostTimeout,
+  validateMaxRetries,
   runPortScan,
   runUdpPortScan,
   runOsScan,
@@ -388,8 +389,10 @@ app.post("/api/scan", async (req, res) => {
   if (rate.error) return res.status(400).json({ error: rate.error });
   const hostTimeout = validateHostTimeout(req.body?.host_timeout);
   if (hostTimeout.error) return res.status(400).json({ error: hostTimeout.error });
+  const maxRetries = validateMaxRetries(req.body?.max_retries);
+  if (maxRetries.error) return res.status(400).json({ error: maxRetries.error });
 
-  const result = await executeCidrScan(cidr, { discoveryArgs: discovery.args, excludeArgs: exclude.args, rateArgs: rate.args, hostTimeoutArgs: hostTimeout.args });
+  const result = await executeCidrScan(cidr, { discoveryArgs: discovery.args, excludeArgs: exclude.args, rateArgs: rate.args, hostTimeoutArgs: hostTimeout.args, maxRetriesArgs: maxRetries.args });
   if (result.busy) {
     return res.status(409).json({ error: "another scan is already in progress" });
   }
@@ -424,6 +427,8 @@ app.post("/api/hosts/:id/portscan", async (req, res) => {
   if (rate.error) return res.status(400).json({ error: rate.error });
   const hostTimeout = validateHostTimeout(req.body?.host_timeout);
   if (hostTimeout.error) return res.status(400).json({ error: hostTimeout.error });
+  const maxRetries = validateMaxRetries(req.body?.max_retries);
+  if (maxRetries.error) return res.status(400).json({ error: maxRetries.error });
 
   try {
     const result = await runPortScan(host.ip, {
@@ -434,6 +439,7 @@ app.post("/api/hosts/:id/portscan", async (req, res) => {
       versionArgs: versionDet.args,
       rateArgs: rate.args,
       hostTimeoutArgs: hostTimeout.args,
+      maxRetriesArgs: maxRetries.args,
     });
     const saved = db.saveHostPorts(id, result.ports, result.host_scripts);
     db.setPortScanTimedOut(id, "tcp", result.timed_out);
@@ -492,6 +498,8 @@ app.post("/api/hosts/:id/udp-portscan", async (req, res) => {
   if (rate.error) return res.status(400).json({ error: rate.error });
   const hostTimeout = validateHostTimeout(req.body?.host_timeout);
   if (hostTimeout.error) return res.status(400).json({ error: hostTimeout.error });
+  const maxRetries = validateMaxRetries(req.body?.max_retries);
+  if (maxRetries.error) return res.status(400).json({ error: maxRetries.error });
 
   try {
     const { ports, timed_out: udpTimedOut } = await runUdpPortScan(host.ip, {
@@ -500,6 +508,7 @@ app.post("/api/hosts/:id/udp-portscan", async (req, res) => {
       versionArgs: versionDet.args,
       rateArgs: rate.args,
       hostTimeoutArgs: hostTimeout.args,
+      maxRetriesArgs: maxRetries.args,
     });
     const saved = db.saveHostUdpPorts(id, ports);
     db.setPortScanTimedOut(id, "udp", udpTimedOut);
