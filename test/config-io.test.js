@@ -105,7 +105,7 @@ test('importConfig roundtrip: everything lands, and re-import breeds no duplicat
   assert.ok(!v.error, v.error);
 
   const first = db.importConfig(v.value);
-  assert.deepEqual(first.imported, { labels: 1, mutes: 2, schedules: 1, channels: 1 });
+  assert.deepEqual(first.imported, { labels: 1, mutes: 2, schedules: 1, channels: 1, exclusions: 0 });
   assert.deepEqual(first.skipped, { schedules: [], channels: [] });
 
   assert.equal(db.listAllLabels().find((l) => l.ip === '192.168.7.10').label, 'NAS');
@@ -116,7 +116,7 @@ test('importConfig roundtrip: everything lands, and re-import breeds no duplicat
   // Re-importing the same backup: labels/mutes upsert in place, schedules
   // and channels are skipped by name — nothing is duplicated.
   const again = db.importConfig(v.value);
-  assert.deepEqual(again.imported, { labels: 1, mutes: 2, schedules: 0, channels: 0 });
+  assert.deepEqual(again.imported, { labels: 1, mutes: 2, schedules: 0, channels: 0, exclusions: 0 });
   assert.deepEqual(again.skipped, { schedules: ['Nightly sweep'], channels: ['Ops webhook'] });
   assert.equal(db.listSchedules().filter((s) => s.name === 'Nightly sweep').length, 1);
   assert.equal(db.listChannels().filter((c) => c.name === 'Ops webhook').length, 1);
@@ -148,7 +148,7 @@ test('a dry run writes nothing and reports the same counts the real import would
 
   const dry = db.importConfig(v.value, { dryRun: true });
   assert.equal(dry.dry_run, true);
-  assert.deepEqual(dry.imported, { labels: 1, mutes: 2, schedules: 0, channels: 0 });
+  assert.deepEqual(dry.imported, { labels: 1, mutes: 2, schedules: 0, channels: 0, exclusions: 0 });
   assert.deepEqual(dry.skipped, { schedules: ['Nightly sweep'], channels: ['Ops webhook'] });
 
   // Nothing moved on disk — the rollback is the whole point.
