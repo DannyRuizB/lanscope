@@ -10,7 +10,7 @@
 const cron = require("node-cron");
 const db = require("./db");
 const alerts = require("./alerts");
-const { validateDiscovery, validateExclude, validateRate, validateHostTimeout, mergeExcludes } = require("./scanner");
+const { validateDiscovery, validateExclude, validateRate, validateHostTimeout, validateMaxRetries, mergeExcludes } = require("./scanner");
 const { executeCidrScan } = require("./runner");
 const notifier = require("./notifier");
 
@@ -41,7 +41,7 @@ async function runDigest() {
 // server.js (HTTP) and scheduler ticks share one validator. Returns
 // { args, excludeArgs, rateArgs } or { error }.
 function validateScheduleScanOptions(opts) {
-  if (opts == null) return { args: [], excludeArgs: [], rateArgs: [], hostTimeoutArgs: [] };
+  if (opts == null) return { args: [], excludeArgs: [], rateArgs: [], hostTimeoutArgs: [], maxRetriesArgs: [] };
   if (typeof opts !== "object" || Array.isArray(opts)) {
     return { error: "scan_options must be an object" };
   }
@@ -69,7 +69,13 @@ function validateScheduleScanOptions(opts) {
     if (h.error) return { error: `host_timeout: ${h.error}` };
     hostTimeoutArgs = h.args;
   }
-  return { args, excludeArgs, rateArgs, hostTimeoutArgs };
+  let maxRetriesArgs = [];
+  if (Object.prototype.hasOwnProperty.call(opts, "max_retries")) {
+    const mr = validateMaxRetries(opts.max_retries);
+    if (mr.error) return { error: `max_retries: ${mr.error}` };
+    maxRetriesArgs = mr.args;
+  }
+  return { args, excludeArgs, rateArgs, hostTimeoutArgs, maxRetriesArgs };
 }
 
 // Run one schedule end-to-end: validate options, execute, record the run.
@@ -95,6 +101,7 @@ async function runScheduled(schedule) {
     excludeArgs: merged.error ? optsV.excludeArgs : merged.args,
     rateArgs: optsV.rateArgs,
     hostTimeoutArgs: optsV.hostTimeoutArgs,
+    maxRetriesArgs: optsV.maxRetriesArgs,
     scheduleId: schedule.id,
   });
 

@@ -260,6 +260,16 @@
               </select>
               <span class="adv-hint">Caps how long nmap spends on any one host (<code>--host-timeout</code>): a firewall that drops instead of rejecting makes every port wait out its retransmissions. Measured: a 200-port scan of an unroutable address took 21.6 s uncapped and stopped at 10.6 s with a 10 s cap. Hosts that hit the cap are reported as skipped, not as clean.</span>
             </label>
+            <label class="adv-field" for="adv-max-retries">
+              <span class="adv-label">Probe retries</span>
+              <select id="adv-max-retries" name="adv-max-retries">
+                <option value="default" selected>Default — nmap's own retry count</option>
+                <option value="3">3 — trim retransmissions</option>
+                <option value="1">1 — one retry, faster on filtered hosts</option>
+                <option value="0">0 — no retransmissions (fastest, misses ports on a lossy LAN)</option>
+              </select>
+              <span class="adv-hint">Caps how many times nmap re-sends a probe before giving up on a port (<code>--max-retries</code>). A firewall that drops makes every port wait out the retries; fewer is faster but a single lost packet on a flaky LAN then reads as a closed port. Measured: a 100-port scan of an unroutable address took 12.0 s at the default and 6.1 s at 0.</span>
+            </label>
 
             <label class="adv-field" for="adv-exclude">
               <span class="adv-label">Exclude hosts</span>

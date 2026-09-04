@@ -33,6 +33,7 @@ const els = {
   advExcludeSave: $("#adv-exclude-save"),
   advRate: $("#adv-rate"),
   advHostTimeout: $("#adv-host-timeout"),
+  advMaxRetries: $("#adv-max-retries"),
   bulkPortscan: $("#bulk-portscan"),
   bulkOsscan: $("#bulk-osscan"),
   bulkUdpscan: $("#bulk-udpscan"),
@@ -112,6 +113,10 @@ function currentRate() {
 // server maps each preset to the exact --host-timeout flag.
 function currentHostTimeout() {
   return els.advHostTimeout?.value || "none";
+}
+// v1.42.0 — the probe retransmission cap. "default" is sent as-is.
+function currentMaxRetries() {
+  return els.advMaxRetries?.value || "default";
 }
 
 function currentExcludeSpec() {
@@ -1933,7 +1938,7 @@ async function runPortscan(hostId) {
     const data = await fetchJson(`/api/hosts/${hostId}/portscan`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ timing, scanType, versionDetection, ports, scripts, rate: currentRate(), host_timeout: currentHostTimeout() }),
+      body: JSON.stringify({ timing, scanType, versionDetection, ports, scripts, rate: currentRate(), host_timeout: currentHostTimeout(), max_retries: currentMaxRetries() }),
     });
     if (lastScan) {
       const h = lastScan.hosts.find((x) => x.id === hostId);
@@ -1981,7 +1986,7 @@ async function runUdpscan(hostId) {
     const data = await fetchJson(`/api/hosts/${hostId}/udp-portscan`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ timing, versionDetection, ports, rate: currentRate(), host_timeout: currentHostTimeout() }),
+      body: JSON.stringify({ timing, versionDetection, ports, rate: currentRate(), host_timeout: currentHostTimeout(), max_retries: currentMaxRetries() }),
     });
     if (lastScan) {
       const h = lastScan.hosts.find((x) => x.id === hostId);
@@ -2059,7 +2064,7 @@ async function runScan(cidr) {
     const scan = await fetchJson("/api/scan", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ cidr, discovery, exclude, rate: currentRate(), host_timeout: currentHostTimeout() }),
+      body: JSON.stringify({ cidr, discovery, exclude, rate: currentRate(), host_timeout: currentHostTimeout(), max_retries: currentMaxRetries() }),
     });
     activeScanId = scan.id;
     setStatus(`Done. ${scan.hosts.length} host${scan.hosts.length === 1 ? "" : "s"} responded.`);
