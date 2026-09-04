@@ -15,7 +15,7 @@ const { test } = require('node:test');
 const assert = require('node:assert/strict');
 const db = require('../src/db');
 const { validateConfigDoc } = require('../src/http-validators');
-const { validateCidr, validateIpv4 } = require('../src/scanner');
+const { validateCidr, validateIpv4, validateExclude } = require('../src/scanner');
 const scheduler = require('../src/scheduler');
 
 const DEPS = {
@@ -23,6 +23,7 @@ const DEPS = {
   validateIpv4,
   validateScanOptions: scheduler.validateScheduleScanOptions,
   alertTypes: db.ALERT_TYPES,
+  validateExclude,
 };
 
 function validDoc() {
@@ -104,7 +105,7 @@ test('importConfig roundtrip: everything lands, and re-import breeds no duplicat
   assert.ok(!v.error, v.error);
 
   const first = db.importConfig(v.value);
-  assert.deepEqual(first.imported, { labels: 1, mutes: 2, schedules: 1, channels: 1 });
+  assert.deepEqual(first.imported, { labels: 1, mutes: 2, schedules: 1, channels: 1, exclusions: 0 });
   assert.deepEqual(first.skipped, { schedules: [], channels: [] });
 
   assert.equal(db.listAllLabels().find((l) => l.ip === '192.168.7.10').label, 'NAS');
@@ -115,7 +116,7 @@ test('importConfig roundtrip: everything lands, and re-import breeds no duplicat
   // Re-importing the same backup: labels/mutes upsert in place, schedules
   // and channels are skipped by name — nothing is duplicated.
   const again = db.importConfig(v.value);
-  assert.deepEqual(again.imported, { labels: 1, mutes: 2, schedules: 0, channels: 0 });
+  assert.deepEqual(again.imported, { labels: 1, mutes: 2, schedules: 0, channels: 0, exclusions: 0 });
   assert.deepEqual(again.skipped, { schedules: ['Nightly sweep'], channels: ['Ops webhook'] });
   assert.equal(db.listSchedules().filter((s) => s.name === 'Nightly sweep').length, 1);
   assert.equal(db.listChannels().filter((c) => c.name === 'Ops webhook').length, 1);
@@ -147,7 +148,7 @@ test('a dry run writes nothing and reports the same counts the real import would
 
   const dry = db.importConfig(v.value, { dryRun: true });
   assert.equal(dry.dry_run, true);
-  assert.deepEqual(dry.imported, { labels: 1, mutes: 2, schedules: 0, channels: 0 });
+  assert.deepEqual(dry.imported, { labels: 1, mutes: 2, schedules: 0, channels: 0, exclusions: 0 });
   assert.deepEqual(dry.skipped, { schedules: ['Nightly sweep'], channels: ['Ops webhook'] });
 
   // Nothing moved on disk — the rollback is the whole point.
@@ -286,4 +287,65 @@ test('validateScheduleScanOptions: exclude rides in scan_options, validated by t
   assert.match(scheduler.validateScheduleScanOptions({ exclude: ['printer.local'] }).error, /^exclude: exclude entry not allowed: printer.local/);
   assert.match(scheduler.validateScheduleScanOptions({ exclude: '10.0.0.1' }).error, /^exclude: exclude must be an array/);
   assert.match(scheduler.validateScheduleScanOptions({ discovery: 'x' }).error, /^discovery:/);
+});
+
+// --- v1.39.0: exclusions as the fifth section --------------------------------
+
+test('validateConfigDoc: exclusions are trimmed, deduped and judged by the sweep allowlist; an empty list is legal', () => {
+  const v = validateConfigDoc({
+    lanscope_config: 1,
+    exclusions: [
+      { cidr: '10.9.0.0/24', targets: [' 10.9.0.1', '10.9.0.20-29', '10.9.0.1', '', '10.9.0.64/26'] },
+      { cidr: '10.8.0.0/24', targets: [] },
+      { cidr: '10.7.0.0/24' },
+    ],
+  }, DEPS);
+  assert.equal(v.error, undefined);
+  assert.deepEqual(v.value.exclusions, [
+    { cidr: '10.9.0.0/24', targets: ['10.9.0.1', '10.9.0.20-29', '10.9.0.64/26'] },
+    { cidr: '10.8.0.0/24', targets: [] },
+    { cidr: '10.7.0.0/24', targets: [] },
+  ]);
+  assert.deepEqual(v.value.labels, [], 'absent sections stay empty arrays');
+});
+
+test('validateConfigDoc: a bad exclusion names the item, and what PUT refuses the backup refuses too', () => {
+  const bad = (exclusions) => validateConfigDoc({ lanscope_config: 1, exclusions }, DEPS).error;
+  assert.match(bad([{ cidr: 'nope', targets: [] }]), /^exclusions\[0\]: /);
+  assert.match(bad([{ cidr: '10.9.0.0/24', targets: ['10.9.0.1'] }, { cidr: '10.8.0.0/24', targets: ['-sS'] }]), /^exclusions\[1\]: exclude entry not allowed: -sS/);
+  assert.match(bad([{ cidr: '10.9.0.0/24', targets: 'not-a-list' }]), /targets must be an array/);
+  assert.match(bad([42]), /exclusions\[0\] must be an object/);
+  assert.match(validateConfigDoc({ lanscope_config: 1, exclusions: {} }, DEPS).error, /exclusions must be an array/);
+});
+
+test('importConfig: exclusion lists land, a re-import replaces (not appends) and the plan names the overwritten network', () => {
+  db.setNetworkExclusions('10.6.0.0/24', ['10.6.0.9']);
+  const doc = validateConfigDoc({
+    lanscope_config: 1,
+    exclusions: [
+      { cidr: '10.6.0.0/24', targets: ['10.6.0.1', '10.6.0.20-29'] },
+      { cidr: '10.5.0.0/24', targets: ['10.5.0.64/26'] },
+    ],
+  }, DEPS).value;
+  const dry = db.importConfig(doc, { dryRun: true });
+  assert.equal(dry.imported.exclusions, 2);
+  assert.deepEqual(dry.plan.exclusions, { created: 1, updated: ['10.6.0.0/24'] });
+  assert.deepEqual(db.getNetworkExclusions('10.6.0.0/24'), ['10.6.0.9'], 'dry run wrote nothing');
+  const r = db.importConfig(doc);
+  assert.equal(r.imported.exclusions, 2);
+  assert.deepEqual(db.getNetworkExclusions('10.6.0.0/24'), ['10.6.0.1', '10.6.0.20-29'], 'replaced, not merged');
+  assert.deepEqual(db.getNetworkExclusions('10.5.0.0/24'), ['10.5.0.64/26']);
+  const again = db.importConfig(doc);
+  assert.deepEqual(again.plan.exclusions.updated.sort(), ['10.5.0.0/24', '10.6.0.0/24'], 'second import overwrites both, breeds nothing');
+  assert.deepEqual(db.listAllNetworkExclusions().filter((e) => e.cidr.startsWith('10.5') || e.cidr.startsWith('10.6')).map((e) => e.cidr), ['10.5.0.0/24', '10.6.0.0/24']);
+  // An empty list on import forgets the network, the PUT semantics.
+  db.importConfig(validateConfigDoc({ lanscope_config: 1, exclusions: [{ cidr: '10.5.0.0/24', targets: [] }] }, DEPS).value);
+  assert.deepEqual(db.getNetworkExclusions('10.5.0.0/24'), []);
+});
+
+test('a document without an exclusions key (pre-v1.39 backup) leaves the remembered lists alone', () => {
+  db.setNetworkExclusions('10.4.0.0/24', ['10.4.0.1']);
+  const r = db.importConfig(validateConfigDoc(validDoc(), DEPS).value);
+  assert.equal(r.imported.exclusions, 0);
+  assert.deepEqual(db.getNetworkExclusions('10.4.0.0/24'), ['10.4.0.1']);
 });

@@ -91,19 +91,20 @@
         <div class="panel-header">
           <h2>Config</h2>
           <div class="panel-actions">
-            <a id="config-export-btn" class="ghost small" href="/api/config/export" download title="Download labels, mutes, schedules and notification channels as one JSON backup">⬇ Export</a>
-            <button id="config-import-btn" class="ghost small" type="button" title="Restore a config backup — scoped to the checked sections; labels and mutes upsert, schedules and channels with an existing name are skipped">⬆ Import</button>
+            <a id="config-export-btn" class="ghost small" href="/api/config/export" download title="Download labels, mutes, schedules, notification channels and remembered exclusions as one JSON backup">⬇ Export</a>
+            <button id="config-import-btn" class="ghost small" type="button" title="Restore a config backup — scoped to the checked sections; labels, mutes and exclusion lists upsert, schedules and channels with an existing name are skipped">⬆ Import</button>
             <input id="config-import-file" type="file" accept=".json,application/json" hidden />
           </div>
         </div>
         <!-- The section checkboxes scope BOTH directions: on export (v1.26)
              they pick what the backup carries, on import (v1.27) which
-             sections of the file get restored. All four checked = the whole
+             sections of the file get restored. All five checked = the whole
              document either way; a subset scopes the operation. -->
         <div class="adv-checks-row config-export-scope">
           <label class="adv-check"><input type="checkbox" id="cfg-sec-labels" checked /><span>labels</span></label>
           <label class="adv-check"><input type="checkbox" id="cfg-sec-mutes" checked /><span>mutes</span></label>
           <label class="adv-check"><input type="checkbox" id="cfg-sec-schedules" checked /><span>schedules</span></label>
+          <label class="adv-check"><input type="checkbox" id="cfg-sec-exclusions" checked /><span>exclusions</span></label>
           <label class="adv-check"><input type="checkbox" id="cfg-sec-channels" checked /><span>channels</span></label>
         </div>
         <p id="config-io-status" class="muted config-io-status" hidden></p>

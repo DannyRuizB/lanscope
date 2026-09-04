@@ -1463,6 +1463,24 @@ function listAllLabels() {
   return db.prepare(`SELECT * FROM host_labels ORDER BY cidr, ip`).all();
 }
 
+// v1.39.0 — every remembered exclusion list, for the config export. The
+// JSON column is parsed here so callers see the same shape as
+// getNetworkExclusions; an unreadable row exports as an empty list rather
+// than poisoning the whole backup.
+function listAllNetworkExclusions() {
+  return db
+    .prepare(`SELECT cidr, targets FROM network_exclusions ORDER BY cidr`)
+    .all()
+    .map(({ cidr, targets }) => {
+      try {
+        const parsed = JSON.parse(targets);
+        return { cidr, targets: Array.isArray(parsed) ? parsed.map(String) : [] };
+      } catch {
+        return { cidr, targets: [] };
+      }
+    });
+}
+
 function listAllMutes() {
   purgeExpiredMutes();
   return db
@@ -1485,12 +1503,12 @@ function listAllMutes() {
 const DRY_RUN_ROLLBACK = Symbol("dry-run rollback");
 
 function importConfig(
-  { labels = [], mutes = [], schedules = [], channels = [] },
+  { labels = [], mutes = [], schedules = [], channels = [], exclusions = [] },
   { dryRun = false } = {},
 ) {
   const result = {
     dry_run: dryRun,
-    imported: { labels: 0, mutes: 0, schedules: 0, channels: 0 },
+    imported: { labels: 0, mutes: 0, schedules: 0, channels: 0, exclusions: 0 },
     skipped: { schedules: [], channels: [] },
     // What the counts above are made of: an upsert that lands on an existing
     // row overwrites a name someone typed, which is the one thing a person
@@ -1498,10 +1516,15 @@ function importConfig(
     plan: {
       labels: { created: 0, updated: [] },
       mutes: { created: 0, updated: [] },
+      // v1.39.0 — a remembered exclusion list is one value per network, so a
+      // backup's list REPLACES the box's (the PUT semantics), and the plan
+      // names the networks whose list gets overwritten.
+      exclusions: { created: 0, updated: [] },
     },
   };
   const existingLabels = new Set(listAllLabels().map((l) => `${l.cidr}|${l.ip}`));
   const existingMutes = new Set(listAllMutes().map((m) => `${m.cidr}|${m.ip}`));
+  const existingExcl = new Set(listAllNetworkExclusions().map((e) => e.cidr));
   const run = db.transaction(() => {
     for (const l of labels) {
       const key = `${l.cidr}|${l.ip}`;
@@ -1532,6 +1555,15 @@ function importConfig(
       createSchedule(s);
       schedNames.add(s.name);
       result.imported.schedules += 1;
+    }
+    for (const e of exclusions) {
+      if (existingExcl.has(e.cidr)) result.plan.exclusions.updated.push(e.cidr);
+      else {
+        result.plan.exclusions.created += 1;
+        existingExcl.add(e.cidr);
+      }
+      setNetworkExclusions(e.cidr, e.targets);
+      result.imported.exclusions += 1;
     }
     const chanNames = new Set(listChannels().map((c) => c.name));
     for (const c of channels) {
@@ -1607,6 +1639,7 @@ function touchApiToken(id) {
 module.exports = {
   getNetworkExclusions,
   setNetworkExclusions,
+  listAllNetworkExclusions,
   startScan,
   finishScan,
   failScan,

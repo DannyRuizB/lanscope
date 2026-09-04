@@ -175,7 +175,7 @@ function validateNotesText(s) {
 // vocabulary either way — on export it picks what the backup carries, on
 // import what gets restored — and both compose because the import already
 // treats an absent section as "nothing to do here".
-const CONFIG_SECTIONS = ["labels", "mutes", "schedules", "channels"];
+const CONFIG_SECTIONS = ["labels", "mutes", "schedules", "channels", "exclusions"];
 
 function validateSectionsParam(raw) {
   // Absent means everything — the pre-v1.26 contract, unchanged.
@@ -206,7 +206,7 @@ function validateSectionsParam(raw) {
 // the scan-options validator in the scheduler, and dragging either in here
 // would tie the unit tests to nmap and node-cron wiring.
 function validateConfigDoc(doc, deps) {
-  const { validateCidr, validateIpv4, validateScanOptions, alertTypes } = deps;
+  const { validateCidr, validateIpv4, validateScanOptions, alertTypes, validateExclude } = deps;
   if (!doc || typeof doc !== "object" || Array.isArray(doc)) {
     return { error: "body must be a config export object" };
   }
@@ -214,7 +214,7 @@ function validateConfigDoc(doc, deps) {
     return { error: "not a LanScope config export (expected lanscope_config: 1)" };
   }
   const sections = {};
-  for (const key of ["labels", "mutes", "schedules", "channels"]) {
+  for (const key of ["labels", "mutes", "schedules", "channels", "exclusions"]) {
     const v = doc[key];
     if (v === undefined || v === null) {
       sections[key] = [];
@@ -224,7 +224,7 @@ function validateConfigDoc(doc, deps) {
       sections[key] = v;
     }
   }
-  const out = { labels: [], mutes: [], schedules: [], channels: [] };
+  const out = { labels: [], mutes: [], schedules: [], channels: [], exclusions: [] };
   const typeSet = new Set(alertTypes);
 
   for (const [i, l] of sections.labels.entries()) {
@@ -316,6 +316,26 @@ function validateConfigDoc(doc, deps) {
       events: eventsV.value,
       enabled: c.enabled !== false,
     });
+  }
+
+  // v1.39.0 — remembered exclusion lists, one per network. The same
+  // allowlist that guards PUT /api/exclusions judges every entry here
+  // (IPv4, CIDR or last-octet range — nothing nmap could read as a flag), so
+  // a backup cannot smuggle in what the live endpoint refuses. An empty
+  // list is legal and means "forget this network's list" on import.
+  for (const [i, e] of sections.exclusions.entries()) {
+    const where = `exclusions[${i}]`;
+    if (!e || typeof e !== "object") return { error: `${where} must be an object` };
+    const cidrErr = validateCidr(e.cidr);
+    if (cidrErr) return { error: `${where}: ${cidrErr}` };
+    if (e.targets !== undefined && e.targets !== null && !Array.isArray(e.targets)) {
+      return { error: `${where}: targets must be an array of hosts` };
+    }
+    const raw = e.targets ?? [];
+    const ex = validateExclude(raw);
+    if (ex.error) return { error: `${where}: ${ex.error}` };
+    const targets = [...new Set(raw.map((s) => String(s).trim()).filter(Boolean))];
+    out.exclusions.push({ cidr: e.cidr, targets });
   }
 
   return { value: out };

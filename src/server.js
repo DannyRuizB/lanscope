@@ -726,6 +726,12 @@ app.get("/api/config/export", (req, res) => {
       latency_alert_ms: s.latency_alert_ms ?? null,
     }));
   }
+  // v1.39.0 — the remembered exclusion lists (v1.38) ride along: the box
+  // you were told to leave alone is configuration, and a second LanScope
+  // that inherits the labels should inherit the "never probe" list too.
+  if (has("exclusions")) {
+    doc.exclusions = db.listAllNetworkExclusions().map(({ cidr, targets }) => ({ cidr, targets }));
+  }
   if (has("channels")) {
     doc.channels = db.listChannels().map((c) => ({
       name: c.name,
@@ -755,6 +761,7 @@ app.post("/api/config/import", (req, res) => {
     validateIpv4,
     validateScanOptions: scheduler.validateScheduleScanOptions,
     alertTypes: db.ALERT_TYPES,
+    validateExclude,
   });
   if (v.error) return res.status(400).json({ error: v.error });
   // v1.27.0 — ?sections=labels,mutes restores only those sections and leaves
@@ -767,7 +774,7 @@ app.post("/api/config/import", (req, res) => {
   if (secV.error) return res.status(400).json({ error: secV.error });
   const doc = v.value;
   if (secV.value !== null) {
-    for (const section of ["labels", "mutes", "schedules", "channels"]) {
+    for (const section of ["labels", "mutes", "schedules", "channels", "exclusions"]) {
       if (!secV.value.includes(section)) doc[section] = [];
     }
   }
