@@ -32,13 +32,39 @@ function parseBasicHeader(header) {
 // Express middleware. Evaluates both comparisons unconditionally (no &&
 // short-circuit on the user check) so a wrong username costs the same time
 // as a wrong password.
-function basicAuth({ user, pass }) {
+//
+// v1.43.0 — `throttle` (optional, the login form's createLoginThrottle):
+// Basic carries AUTH_PASS, the SAME human-chosen password the login form
+// takes, so an unthrottled Basic path made the form's throttle theatre —
+// measured: with the form at 429, Basic answered 200 guesses in ~1 s and
+// the right password still got in. Now a presented-but-wrong Basic
+// credential is a failure on the same per-address counter, and a limited
+// address is refused (429, named, Retry-After) BEFORE its credential is
+// evaluated — the form's rules exactly. A request with no Basic header is
+// a challenge, not a guess, and is never counted. Session cookies and
+// Bearer tokens are checked before this in requireAuth and never touch the
+// counter: a logged-in admin keeps working while their address is limited.
+function basicAuth({ user, pass, throttle, addressOf = clientAddress }) {
   return (req, res, next) => {
     const creds = parseBasicHeader(req.headers.authorization);
     if (creds) {
+      const addr = throttle ? addressOf(req) : null;
+      if (throttle) {
+        const gate = throttle.check(addr);
+        if (gate.limited) {
+          res.set("Retry-After", String(gate.retryAfterSec));
+          return res.status(429).json({
+            error: `too many failed logins — try again in ${gate.retryAfterSec} s`,
+          });
+        }
+      }
       const userOk = safeEqual(creds.user, user);
       const passOk = safeEqual(creds.pass, pass);
-      if (userOk && passOk) return next();
+      if (userOk && passOk) {
+        if (throttle) throttle.recordSuccess(addr);
+        return next();
+      }
+      if (throttle) throttle.recordFailure(addr);
     }
     res.set("WWW-Authenticate", 'Basic realm="LanScope", charset="UTF-8"');
     res.status(401).json({ error: "Authentication required" });
@@ -181,8 +207,8 @@ function ipInCidr(ip, cidr) {
 // Combined middleware: a valid API token OR the Basic credential opens the
 // door. Token first — it's cheap to rule out (regex + one indexed lookup)
 // and API clients never see the browser's Basic prompt semantics change.
-function requireAuth({ user, pass, secret, findTokenByHash, markTokenUsed }) {
-  const basic = basicAuth({ user, pass });
+function requireAuth({ user, pass, secret, findTokenByHash, markTokenUsed, throttle }) {
+  const basic = basicAuth({ user, pass, throttle });
   return (req, res, next) => {
     // v1.34.0 — a valid session cookie opens the door too (the browser's
     // login-form path). A session is always full-access — it IS the admin
