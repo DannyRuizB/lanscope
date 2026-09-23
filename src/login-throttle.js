@@ -16,11 +16,17 @@
 //     the refusal costs nothing, and the window does not stretch while
 //     limited (the deadline is set by the FIRST failure, so "try again in
 //     N s" is a promise that holds instead of a horizon that recedes).
-//   - Only /api/login is throttled. Basic and Bearer are high-entropy
-//     machine credentials on every request — throttling them would let one
-//     forged header lock the admin out of their own dashboard (an anti-
-//     brute-force control that doubles as a DoS is the rate-limit-inverted
-//     smell from the firewall linter, grown legs).
+//   - Every path that takes AUTH_PASS is throttled: /api/login AND the
+//     Basic header (v1.43.0). v1.35 exempted Basic as a "high-entropy
+//     machine credential" — it is not: it carries the same human-chosen
+//     password as the form, so the exemption was a bypass (measured: 200
+//     Basic guesses in ~1 s while the form said 429). Bearer tokens ARE
+//     high-entropy (32 random bytes) and stay unthrottled, and so do session
+//     cookies (HMAC-signed). The lock-out worry that motivated the exemption
+//     does not hold per address: a forged header only spends the budget of
+//     the address that sent it, and a logged-in admin's cookie never
+//     consults the counter (an anti-brute-force control that doubles as a
+//     DoS is the rate-limit-inverted smell from the firewall linter).
 //   - Keyed by the socket's peer address (the v1.31 binding precedent:
 //     a forwarded header is attacker-writable, so behind a reverse proxy
 //     this is the proxy's address — the throttle then guards the TOTAL
