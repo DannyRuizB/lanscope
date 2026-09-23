@@ -179,6 +179,9 @@ if (AUTH_USER) {
       secret: SESSION_SECRET,
       findTokenByHash: db.findApiTokenByHash,
       markTokenUsed: db.touchApiToken,
+      // v1.43.0 — Basic carries the same password as the form, so it
+      // spends the same per-address budget (see basicAuth).
+      throttle: loginThrottle,
     })
   );
   console.log("[auth] HTTP Basic Auth enabled (API tokens accepted)");
