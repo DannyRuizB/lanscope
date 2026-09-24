@@ -294,12 +294,21 @@ async function loadScan(id) {
 function portsButtonLabel(host) {
   if (!host.portscanned_at) return "Scan ports";
   const open = (host.ports || []).filter((p) => p.state === "open").length;
-  return `${open} open · ▾`;
+  return `${open} open${host.port_timedout ? " ⏱" : ""} · ▾`;
+}
+
+// v1.44.0 — a scan that hit --host-timeout comes back PARTIAL (v1.41 stores
+// it), and until now only the expanded panel said so: in the table "0 open"
+// read exactly like a clean host. The button now carries the mark and says
+// why; `is:timedout` in the search box lists every such host.
+const TIMEDOUT_TITLE = "The scan hit the per-host timeout: the ports not listed are unknown, not closed. Re-scan with a longer (or no) host timeout.";
+function timedOutAttrs(timedOut) {
+  return timedOut ? ` title="${TIMEDOUT_TITLE}" data-timedout="1"` : "";
 }
 
 function renderPortsButton(host) {
   if (host.status !== "up") return `<span class="muted">—</span>`;
-  return `<button class="ghost small portscan-btn" data-host-id="${host.id}">${portsButtonLabel(host)}</button>`;
+  return `<button class="ghost small portscan-btn${host.port_timedout ? " scan-timedout" : ""}" data-host-id="${host.id}"${timedOutAttrs(host.port_timedout)}>${portsButtonLabel(host)}</button>`;
 }
 
 // Wake-on-LAN is addressed to the NIC, so the button only renders when the
@@ -535,14 +544,15 @@ function udpButtonLabel(host) {
   const ports = host.udp_ports || [];
   const responsive = ports.filter((p) => p.state === "open").length;
   const unknown = ports.filter((p) => p.state === "open|filtered").length;
-  if (responsive) return `${responsive} responsive · ▾`;
-  if (unknown) return `${unknown} unknown · ▾`;
-  return `0 responsive · ▾`;
+  const mark = host.udp_port_timedout ? " ⏱" : "";
+  if (responsive) return `${responsive} responsive${mark} · ▾`;
+  if (unknown) return `${unknown} unknown${mark} · ▾`;
+  return `0 responsive${mark} · ▾`;
 }
 
 function renderUdpButton(host) {
   if (host.status !== "up") return `<span class="muted">—</span>`;
-  return `<button class="ghost small udpscan-btn" data-host-id="${host.id}">${udpButtonLabel(host)}</button>`;
+  return `<button class="ghost small udpscan-btn${host.udp_port_timedout ? " scan-timedout" : ""}" data-host-id="${host.id}"${timedOutAttrs(host.udp_port_timedout)}>${udpButtonLabel(host)}</button>`;
 }
 
 function familyLetter(family) {

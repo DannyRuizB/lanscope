@@ -2139,3 +2139,4 @@ li.is-baseline .scan-cidr {
 
 /* v1.41.0 — a port scan that hit --host-timeout: unknown, not clean */
 .ports-timedout { color: var(--warn, #b7791f); border: 1px dashed currentColor; }
+.scan-timedout { color: var(--warn, #b7791f); border-style: dashed; }
