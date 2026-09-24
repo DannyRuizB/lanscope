@@ -77,3 +77,33 @@ test('matchHost is the single-host predicate behind searchHosts', () => {
   assert.equal(matchHost(HOSTS[0], 'apple'), false);
   assert.equal(matchHost(HOSTS[0], ''), true);
 });
+
+// --- v1.44.0: UDP ports, and the partial-scan filter -------------------------
+
+test('a UDP port that ANSWERED is searchable, as the module always promised (fix)', () => {
+  const snmp = { ip: '10.0.0.9', ports: [{ port: 22, state: 'open' }], udp_ports: [{ port: 161, state: 'open' }] };
+  assert.equal(matchHost(snmp, '161'), true);
+  assert.equal(matchHost(snmp, '22'), true);
+});
+
+test('an open|filtered UDP port is NOT searchable: nmap got no reply and cannot tell', () => {
+  const quiet = { ip: '10.0.0.10', ports: [], udp_ports: [{ port: 53, state: 'open|filtered' }] };
+  assert.equal(matchHost(quiet, '53'), false);
+});
+
+test('is:timedout lists the hosts whose TCP or UDP port scan hit the per-host timeout', () => {
+  const hosts = [
+    { ip: '10.0.0.1', port_timedout: 1, udp_port_timedout: 0 },
+    { ip: '10.0.0.2', port_timedout: 0, udp_port_timedout: 1 },
+    { ip: '10.0.0.3', port_timedout: 0, udp_port_timedout: 0 },
+    { ip: '10.0.0.4' },
+  ];
+  assert.deepEqual(searchHosts(hosts, 'is:timedout').map((h) => h.ip), ['10.0.0.1', '10.0.0.2']);
+  assert.deepEqual(searchHosts(hosts, '  IS:TimedOut ').map((h) => h.ip), ['10.0.0.1', '10.0.0.2']);
+});
+
+test('is:timedout is a keyword, not a substring: a host named "timedout" is not a partial scan', () => {
+  const hosts = [{ ip: '10.0.0.5', hostname: 'is-timedout-box', port_timedout: 0 }];
+  assert.equal(searchHosts(hosts, 'is:timedout').length, 0);
+  assert.equal(searchHosts(hosts, 'timedout').length, 1);
+});
