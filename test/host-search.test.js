@@ -107,3 +107,58 @@ test('is:timedout is a keyword, not a substring: a host named "timedout" is not 
   assert.equal(searchHosts(hosts, 'is:timedout').length, 0);
   assert.equal(searchHosts(hosts, 'timedout').length, 1);
 });
+
+// v1.45.0 — terms, keywords and negation.
+const FLEET = [
+  { ip: '10.0.0.1', mac: 'AA:BB:CC:22:33:44', status: 'up', hostname: 'nas',
+    ports: [{ port: 2222, state: 'open' }], udp_ports: [] },
+  { ip: '10.0.0.22', mac: 'AA:BB:CC:00:00:01', status: 'up', hostname: 'pi',
+    ports: [{ port: 22, state: 'open' }, { port: 80, state: 'open' }], udp_ports: [{ port: 161, state: 'open' }] },
+  { ip: '10.0.0.3', mac: 'AA:BB:CC:00:00:02', status: 'down', hostname: 'printer',
+    ports: [{ port: 22, state: 'closed' }], udp_ports: [{ port: 22, state: 'open|filtered' }] },
+  { ip: '10.0.0.4', mac: 'AA:BB:CC:00:00:03', status: 'up', hostname: 'switch',
+    ports: [], udp_ports: [{ port: 161, state: 'open' }] },
+];
+const ips = (q, labelFor) => searchHosts(FLEET, q, labelFor).map((h) => h.ip);
+
+test('port:N is exact: the substring 22 also hits a MAC, an IP and port 2222; port:22 only the open 22', () => {
+  assert.deepEqual(ips('22'), ['10.0.0.1', '10.0.0.22']);
+  assert.deepEqual(ips('port:22'), ['10.0.0.22']);
+  assert.deepEqual(ips('port:2222'), ['10.0.0.1']);
+});
+
+test('port: covers TCP and UDP; tcp: and udp: pick one; closed and open|filtered never count', () => {
+  assert.deepEqual(ips('port:161'), ['10.0.0.22', '10.0.0.4']);
+  assert.deepEqual(ips('tcp:161'), []);
+  assert.deepEqual(ips('udp:161'), ['10.0.0.22', '10.0.0.4']);
+  assert.deepEqual(ips('tcp:22'), ['10.0.0.22']);
+  assert.deepEqual(ips('udp:22'), []);
+});
+
+test('is:up / is:down / is:labeled', () => {
+  assert.deepEqual(ips('is:up'), ['10.0.0.1', '10.0.0.22', '10.0.0.4']);
+  assert.deepEqual(ips('is:down'), ['10.0.0.3']);
+  const labels = { '10.0.0.4': 'Core switch', '10.0.0.1': '   ' };
+  assert.deepEqual(ips('is:labeled', (ip) => labels[ip] || null), ['10.0.0.4']);
+});
+
+test('terms are ANDed, a leading - negates, and keywords are case-insensitive', () => {
+  assert.deepEqual(ips('is:up udp:161'), ['10.0.0.22', '10.0.0.4']);
+  assert.deepEqual(ips('IS:UP  UDP:161   -Port:22'), ['10.0.0.4']);
+  assert.deepEqual(ips('-is:up'), ['10.0.0.3']);
+  assert.deepEqual(ips('pi port:80'), ['10.0.0.22']);
+});
+
+test('a keyword with a value it cannot use matches nothing (no silent fallback to the substring)', () => {
+  for (const q of ['port:ssh', 'port:0', 'port:65536', 'tcp:', 'is:nope', 'is:']) {
+    assert.deepEqual(ips(q), [], q);
+  }
+  assert.deepEqual(ips('-'), [], 'a lone dash is a substring term');
+});
+
+test('multi-word text still works as before: every word must appear', () => {
+  const hosts = [{ ip: '192.168.1.42', vendor: 'Apple, Inc.', hostname: 'iphone.lan' }];
+  assert.equal(searchHosts(hosts, 'Apple, Inc.').length, 1);
+  assert.equal(searchHosts(hosts, 'apple iphone').length, 1);
+  assert.equal(searchHosts(hosts, 'apple android').length, 0);
+});
