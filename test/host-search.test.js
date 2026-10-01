@@ -162,3 +162,76 @@ test('multi-word text still works as before: every word must appear', () => {
   assert.equal(searchHosts(hosts, 'apple iphone').length, 1);
   assert.equal(searchHosts(hosts, 'apple android').length, 0);
 });
+
+// --- v1.46.0: field keywords and quoted phrases ------------------------------
+// Measured on the demo seed: `192.168.1.1` as a substring matches SEVEN hosts
+// (.1 .10 .11 .12 .100 .101 .150); `ip:` is exact or a CIDR block.
+
+const NET = ['1', '10', '11', '12', '100', '101', '150'].map((o) => ({
+  ip: `192.168.1.${o}`, mac: '00:11:22:33:44:55', vendor: 'X', hostname: `h${o}.lan`, ports: [],
+}));
+const lastOctets = (q, hosts = NET) => searchHosts(hosts, q).map((h) => h.ip.split('.')[3]);
+
+test('ip:A is exact - the substring 192.168.1.1 hits seven hosts, ip: one', () => {
+  assert.equal(searchHosts(NET, '192.168.1.1').length, 7);
+  assert.deepEqual(lastOctets('ip:192.168.1.1'), ['1']);
+  assert.deepEqual(lastOctets('ip:192.168.1.10'), ['10']);
+});
+
+test('ip:A/N is a CIDR block, and negates like any term', () => {
+  assert.deepEqual(lastOctets('ip:192.168.1.0/28'), ['1', '10', '11', '12']);
+  assert.deepEqual(lastOctets('ip:192.168.1.96/27'), ['100', '101']);
+  assert.deepEqual(lastOctets('ip:0.0.0.0/0'), ['1', '10', '11', '12', '100', '101', '150']);
+  assert.deepEqual(lastOctets('-ip:192.168.1.0/25'), ['150']);
+  // the host bits of the block itself do not matter, as in a route
+  assert.deepEqual(lastOctets('ip:192.168.1.5/28'), ['1', '10', '11', '12']);
+});
+
+test('ip: with a value it cannot use matches NOTHING (no fallback to the substring)', () => {
+  for (const q of ['ip:192.168.1.256', 'ip:192.168.1.0/33', 'ip:192.168', 'ip:router', 'ip:', 'ip:1.2.3.4/8/9', 'ip:192.168.1.0/x']) {
+    assert.equal(searchHosts(NET, q).length, 0, q);
+  }
+});
+
+test('mac: is a prefix (an OUI), with any separator or none', () => {
+  const ips = (q) => searchHosts(HOSTS, q).map((h) => h.ip);
+  assert.deepEqual(ips('mac:AC:DE:48'), ['192.168.1.42']);
+  assert.deepEqual(ips('mac:ac-de-48'), ['192.168.1.42']);
+  assert.deepEqual(ips('mac:acde48'), ['192.168.1.42']);
+  // a prefix, not a substring: 11:22 sits inside two MACs but starts none
+  assert.equal(searchHosts(HOSTS, '11:22').length, 2);
+  assert.equal(searchHosts(HOSTS, 'mac:11:22').length, 0);
+  assert.equal(searchHosts(HOSTS, 'mac:zz').length, 0);
+});
+
+test('vendor: / os: / name: look at their own field only', () => {
+  const ips = (q, labelFor) => searchHosts(HOSTS, q, labelFor).map((h) => h.ip);
+  // `pi` hits pihole's hostname AND its vendor; name: only the hostname
+  assert.deepEqual(ips('pi'), ['192.168.1.50']);
+  assert.deepEqual(ips('name:pihole'), ['192.168.1.50']);
+  assert.deepEqual(ips('vendor:pihole'), []);
+  assert.deepEqual(ips('vendor:raspberry'), ['192.168.1.50']);
+  assert.deepEqual(ips('name:raspberry'), []);
+  assert.deepEqual(ips('os:linux'), ['192.168.1.1']);
+  assert.deepEqual(ips('os:router'), []);
+  // name: covers the friendly label too
+  assert.deepEqual(ips('name:garage', (ip) => (ip === '192.168.1.1' ? 'Garage AP' : null)), ['192.168.1.1']);
+  // an empty value matches nothing
+  assert.deepEqual(ips('vendor:'), []);
+});
+
+test('a double-quoted phrase keeps its spaces, alone, as a keyword value or negated', () => {
+  const ips = (q) => searchHosts(HOSTS, q).map((h) => h.ip);
+  assert.deepEqual(ips('"apple, inc."'), ['192.168.1.42']);
+  assert.deepEqual(ips('vendor:"raspberry pi"'), ['192.168.1.50']);
+  assert.deepEqual(ips('-"raspberry pi"'), ['192.168.1.1', '192.168.1.42']);
+  // without quotes the same words are two terms that must both match somewhere
+  assert.deepEqual(ips('raspberry router'), []);
+  assert.deepEqual(ips('"raspberry router"'), []);
+});
+
+test('tokenize: quotes group, an unterminated quote runs to the end', () => {
+  const { tokenize } = require('../src/public/host-search');
+  assert.deepEqual([...tokenize('-vendor:"a b" port:22 "x y" -"z w" "open end')], ['-vendor:a b', 'port:22', 'x y', '-z w', 'open end']);
+  assert.deepEqual([...tokenize('  ')], []);
+});

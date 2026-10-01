@@ -16,6 +16,19 @@
 // it. A keyword with a value it cannot use (`port:ssh`, `is:nope`) matches
 // NOTHING rather than falling back to the substring, so a typo shows up as an
 // empty table instead of as a plausible-looking wrong one.
+//
+// v1.46.0 — field keywords and quoted phrases. Measured on the demo seed, a
+// bare IP is the worst substring of all: `192.168.1.1` matches SEVEN hosts
+// (.1, .10, .11, .12, .100, .101, .150) and `192.168.1.10` three. So
+// `ip:192.168.1.1` is exact, and `ip:192.168.1.0/28` a CIDR block (IPv4,
+// like the scanner). `mac:` is a prefix - an OUI, any of `:`, `-` or no
+// separator. `vendor:`, `os:` and `name:` (hostname or label) are a
+// substring of THAT field only - on the seed, `pi` hits pihole AND
+// homeassistant (a Raspberry Pi), `name:pi` only pihole; `apple` hits the Mac
+// and the iPhone, `os:apple` only the host nmap fingerprinted as macOS.
+// A double-quoted phrase keeps its spaces, alone or as a
+// keyword value: `"apple, inc."`, `vendor:"raspberry pi"`; an unterminated
+// quote runs to the end of the query.
 (function (global) {
   "use strict";
 
@@ -61,7 +74,37 @@
     return n >= 1 && n <= 65535 ? n : null;
   }
 
+  // A dotted-quad IPv4 as an unsigned 32-bit number, or null.
+  function ipv4(v) {
+    const m = /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/.exec(v);
+    if (!m) return null;
+    const o = m.slice(1).map(Number);
+    if (o.some((x) => x > 255)) return null;
+    return ((o[0] << 24) | (o[1] << 16) | (o[2] << 8) | o[3]) >>> 0;
+  }
+
+  // `ip:` value: an exact address, or a CIDR block a.b.c.d/n (0-32).
+  function ipMatches(ip, v) {
+    const [addr, bits, extra] = v.split("/");
+    if (extra !== undefined) return false;
+    const want = ipv4(addr);
+    const have = ipv4(String(ip || ""));
+    if (want === null || have === null) return false;
+    if (bits === undefined) return want === have;
+    if (!/^\d{1,2}$/.test(bits) || Number(bits) > 32) return false;
+    const mask = Number(bits) === 0 ? 0 : (0xffffffff << (32 - Number(bits))) >>> 0;
+    return ((want & mask) >>> 0) === ((have & mask) >>> 0);
+  }
+
+  const hex = (v) => String(v || "").toLowerCase().replace(/[^0-9a-f]/g, "");
+  const has = (field, v) => v !== "" && String(field || "").toLowerCase().includes(v);
+
   const KEYWORDS = {
+    ip: (host, v) => ipMatches(host.ip, v),
+    mac: (host, v) => /^[0-9a-f:-]+$/.test(v) && hex(v) !== "" && hex(host.mac).startsWith(hex(v)),
+    vendor: (host, v) => has(host.vendor, v),
+    os: (host, v) => (host.os_matches || []).some((m) => has(m.name, v)),
+    name: (host, v, label) => has(host.hostname, v) || has(label, v),
     is: (host, v, label) => (IS[v] ? IS[v](host, label) : false),
     port: (host, v) => {
       const n = portValue(v);
@@ -85,8 +128,21 @@
 
   // True when the host matches the query. An empty / whitespace query
   // matches everything (no filter applied).
+  // Split a query into terms: whitespace separates, a double-quoted run
+  // (alone or after `keyword:` / `-`) keeps its spaces and loses its quotes.
+  function tokenize(query) {
+    const out = [];
+    const re = /(-?(?:[a-z]+:)?)"([^"]*)"?|\S+/g;
+    let m;
+    while ((m = re.exec(query)) !== null) {
+      if (m[2] !== undefined) out.push(m[1] + m[2]);
+      else out.push(m[0]);
+    }
+    return out.filter((t) => t !== "");
+  }
+
   function matchHost(host, query, label) {
-    const terms = String(query || "").trim().toLowerCase().split(/\s+/).filter(Boolean);
+    const terms = tokenize(String(query || "").trim().toLowerCase());
     if (!terms.length) return true;
     let cached = null;
     const hay = () => (cached === null ? (cached = haystack(host, label)) : cached);
@@ -106,7 +162,7 @@
     return hosts.filter((h) => matchHost(h, q, lookup(h.ip)));
   }
 
-  const api = { matchHost, searchHosts };
+  const api = { matchHost, searchHosts, tokenize };
   if (typeof module !== "undefined" && module.exports) module.exports = api;
   else global.HostSearch = api;
 })(typeof window !== "undefined" ? window : globalThis);
