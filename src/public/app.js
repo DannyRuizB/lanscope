@@ -1227,7 +1227,13 @@ function filterHosts(hosts) {
   let out = filterPort === null ? hosts : hosts.filter((h) => hasOpenPort(h, filterPort));
   // Free-text search (v1.11.0) on top of the port filter. HostSearch is the
   // shared pure module; the label lookup makes friendly names searchable.
-  out = HostSearch.searchHosts(out, searchQuery, (ip) => hostLabels.get(ip)?.label || null);
+  // v1.47.0: is:new / is:changed read the active comparison (null when none).
+  out = HostSearch.searchHosts(
+    out,
+    searchQuery,
+    (ip) => hostLabels.get(ip)?.label || null,
+    (ip) => lastDiff?.byIp.get(ip)?.state || null,
+  );
   return out;
 }
 
@@ -2284,7 +2290,9 @@ function updateHostSearchCount(shown, total) {
     return;
   }
   els.hostSearchCount.hidden = false;
-  els.hostSearchCount.textContent = `${shown} of ${total}`;
+  els.hostSearchCount.textContent = HostSearch.needsComparison(searchQuery) && !diffActive()
+    ? `${shown} of ${total} · is:new / is:changed need a comparison (Compare, or a baseline)`
+    : `${shown} of ${total}`;
 }
 
 els.portFilterInput?.addEventListener("focus", () => {

@@ -235,3 +235,34 @@ test('tokenize: quotes group, an unterminated quote runs to the end', () => {
   assert.deepEqual([...tokenize('-vendor:"a b" port:22 "x y" -"z w" "open end')], ['-vendor:a b', 'port:22', 'x y', '-z w', 'open end']);
   assert.deepEqual([...tokenize('  ')], []);
 });
+
+// v1.47.0 — is:new / is:changed read the host's state in the ACTIVE
+// comparison (scan-diff.js byIp states), passed as the 4th argument.
+test('is:new / is:changed follow the active comparison, and AND with other terms', () => {
+  const state = { '192.168.1.1': 'unchanged', '192.168.1.42': 'appeared', '192.168.1.50': 'changed' };
+  const ips = (q) => searchHosts(HOSTS, q, null, (ip) => state[ip] || null).map((h) => h.ip);
+  assert.deepEqual(ips('is:new'), ['192.168.1.42']);
+  assert.deepEqual(ips('is:changed'), ['192.168.1.50']);
+  assert.deepEqual(ips('-is:new'), ['192.168.1.1', '192.168.1.50']);
+  assert.deepEqual(ips('is:changed port:22'), ['192.168.1.50']);
+  assert.deepEqual(ips('is:changed port:443'), []);
+});
+
+test('is:new / is:changed match nothing with no comparison, and the UI is told why', () => {
+  const { needsComparison } = require('../src/public/host-search');
+  assert.equal(searchHosts(HOSTS, 'is:new').length, 0);
+  assert.equal(searchHosts(HOSTS, 'is:changed', null, () => null).length, 0);
+  // Anchor: the same query DOES match when a comparison is active.
+  assert.equal(searchHosts(HOSTS, 'is:new', null, () => 'appeared').length, 3);
+  assert.equal(needsComparison('port:22 is:new'), true);
+  assert.equal(needsComparison('-IS:CHANGED'), true);
+  assert.equal(needsComparison('is:up port:22'), false);
+  assert.equal(needsComparison('"is:new"'), true, 'a quoted keyword is still the keyword');
+  assert.equal(needsComparison(''), false);
+});
+
+test('a host literally named "new" is not is:new', () => {
+  const hosts = [{ ip: '10.9.9.9', hostname: 'new', status: 'up' }];
+  assert.equal(searchHosts(hosts, 'is:new', null, () => 'unchanged').length, 0);
+  assert.equal(searchHosts(hosts, 'new').length, 1);
+});
