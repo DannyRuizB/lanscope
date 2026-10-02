@@ -615,13 +615,28 @@ function renderDisappearedRow(h) {
     </tr>`;
 }
 
+// v1.48.0: the ghost rows go through the same search as the table (they used
+// to stay on screen whatever the query), with `is:gone` true for them.
+function filteredDisappeared() {
+  if (!lastDiff) return [];
+  return HostSearch.searchHosts(
+    lastDiff.disappeared,
+    searchQuery,
+    (ip) => hostLabels.get(ip)?.label || null,
+    () => "disappeared",
+  );
+}
+
 function renderDisappearedSection() {
   if (!lastDiff || !lastDiff.disappeared.length) return "";
+  const gone = filteredDisappeared();
+  if (!gone.length) return "";
+  const total = lastDiff.disappeared.length;
   const header = `
     <tr class="diff-section-header">
-      <td colspan="9">Disappeared since base scan (${lastDiff.disappeared.length})</td>
+      <td colspan="9">Disappeared since base scan (${gone.length === total ? total : `${gone.length} of ${total}`})</td>
     </tr>`;
-  const rows = lastDiff.disappeared
+  const rows = gone
     .slice()
     .sort((a, b) => compareIp(a.ip, b.ip))
     .map(renderDisappearedRow)
@@ -2290,9 +2305,11 @@ function updateHostSearchCount(shown, total) {
     return;
   }
   els.hostSearchCount.hidden = false;
+  const gone = diffActive() ? filteredDisappeared().length : 0;
+  const base = `${shown} of ${total}${gone ? ` · ${gone} gone` : ""}`;
   els.hostSearchCount.textContent = HostSearch.needsComparison(searchQuery) && !diffActive()
-    ? `${shown} of ${total} · is:new / is:changed need a comparison (Compare, or a baseline)`
-    : `${shown} of ${total}`;
+    ? `${base} · is:new / is:changed / is:gone need a comparison (Compare, or a baseline)`
+    : base;
 }
 
 els.portFilterInput?.addEventListener("focus", () => {

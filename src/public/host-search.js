@@ -38,6 +38,10 @@
 // disagree. With no comparison active there is nothing to be new AGAINST:
 // both match nothing, and `needsComparison()` lets the UI say why instead of
 // showing a silently empty table.
+//
+// v1.48.0 — `is:gone`: a host that was in the base scan and is not in this
+// one - the "Disappeared since base scan" rows, which the search now filters
+// too (before, every query left them all on screen).
 (function (global) {
   "use strict";
 
@@ -72,8 +76,9 @@
     labeled: (host, label) => !!(label && String(label).trim()),
     new: (host, label, diff) => diff === "appeared",
     changed: (host, label, diff) => diff === "changed",
+    gone: (host, label, diff) => diff === "disappeared",
   };
-  const DIFF_KEYWORDS = new Set(["is:new", "is:changed"]);
+  const DIFF_KEYWORDS = new Set(["is:new", "is:changed", "is:gone"]);
 
   function openOn(list, port) {
     return (list || []).some((p) => Number(p.port) === port && p.state === "open");

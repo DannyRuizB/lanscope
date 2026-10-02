@@ -266,3 +266,16 @@ test('a host literally named "new" is not is:new', () => {
   assert.equal(searchHosts(hosts, 'is:new', null, () => 'unchanged').length, 0);
   assert.equal(searchHosts(hosts, 'new').length, 1);
 });
+
+// v1.48.0 — is:gone (the disappeared rows, searched with state "disappeared").
+test('is:gone matches only hosts whose state is disappeared, and needs a comparison', () => {
+  const { needsComparison } = require('../src/public/host-search');
+  const state = { '192.168.1.1': 'disappeared', '192.168.1.42': 'appeared', '192.168.1.50': 'unchanged' };
+  const ips = (q) => searchHosts(HOSTS, q, null, (ip) => state[ip] || null).map((h) => h.ip);
+  assert.deepEqual(ips('is:gone'), ['192.168.1.1']);
+  assert.deepEqual(ips('is:gone port:443'), ['192.168.1.1']);
+  assert.deepEqual(ips('is:gone port:22'), []);
+  assert.equal(searchHosts(HOSTS, 'is:gone').length, 0, 'no comparison, nothing gone');
+  assert.equal(needsComparison('is:gone'), true);
+  assert.equal(needsComparison('-is:gone vendor:apple'), true);
+});
