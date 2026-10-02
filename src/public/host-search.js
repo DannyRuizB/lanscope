@@ -29,6 +29,15 @@
 // A double-quoted phrase keeps its spaces, alone or as a
 // keyword value: `"apple, inc."`, `vendor:"raspberry pi"`; an unterminated
 // quote runs to the end of the query.
+//
+// v1.47.0 — `is:new` and `is:changed`, against the ACTIVE comparison (the
+// base scan the diff view is showing: a manual Compare, or the CIDR's
+// baseline). `is:new` is a host that appeared since the base, `is:changed`
+// one whose ports / OS / vendor / MAC moved - the same classification the
+// diff colours rows by (scan-diff.js), so the filter and the colours cannot
+// disagree. With no comparison active there is nothing to be new AGAINST:
+// both match nothing, and `needsComparison()` lets the UI say why instead of
+// showing a silently empty table.
 (function (global) {
   "use strict";
 
@@ -61,7 +70,10 @@
     up: (host) => host.status === "up",
     down: (host) => host.status === "down",
     labeled: (host, label) => !!(label && String(label).trim()),
+    new: (host, label, diff) => diff === "appeared",
+    changed: (host, label, diff) => diff === "changed",
   };
+  const DIFF_KEYWORDS = new Set(["is:new", "is:changed"]);
 
   function openOn(list, port) {
     return (list || []).some((p) => Number(p.port) === port && p.state === "open");
@@ -105,7 +117,7 @@
     vendor: (host, v) => has(host.vendor, v),
     os: (host, v) => (host.os_matches || []).some((m) => has(m.name, v)),
     name: (host, v, label) => has(host.hostname, v) || has(label, v),
-    is: (host, v, label) => (IS[v] ? IS[v](host, label) : false),
+    is: (host, v, label, diff) => (IS[v] ? IS[v](host, label, diff) : false),
     port: (host, v) => {
       const n = portValue(v);
       return n !== null && (openOn(host.ports, n) || openOn(host.udp_ports, n));
@@ -120,9 +132,9 @@
     },
   };
 
-  function matchTerm(host, term, label, hay) {
+  function matchTerm(host, term, label, hay, diff) {
     const m = /^([a-z]+):(.*)$/.exec(term);
-    if (m && KEYWORDS[m[1]]) return KEYWORDS[m[1]](host, m[2], label);
+    if (m && KEYWORDS[m[1]]) return KEYWORDS[m[1]](host, m[2], label, diff);
     return hay().includes(term);
   }
 
@@ -141,28 +153,39 @@
     return out.filter((t) => t !== "");
   }
 
-  function matchHost(host, query, label) {
+  // `diff` is the host's state in the active comparison ("appeared",
+  // "changed", "unchanged") or null when no comparison is active.
+  function matchHost(host, query, label, diff) {
     const terms = tokenize(String(query || "").trim().toLowerCase());
     if (!terms.length) return true;
     let cached = null;
     const hay = () => (cached === null ? (cached = haystack(host, label)) : cached);
     return terms.every((t) => {
       const negated = t.length > 1 && t.startsWith("-");
-      const hit = matchTerm(host, negated ? t.slice(1) : t, label, hay);
+      const hit = matchTerm(host, negated ? t.slice(1) : t, label, hay, diff || null);
       return negated ? !hit : hit;
     });
   }
 
   // Filter a host list by the query. `labelFor` is an optional
-  // (ip) => label|null lookup so the friendly name is searchable too.
-  function searchHosts(hosts, query, labelFor) {
+  // (ip) => label|null lookup so the friendly name is searchable too, and
+  // `diffFor` an optional (ip) => diff state|null for is:new / is:changed.
+  function searchHosts(hosts, query, labelFor, diffFor) {
     const q = String(query || "").trim();
     if (!q) return hosts;
     const lookup = typeof labelFor === "function" ? labelFor : () => null;
-    return hosts.filter((h) => matchHost(h, q, lookup(h.ip)));
+    const diffOf = typeof diffFor === "function" ? diffFor : () => null;
+    return hosts.filter((h) => matchHost(h, q, lookup(h.ip), diffOf(h.ip)));
   }
 
-  const api = { matchHost, searchHosts, tokenize };
+  // True when the query uses a keyword that only means something against a
+  // comparison (negated or not), so the UI can explain an empty result.
+  function needsComparison(query) {
+    return tokenize(String(query || "").trim().toLowerCase())
+      .some((t) => DIFF_KEYWORDS.has(t.startsWith("-") ? t.slice(1) : t));
+  }
+
+  const api = { matchHost, searchHosts, tokenize, needsComparison };
   if (typeof module !== "undefined" && module.exports) module.exports = api;
   else global.HostSearch = api;
 })(typeof window !== "undefined" ? window : globalThis);
