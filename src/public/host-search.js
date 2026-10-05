@@ -42,6 +42,13 @@
 // v1.48.0 — `is:gone`: a host that was in the base scan and is not in this
 // one - the "Disappeared since base scan" rows, which the search now filters
 // too (before, every query left them all on screen).
+//
+// v1.49.0 — `port:`, `tcp:` and `udp:` take ranges and lists: `port:8000-8999`
+// (an open port anywhere in the range, ends included), `port:22,80,443` (any
+// of them), or both mixed (`tcp:22,8000-8100`). Same rule as before for what
+// cannot be used: a reversed range (`8100-8000`), a port outside 1-65535 or
+// an empty item (`22,,80`) matches NOTHING. Negation reads as "no open port
+// in it": `-tcp:1-1023` is the hosts with nothing open below 1024.
 (function (global) {
   "use strict";
 
@@ -80,15 +87,30 @@
   };
   const DIFF_KEYWORDS = new Set(["is:new", "is:changed", "is:gone"]);
 
-  function openOn(list, port) {
-    return (list || []).some((p) => Number(p.port) === port && p.state === "open");
+  function openIn(list, ranges) {
+    return (list || []).some((p) => p.state === "open" && ranges.some(([lo, hi]) => Number(p.port) >= lo && Number(p.port) <= hi));
   }
 
-  // A port keyword's value: a whole number 1-65535, or null.
-  function portValue(v) {
+  // A whole number 1-65535, or null.
+  function portNumber(v) {
     if (!/^\d{1,5}$/.test(v)) return null;
     const n = Number(v);
     return n >= 1 && n <= 65535 ? n : null;
+  }
+
+  // A port keyword's value - `22`, `8000-8999`, `22,80,443-445` - as a list
+  // of [lo, hi] ranges, or null if any part of it is unusable.
+  function portRanges(v) {
+    const out = [];
+    for (const item of v.split(",")) {
+      const m = /^(\d+)(?:-(\d+))?$/.exec(item);
+      if (!m) return null;
+      const lo = portNumber(m[1]);
+      const hi = m[2] === undefined ? lo : portNumber(m[2]);
+      if (lo === null || hi === null || hi < lo) return null;
+      out.push([lo, hi]);
+    }
+    return out;
   }
 
   // A dotted-quad IPv4 as an unsigned 32-bit number, or null.
@@ -124,16 +146,16 @@
     name: (host, v, label) => has(host.hostname, v) || has(label, v),
     is: (host, v, label, diff) => (IS[v] ? IS[v](host, label, diff) : false),
     port: (host, v) => {
-      const n = portValue(v);
-      return n !== null && (openOn(host.ports, n) || openOn(host.udp_ports, n));
+      const r = portRanges(v);
+      return r !== null && (openIn(host.ports, r) || openIn(host.udp_ports, r));
     },
     tcp: (host, v) => {
-      const n = portValue(v);
-      return n !== null && openOn(host.ports, n);
+      const r = portRanges(v);
+      return r !== null && openIn(host.ports, r);
     },
     udp: (host, v) => {
-      const n = portValue(v);
-      return n !== null && openOn(host.udp_ports, n);
+      const r = portRanges(v);
+      return r !== null && openIn(host.udp_ports, r);
     },
   };
 
