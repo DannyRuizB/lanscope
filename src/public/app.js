@@ -2291,10 +2291,51 @@ els.portFilterInput?.addEventListener("input", () => {
 
 // v1.11.0 — free-text host search. Re-render on each keystroke (same pattern
 // as the port filter); host counts are small enough that it's instant.
+// v1.50.0 — the host search lives in the URL hash (#q=...), so a filtered view
+// is a shareable/bookmarkable link. We use the hash (not a ?query) because it
+// never hits the server and never reloads, and replaceState so typing does not
+// pile up history entries. Reading it back on load (and on hashchange, for a
+// pasted link) prefills the box before the first scan renders.
+function readQueryFromHash() {
+  const m = /[#&]q=([^&]*)/.exec(location.hash || "");
+  if (!m) return "";
+  try { return decodeURIComponent(m[1].replace(/\+/g, " ")); } catch { return m[1]; }
+}
+
+function writeQueryToHash(q) {
+  const next = q.trim() ? `#q=${encodeURIComponent(q)}` : "";
+  // Only touch history when it actually changes, and keep the path/search.
+  if (next === (location.hash || "")) return;
+  try {
+    history.replaceState(null, "", next || location.pathname + location.search);
+  } catch {
+    location.hash = next; // file:// or a sandbox that blocks replaceState
+  }
+}
+
 els.hostSearch?.addEventListener("input", () => {
   searchQuery = els.hostSearch.value;
+  writeQueryToHash(searchQuery);
   if (lastScan) renderScan(lastScan);
 });
+
+// A pasted or edited link: adopt its query live.
+window.addEventListener("hashchange", () => {
+  const q = readQueryFromHash();
+  if (q === searchQuery) return;
+  searchQuery = q;
+  if (els.hostSearch) els.hostSearch.value = q;
+  if (lastScan) renderScan(lastScan);
+});
+
+// On load: a link with #q=... arrives filtered. Set it before the first render.
+if (els.hostSearch) {
+  const initial = readQueryFromHash();
+  if (initial) {
+    searchQuery = initial;
+    els.hostSearch.value = initial;
+  }
+}
 
 // Show "N of M" only while a search is active; hide the count otherwise so
 // the toolbar stays quiet on the common (unfiltered) path.
