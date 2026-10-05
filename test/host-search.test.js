@@ -279,3 +279,37 @@ test('is:gone matches only hosts whose state is disappeared, and needs a compari
   assert.equal(needsComparison('is:gone'), true);
   assert.equal(needsComparison('-is:gone vendor:apple'), true);
 });
+
+// --- v1.49.0: port ranges and lists ------------------------------------------
+
+test('port:A-B matches an open port anywhere in the range, ends included', () => {
+  assert.deepEqual(ips('port:2000-3000'), ['10.0.0.1']);
+  assert.deepEqual(ips('port:22-22'), ['10.0.0.22'], 'a one-port range is the port');
+  assert.deepEqual(ips('tcp:80-2222'), ['10.0.0.1', '10.0.0.22'], 'both ends count');
+  assert.deepEqual(ips('port:80-2222'), ['10.0.0.1', '10.0.0.22', '10.0.0.4'], 'port: counts the UDP 161 in between');
+  assert.deepEqual(ips('port:1-1023'), ['10.0.0.22', '10.0.0.4'], 'TCP 22/80 and UDP 161');
+  assert.deepEqual(ips('tcp:1-1023'), ['10.0.0.22']);
+  assert.deepEqual(ips('udp:100-200'), ['10.0.0.22', '10.0.0.4']);
+  assert.deepEqual(ips('port:23-79'), [], 'nothing open in between');
+});
+
+test('port:A,B,C is any of them, and ranges mix in', () => {
+  assert.deepEqual(ips('port:80,2222'), ['10.0.0.1', '10.0.0.22']);
+  assert.deepEqual(ips('tcp:161,2222'), ['10.0.0.1'], 'tcp: still ignores the UDP 161');
+  assert.deepEqual(ips('tcp:22,2000-3000'), ['10.0.0.1', '10.0.0.22']);
+});
+
+test('negated, a range means "no open port in it"; closed and open|filtered still never count', () => {
+  assert.deepEqual(ips('-tcp:1-1023'), ['10.0.0.1', '10.0.0.3', '10.0.0.4']);
+  assert.deepEqual(ips('is:up -port:1-1023'), ['10.0.0.1']);
+  assert.deepEqual(ips('port:20-25'), ['10.0.0.22'], 'the printer\'s closed 22 and open|filtered UDP 22 are not open');
+});
+
+test('a range or list it cannot use matches nothing', () => {
+  for (const q of ['port:3000-2000', 'port:0-80', 'port:1-65536', 'port:22,,80', 'port:22,', 'port:-80', 'port:80-', 'port:1-2-3', 'tcp:22,ssh']) {
+    assert.deepEqual(ips(q), [], q);
+  }
+  // Anchor: the same harness does match a valid spelling of each shape.
+  assert.deepEqual(ips('port:2000-3000'), ['10.0.0.1']);
+  assert.deepEqual(ips('port:22,80'), ['10.0.0.22']);
+});
