@@ -805,6 +805,11 @@ button.ghost.danger:hover {
 .hosts-table th.udp-col {
   width: 130px;
 }
+/* Wide enough for a full dotted quad (15 mono chars) so the IP never
+   gets ellipsised when the flexible columns are squeezed. */
+.hosts-table th.ip-col {
+  width: 160px;
+}
 /* v1.9.0 — room for the number plus its sparkline (56px SVG + margin). */
 .hosts-table th.latency-col {
   width: 138px;
