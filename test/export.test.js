@@ -279,3 +279,70 @@ test("scanToCsv marks a port scan that hit --host-timeout (v1.41.0): unknown, no
   assert.ok(rows[1].endsWith(",yes,"), `tcp timed out -> yes: ${rows[1]}`);
   assert.ok(rows[2].endsWith(",,yes"), `udp timed out -> yes: ${rows[2]}`);
 });
+
+// --- v1.51.0 filtered export: the hosts the table shows ------------------------
+
+const { filterScanHosts, filteredExportFilename } = require("../src/export");
+const { diffScans } = require("../src/public/scan-diff");
+
+function viewScan(id, hosts) {
+  return { id, cidr: "10.0.0.0/24", started_at: "2026-10-07T10:00:00Z", hosts };
+}
+const H = (ip, ports, extra = {}) => ({
+  ip, mac: null, vendor: null, hostname: null, status: "up",
+  portscanned_at: ports ? "2026-10-07T10:01:00Z" : null,
+  ports: (ports || []).map((p) => ({ port: p, protocol: "tcp", state: "open" })),
+  ...extra,
+});
+
+test("filterScanHosts: no filter keeps every host and reports the totals", () => {
+  const scan = viewScan(2, [H("10.0.0.1", [22]), H("10.0.0.2", [80])]);
+  const out = filterScanHosts(scan, {});
+  assert.equal(out.hosts.length, 2);
+  assert.deepEqual(out.filter, { query: null, port: null, base_scan_id: null, matched: 2, total: 2 });
+  assert.equal(scan.hosts.length, 2, "the input scan is not mutated");
+});
+
+test("filterScanHosts: the search query is the browser's HostSearch (keywords, negation, labels)", () => {
+  const scan = viewScan(2, [H("10.0.0.1", [22]), H("10.0.0.2", [80, 443]), H("10.0.0.3", null)]);
+  assert.deepEqual(filterScanHosts(scan, { query: "port:22" }).hosts.map((h) => h.ip), ["10.0.0.1"]);
+  assert.deepEqual(filterScanHosts(scan, { query: "-port:22" }).hosts.map((h) => h.ip), ["10.0.0.2", "10.0.0.3"]);
+  const labelled = filterScanHosts(scan, { query: "name:printer", labelsByIp: { "10.0.0.2": "Office printer" } });
+  assert.deepEqual(labelled.hosts.map((h) => h.ip), ["10.0.0.2"]);
+  assert.equal(labelled.filter.query, "name:printer");
+});
+
+test("filterScanHosts: the open-port filter runs first, like the table (and needs a port scan)", () => {
+  const scan = viewScan(2, [H("10.0.0.1", [22]), H("10.0.0.2", [80]), H("10.0.0.3", null)]);
+  const out = filterScanHosts(scan, { port: 80 });
+  assert.deepEqual(out.hosts.map((h) => h.ip), ["10.0.0.2"]);
+  assert.equal(out.filter.port, 80);
+  assert.equal(filterScanHosts(scan, { port: 80, query: "-is:up" }).hosts.length, 0);
+});
+
+test("filterScanHosts: is:new / is:changed read the comparison's diff states", () => {
+  // scan-diff.js calls a host "changed" when its MAC, hostname or OS moved
+  const base = viewScan(1, [H("10.0.0.1", [22]), H("10.0.0.2", [80], { mac: "AA:AA:AA:00:00:01" })]);
+  const scan = viewScan(2, [H("10.0.0.1", [22]), H("10.0.0.2", [80], { mac: "BB:BB:BB:00:00:02" }), H("10.0.0.9", [22])]);
+  const diffByIp = diffScans(base, scan).byIp;
+  const fresh = filterScanHosts(scan, { query: "is:new", diffByIp, baseScanId: 1 });
+  assert.deepEqual(fresh.hosts.map((h) => h.ip), ["10.0.0.9"]);
+  assert.equal(fresh.filter.base_scan_id, 1);
+  assert.deepEqual(filterScanHosts(scan, { query: "is:changed", diffByIp }).hosts.map((h) => h.ip), ["10.0.0.2"]);
+  // without a comparison there is nothing to be new against: nothing matches
+  assert.equal(filterScanHosts(scan, { query: "is:new" }).hosts.length, 0);
+});
+
+test("filterScanHosts: the CSV of a filtered scan has only the matched rows", () => {
+  const scan = viewScan(2, [H("10.0.0.1", [22]), H("10.0.0.2", [80])]);
+  const csv = scanToCsv(filterScanHosts(scan, { query: "port:80" }));
+  const rows = csv.trim().split("\r\n");
+  assert.equal(rows.length, 2, "header + one host");
+  assert.ok(rows[1].startsWith("10.0.0.2"));
+});
+
+test("filteredExportFilename marks the file as a filtered view", () => {
+  const scan = viewScan(12, []);
+  assert.equal(filteredExportFilename(scan, "csv"), "lanscope_scan-12_10-0-0-0-24_filtered.csv");
+  assert.equal(filteredExportFilename(scan, "json"), "lanscope_scan-12_10-0-0-0-24_filtered.json");
+});

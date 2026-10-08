@@ -2384,16 +2384,44 @@ els.compareList?.addEventListener("click", (e) => {
 
 // Export dropdown (v1.1.0). The download itself is a plain GET the browser
 // handles natively — a temporary anchor click, no fetch/blob juggling.
+// v1.51.0 — the export follows the view: with a search or a port filter
+// active, the file holds the hosts the table is showing (the server replays
+// the same HostSearch, label lookup and comparison), and the menu says so.
+function viewFilterActive() {
+  return searchQuery.trim() !== "" || filterPort !== null;
+}
+
+function scanExportUrl(fmt) {
+  const params = new URLSearchParams({ format: fmt });
+  const q = searchQuery.trim();
+  if (q) params.set("q", q);
+  if (filterPort !== null) params.set("port", String(filterPort));
+  if (viewFilterActive() && diffActive()) params.set("base", String(compareBaseScan.id));
+  return `/api/scans/${lastScan.id}/export?${params}`;
+}
+
+function labelExportItems() {
+  if (!els.exportList || !lastScan) return;
+  const total = (lastScan.hosts || []).length;
+  const suffix = viewFilterActive() ? ` (filtered: ${filterHosts(lastScan.hosts || []).length} of ${total})` : "";
+  for (const item of els.exportList.querySelectorAll(".compare-item")) {
+    if (!item.dataset.text) item.dataset.text = item.textContent;
+    item.textContent = item.dataset.text + suffix;
+  }
+}
+
 els.exportBtn?.addEventListener("click", (e) => {
   e.stopPropagation();
-  if (els.exportList) els.exportList.hidden = !els.exportList.hidden;
+  if (!els.exportList) return;
+  labelExportItems();
+  els.exportList.hidden = !els.exportList.hidden;
 });
 
 els.exportList?.addEventListener("click", (e) => {
   const item = e.target.closest(".compare-item");
   if (!item || !lastScan) return;
   const a = document.createElement("a");
-  a.href = `/api/scans/${lastScan.id}/export?format=${item.dataset.format}`;
+  a.href = scanExportUrl(item.dataset.format);
   document.body.appendChild(a);
   a.click();
   a.remove();

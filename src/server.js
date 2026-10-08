@@ -39,7 +39,7 @@ const {
 } = require("./http-validators");
 const {
   scanToCsv, exportFilename, historyToCsv, historyFilename, alertsToCsv, alertsFilename,
-  diffToCsv, diffFilename,
+  diffToCsv, diffFilename, filterScanHosts, filteredExportFilename,
 } = require("./export");
 // The same classification module the browser runs (dual-export pattern):
 // the diff export and the compare view agree by construction.
@@ -244,15 +244,46 @@ app.get("/api/scans/:id/export", (req, res) => {
   if (format !== "csv" && format !== "json") {
     return res.status(400).json({ error: "invalid format, use csv|json" });
   }
+  // v1.51.0 — optional view filter, the one the results table is showing:
+  // q= (the search box), port= (the open-port filter) and base= (the active
+  // comparison, which is:new / is:changed read). All absent = the whole scan,
+  // exactly as before.
+  const query = typeof req.query.q === "string" ? req.query.q : "";
+  let port = null;
+  if (req.query.port !== undefined) {
+    port = Number(req.query.port);
+    if (!Number.isInteger(port) || port < 1 || port > 65535) {
+      return res.status(400).json({ error: "invalid port, use 1-65535" });
+    }
+  }
+  let baseId = null;
+  if (req.query.base !== undefined) {
+    baseId = parseInt(req.query.base, 10);
+    if (!Number.isInteger(baseId) || baseId <= 0) return res.status(400).json({ error: "invalid base scan id" });
+    if (baseId === id) return res.status(400).json({ error: "base and target are the same scan" });
+  }
   const scan = db.getScan(id);
   if (!scan) return res.status(404).json({ error: "scan not found" });
-
-  res.setHeader("Content-Disposition", `attachment; filename="${exportFilename(scan, format)}"`);
-  if (format === "json") return res.json(scan);
   const labelsByIp = Object.fromEntries(
     db.listLabels(scan.cidr).filter((l) => l.label).map((l) => [l.ip, l.label])
   );
-  res.type("text/csv; charset=utf-8").send(scanToCsv(scan, labelsByIp));
+  const filtered = query.trim() !== "" || port !== null || baseId !== null;
+  let out = scan;
+  if (filtered) {
+    let diffByIp = null;
+    if (baseId !== null) {
+      const baseScan = db.getScan(baseId);
+      if (!baseScan) return res.status(404).json({ error: "base scan not found" });
+      if (baseScan.cidr !== scan.cidr) return res.status(400).json({ error: "scans belong to different networks" });
+      diffByIp = diffScans(baseScan, scan).byIp;
+    }
+    out = filterScanHosts(scan, { query, port, labelsByIp, diffByIp, baseScanId: baseId });
+  }
+
+  const name = filtered ? filteredExportFilename(scan, format) : exportFilename(scan, format);
+  res.setHeader("Content-Disposition", `attachment; filename="${name}"`);
+  if (format === "json") return res.json(out);
+  res.type("text/csv; charset=utf-8").send(scanToCsv(out, labelsByIp));
 });
 
 // v1.33.0 — download the compare view's diff between two scans of the same

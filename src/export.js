@@ -262,7 +262,49 @@ function alertsFilename(filters, format) {
   return `lanscope_alerts_${scope}.${format}`;
 }
 
+// v1.51.0 — export the FILTERED view: the hosts the results table is showing.
+// The table narrows twice, in this order: the open-port filter (a click on a
+// top-ports bar) and then the search box. Both are replayed here with the
+// browser's own code paths - the port test mirrors app.js hasOpenPort, the
+// search is the shared HostSearch module, fed the same label lookup and the
+// same diff states (scan-diff.js) when a comparison is active - so the file
+// is what was on screen, by construction. Hosts that `is:gone` lists are not
+// in this scan, so they are never part of its export.
+const HostSearch = require("./public/host-search");
+
+function hostHasOpenPort(host, port) {
+  if (!host.portscanned_at) return false;
+  return (host.ports || []).some((p) => p.port === port && p.state === "open");
+}
+
+function filterScanHosts(scan, { query = "", port = null, labelsByIp = {}, diffByIp = null, baseScanId = null } = {}) {
+  const all = scan.hosts || [];
+  let hosts = port === null ? all : all.filter((h) => hostHasOpenPort(h, port));
+  hosts = HostSearch.searchHosts(
+    hosts,
+    query,
+    (ip) => labelsByIp[ip] || null,
+    (ip) => (diffByIp && diffByIp.get(ip) ? diffByIp.get(ip).state : null),
+  );
+  return {
+    ...scan,
+    hosts,
+    filter: {
+      query: String(query || "").trim() || null,
+      port,
+      base_scan_id: diffByIp ? baseScanId : null,
+      matched: hosts.length,
+      total: all.length,
+    },
+  };
+}
+
+function filteredExportFilename(scan, format) {
+  return exportFilename(scan, format).replace(/\.(csv|json)$/, "_filtered.$1");
+}
+
 module.exports = {
   scanToCsv, exportFilename, csvField, historyToCsv, historyFilename,
   alertsToCsv, alertsFilename, alertDetail, diffToCsv, diffFilename,
+  filterScanHosts, filteredExportFilename,
 };
