@@ -313,3 +313,41 @@ test('a range or list it cannot use matches nothing', () => {
   assert.deepEqual(ips('port:2000-3000'), ['10.0.0.1']);
   assert.deepEqual(ips('port:22,80'), ['10.0.0.22']);
 });
+
+// --- v1.52.0: ports: and latency: compare numbers -----------------------------
+
+const MEASURED = [
+  { ip: '10.0.1.1', status: 'up', latency_ms: 0.4, portscanned_at: 1, ports: [{ port: 22, state: 'open' }, { port: 80, state: 'open' }, { port: 443, state: 'closed' }] },
+  { ip: '10.0.1.2', status: 'up', latency_ms: 55.2, portscanned_at: 1, ports: [] },
+  { ip: '10.0.1.3', status: 'up', latency_ms: null, portscanned_at: null, ports: [] },
+  { ip: '10.0.1.4', status: 'up', latency_ms: 12, portscanned_at: 1, port_timedout: 1, ports: [] },
+];
+const mips = (q) => searchHosts(MEASURED, q).map((h) => h.ip.split('.')[3]);
+
+test('latency: compares milliseconds with > >= < <= = and a range; an unknown latency never matches', () => {
+  assert.deepEqual(mips('latency:>50'), ['2']);
+  assert.deepEqual(mips('latency:<1'), ['1']);
+  assert.deepEqual(mips('latency:<=12'), ['1', '4']);
+  assert.deepEqual(mips('latency:12'), ['4'], 'a bare number is equality');
+  assert.deepEqual(mips('latency:=12'), ['4']);
+  assert.deepEqual(mips('latency:10-60'), ['2', '4'], 'inclusive range');
+  assert.deepEqual(mips('latency:>0.3'), ['1', '2', '4'], 'decimals');
+  assert.deepEqual(mips('-latency:>50'), ['1', '3', '4'], 'negated: everything that is not a measured > 50, unknowns included');
+});
+
+test('ports: counts open TCP like the Ports column; not scanned or timed out is unknown, never 0', () => {
+  assert.deepEqual(mips('ports:2'), ['1'], 'closed 443 does not count');
+  assert.deepEqual(mips('ports:0'), ['2'], 'the unscanned and the timed-out host are not "0 open"');
+  assert.deepEqual(mips('ports:>=1'), ['1']);
+  assert.deepEqual(mips('ports:1-3'), ['1']);
+  assert.deepEqual(mips('is:up ports:0 latency:>50'), ['2'], 'composes with the rest');
+});
+
+test('ports: / latency: with a value they cannot use match nothing', () => {
+  for (const q of ['latency:abc', 'latency:50-10', 'latency:>', 'latency:>>5', 'latency:-5', 'ports:>x', 'ports:', 'ports:1-', 'ports:=>2']) {
+    assert.deepEqual(mips(q), [], q);
+  }
+  // Anchor: valid spellings of the same shapes do match.
+  assert.deepEqual(mips('latency:>5'), ['2', '4']);
+  assert.deepEqual(mips('ports:>=2'), ['1']);
+});

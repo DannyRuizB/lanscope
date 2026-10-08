@@ -135,6 +135,40 @@
     return ((want & mask) >>> 0) === ((have & mask) >>> 0);
   }
 
+  // v1.52.0 — a numeric comparison: `>50`, `>=50`, `<5`, `<=5`, `50` (equal)
+  // or `10-50` (inclusive), decimals allowed. A predicate, or null when the
+  // value is unusable (so the keyword matches nothing, like a bad port).
+  function comparison(v) {
+    const num = "(\\d+(?:\\.\\d+)?)";
+    let m = new RegExp(`^(>=|<=|>|<|=)?${num}$`).exec(v);
+    if (m) {
+      const n = Number(m[2]);
+      const op = m[1] || "=";
+      return (x) => (op === ">" ? x > n : op === ">=" ? x >= n : op === "<" ? x < n : op === "<=" ? x <= n : x === n);
+    }
+    m = new RegExp(`^${num}-${num}$`).exec(v);
+    if (m && Number(m[1]) <= Number(m[2])) {
+      const lo = Number(m[1]);
+      const hi = Number(m[2]);
+      return (x) => x >= lo && x <= hi;
+    }
+    return null;
+  }
+
+  // The number the Ports column shows (open TCP), or null when it is not
+  // known: never port-scanned, or the scan hit the per-host timeout (a
+  // partial list - "0 open" there is not a fact).
+  function openTcpCount(host) {
+    if (!host.portscanned_at || host.port_timedout) return null;
+    return (host.ports || []).filter((p) => p.state === "open").length;
+  }
+
+  // A measured value against a comparison; an unknown value never matches.
+  function compares(value, v) {
+    const test = comparison(v);
+    return test !== null && value !== null && value !== undefined && Number.isFinite(Number(value)) && test(Number(value));
+  }
+
   const hex = (v) => String(v || "").toLowerCase().replace(/[^0-9a-f]/g, "");
   const has = (field, v) => v !== "" && String(field || "").toLowerCase().includes(v);
 
@@ -157,6 +191,8 @@
       const r = portRanges(v);
       return r !== null && openIn(host.udp_ports, r);
     },
+    ports: (host, v) => compares(openTcpCount(host), v),
+    latency: (host, v) => compares(host.latency_ms, v),
   };
 
   function matchTerm(host, term, label, hay, diff) {
