@@ -9,9 +9,16 @@ LABEL org.opencontainers.image.documentation="https://github.com/DannyRuizB/lans
 LABEL org.opencontainers.image.licenses="MIT"
 LABEL org.opencontainers.image.authors="Danny Ruiz Boluda"
 
-# nmap with raw socket capabilities; ip/iproute2 for default-gateway detection
-RUN apk add --no-cache nmap nmap-scripts libcap \
+# nmap with raw socket capabilities; ip/iproute2 for default-gateway detection.
+# su-exec drops from root to `node` in the entrypoint.
+RUN apk add --no-cache nmap nmap-scripts libcap su-exec \
   && setcap cap_net_raw,cap_net_admin,cap_net_bind_service+eip /usr/bin/nmap
+
+# nmap only trusts uid 0 unless told otherwise: with this set, the `node` user
+# uses the file capabilities above for SYN/UDP scans, OS detection and the ARP
+# ping that reports MAC addresses (measured: without it -sS and -O quit with
+# "requires root privileges" and the sweep comes back with no MACs).
+ENV NMAP_PRIVILEGED=""
 
 WORKDIR /app
 
@@ -24,9 +31,19 @@ RUN npm install --omit=dev --ignore-scripts
 
 COPY src/ ./src/
 
+# Both data locations (the compose file's DB_PATH and the default one) are
+# born owned by `node`, so a fresh named volume starts out writable.
+RUN mkdir -p /var/lib/lanscope /app/data \
+  && chown node:node /var/lib/lanscope /app/data
+
+COPY docker-entrypoint.sh /usr/local/bin/lanscope-entrypoint
+
 ENV NODE_ENV=production
 ENV PORT=3030
 
 EXPOSE 3030
 
+# v1.54.0 — the server and its nmap run as `node`, not root (the entrypoint
+# takes over a root-owned volume from older versions, then drops privileges).
+ENTRYPOINT ["lanscope-entrypoint"]
 CMD ["node", "src/server.js"]

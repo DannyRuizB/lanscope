@@ -367,6 +367,37 @@ function parseHosts(xml) {
     .filter((h) => h.ip);
 }
 
+// v1.54.0 — the server runs as `node`, and nmap gets its raw sockets from the
+// file capabilities the Dockerfile sets. Two ways that breaks, both measured,
+// both reported by the bare messages below in a way nobody could act on:
+//   - the container lacks NET_ADMIN (a compose with NET_RAW only, which used
+//     to be enough as root): the kernel refuses to exec a binary whose file
+//     capabilities it cannot grant, and Node says only "spawn EPERM";
+//   - no-new-privileges is set: file capabilities are ignored, so nmap starts
+//     and says "Couldn't open a raw socket".
+const RAW_SOCKET_HINT = "nmap runs as the unprivileged node user and needs the container to have both NET_RAW and NET_ADMIN (cap_add in docker-compose.yml), without no-new-privileges (it disables the file capabilities nmap uses)";
+function nmapFailure(err, stderr) {
+  if (err && err.code === "EPERM" && String(err.syscall || "").startsWith("spawn")) {
+    return new Error(`nmap could not start (EPERM): ${RAW_SOCKET_HINT}`);
+  }
+  const msg = stderr?.toString().trim() || err.message;
+  if (/Couldn't open a raw socket/.test(msg)) return new Error(`nmap failed: ${msg} — ${RAW_SOCKET_HINT}`);
+  return new Error(`nmap failed: ${msg}`);
+}
+
+// execFile, except that a spawn failure always reaches the callback. Node only
+// routes some spawn errors there (ENOENT, EACCES, EAGAIN, EMFILE, ENFILE);
+// EPERM - the missing-NET_ADMIN case above - is THROWN synchronously, so it
+// skipped nmapFailure and surfaced as a bare "spawn EPERM" (measured).
+function execNmap(...args) {
+  try {
+    return execFile(...args);
+  } catch (err) {
+    process.nextTick(args[args.length - 1], err, "", "");
+    return null;
+  }
+}
+
 function runPingSweep(cidr, opts = {}) {
   const discoveryArgs = opts.discoveryArgs || [];
   // excludeArgs (v1.36): [] or ["--exclude", "a,b,c"], validated upstream.
@@ -386,14 +417,13 @@ function runPingSweep(cidr, opts = {}) {
     // discoveryArgs (v0.6): optional, validated upstream. Either ["-Pn"]
     //   (treat all hosts up, skip discovery probes) or any combination of
     //   ["-PE","-PS","-PA","-PR"]. Empty array = nmap defaults.
-    execFile(
+    execNmap(
       "nmap",
       ["-sn", "-T4", ...discoveryArgs, ...excludeArgs, ...rateArgs, ...hostTimeoutArgs, ...maxRetriesArgs, "-oX", "-", cidr],
       { maxBuffer: 16 * 1024 * 1024, timeout: 120_000 },
       (err, stdout, stderr) => {
         if (err) {
-          const msg = stderr?.toString().trim() || err.message;
-          return reject(new Error(`nmap failed: ${msg}`));
+          return reject(nmapFailure(err, stderr));
         }
         try {
           resolve(parseHosts(stdout));
@@ -475,7 +505,7 @@ function runPortScan(ip, opts = {}) {
     //           no-response…) so the UI can show the technical detail.
     // scriptsArgs: optional ["--script=default,safe"] — categories validated
     //              upstream, never user-provided strings.
-    execFile(
+    execNmap(
       "nmap",
       [
         ...portsArgs,
@@ -493,8 +523,7 @@ function runPortScan(ip, opts = {}) {
       { maxBuffer: 16 * 1024 * 1024, timeout: timeoutMs },
       (err, stdout, stderr) => {
         if (err) {
-          const msg = stderr?.toString().trim() || err.message;
-          return reject(new Error(`nmap failed: ${msg}`));
+          return reject(nmapFailure(err, stderr));
         }
         try {
           resolve({
@@ -527,7 +556,7 @@ function runUdpPortScan(ip, opts = {}) {
     // Reuses portsArgs (--top-ports N | -p <spec>) and timing flags.
     // Timeout 30 min: a top-100 UDP scan against a single host can
     // realistically take 10-15 min on -T4.
-    execFile(
+    execNmap(
       "nmap",
       [
         ...portsArgs,
@@ -544,8 +573,7 @@ function runUdpPortScan(ip, opts = {}) {
       { maxBuffer: 16 * 1024 * 1024, timeout: 1_800_000 },
       (err, stdout, stderr) => {
         if (err) {
-          const msg = stderr?.toString().trim() || err.message;
-          return reject(new Error(`nmap failed: ${msg}`));
+          return reject(nmapFailure(err, stderr));
         }
         try {
           resolve({ ports: parsePorts(stdout), timed_out: parseTimedOut(stdout) });
@@ -592,14 +620,13 @@ function runOsScan(ip) {
     // -O: OS detection (requires NET_RAW + NET_ADMIN, already in compose)
     // --osscan-guess: report best guesses when no perfect match (useful on LAN devices)
     // -T4: faster timing
-    execFile(
+    execNmap(
       "nmap",
       ["-O", "--osscan-guess", "-T4", "-oX", "-", ip],
       { maxBuffer: 16 * 1024 * 1024, timeout: 180_000 },
       (err, stdout, stderr) => {
         if (err) {
-          const msg = stderr?.toString().trim() || err.message;
-          return reject(new Error(`nmap failed: ${msg}`));
+          return reject(nmapFailure(err, stderr));
         }
         try {
           resolve(parseOsMatches(stdout));
@@ -626,6 +653,8 @@ module.exports = {
   validateHostTimeout,
   validateMaxRetries,
   parseTimedOut,
+  nmapFailure,
+  execNmap,
   runPingSweep,
   runPortScan,
   runUdpPortScan,
