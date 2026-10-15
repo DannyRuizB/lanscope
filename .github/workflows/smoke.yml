@@ -260,6 +260,23 @@ jobs:
 
           echo "All endpoints responded with expected shape"
 
+      - name: Auth-on doors (v1.52.1)
+        run: |
+          # A second container with AUTH_USER/AUTH_PASS set: the login page
+          # AND its stylesheet open without a credential (styles.css used to
+          # 401 and the form rendered unstyled), the API stays locked.
+          docker run -d --name lanscope-smoke-auth -p 3031:3031 \
+            -e PORT=3031 -e AUTH_USER=smoke -e AUTH_PASS=smoke-pass lanscope:smoke
+          for i in $(seq 1 30); do curl -fsS -o /dev/null http://localhost:3031/login 2>/dev/null && break; sleep 1; done
+          curl -fsS -o /dev/null http://localhost:3031/login
+          curl -fsS -o /tmp/styles.css http://localhost:3031/styles.css
+          test -s /tmp/styles.css
+          code=$(curl -s -o /dev/null -w '%{http_code}' http://localhost:3031/api/scans)
+          test "$code" = "401"
+          code=$(curl -s -o /dev/null -w '%{http_code}' -u smoke:smoke-pass http://localhost:3031/api/scans)
+          test "$code" = "200"
+          docker rm -f lanscope-smoke-auth
+
       - name: Container logs on failure
         if: failure()
         run: docker logs lanscope-smoke

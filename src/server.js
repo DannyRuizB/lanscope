@@ -122,6 +122,15 @@ app.get("/login", (req, res) => {
   res.sendFile(path.join(__dirname, "public", "login.html"));
 });
 
+// v1.52.1 — the login page's stylesheet must be reachable before login too.
+// Behind the gate it answered 401 + `WWW-Authenticate: Basic`, so with auth on
+// the form rendered unstyled (the password field had no visible box) and a
+// browser could pop its native Basic prompt over the form. styles.css is
+// theme CSS shared with the app — nothing in it is worth locking.
+app.get("/styles.css", (req, res) => {
+  res.sendFile(path.join(__dirname, "public", "styles.css"));
+});
+
 app.post("/api/login", (req, res) => {
   if (AUTH_USER === "") {
     return res.status(400).json({ error: "authentication is disabled (set AUTH_USER/AUTH_PASS) — nothing to log in to" });
