@@ -6,7 +6,7 @@ const crypto = require('node:crypto');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
-const { securityHeaders, buildCsp, inlineScriptHashes } = require('../src/security-headers');
+const { securityHeaders, buildCsp, inlineScriptHashes, externalScriptUrls } = require('../src/security-headers');
 
 const sha = (s) => `'sha256-${crypto.createHash('sha256').update(s, 'utf8').digest('base64')}'`;
 
@@ -23,12 +23,18 @@ test('inlineScriptHashes hashes inline scripts and skips src= scripts', () => {
   assert.deepEqual(inlineScriptHashes('<p>no scripts</p>'), []);
 });
 
+test('externalScriptUrls lists absolute https script srcs once, and skips our own files', () => {
+  const html = '<script src="app.js"></script><script defer src="https://cdn.example/a@1/a.min.js"></script>'
+    + '<script src="https://cdn.example/a@1/a.min.js"></script><script src="http://plain.example/b.js"></script>';
+  assert.deepEqual(externalScriptUrls(html), ['https://cdn.example/a@1/a.min.js']);
+});
+
 test('buildCsp locks down framing, plugins, base and connections', () => {
-  const csp = buildCsp(["'sha256-abc'"]);
+  const csp = buildCsp(["'sha256-abc'"], ['https://cdn.example/a@1/a.min.js']);
   for (const d of ["default-src 'self'", "frame-ancestors 'none'", "object-src 'none'", "base-uri 'none'", "connect-src 'self'", "form-action 'self'"]) {
     assert.ok(csp.includes(d), d);
   }
-  assert.match(csp, /script-src 'self' https:\/\/cdn\.jsdelivr\.net 'sha256-abc'/);
+  assert.ok(csp.includes("script-src 'self' https://cdn.example/a@1/a.min.js 'sha256-abc';"), csp);
   // never re-opens script execution wholesale
   assert.ok(!/script-src[^;]*'unsafe-inline'/.test(csp));
   assert.ok(!/'unsafe-eval'/.test(csp));
@@ -56,11 +62,18 @@ test('the shipped pages: every inline script is allowed by hash, and no inline e
     // onclick= & co. are blocked by a hash-based CSP; the UI must not grow any
     assert.ok(!/<[^>]+\son[a-z]+\s*=/i.test(html), `${page} has an inline event handler`);
   }
-  // every external script is either ours or on the allowed CDN
+  // every external script is ours or allowed by its exact URL — never by a
+  // bare host (jsdelivr serves anything anyone has published)
   const index = fs.readFileSync(path.join(pub, 'index.html'), 'utf8');
+  const scriptSrc = csp.split('; ').find((d) => d.startsWith('script-src ')).split(' ').slice(1);
+  let external = 0;
   for (const [, src] of index.matchAll(/<script[^>]*\ssrc="([^"]+)"/g)) {
-    assert.ok(!/^https?:/.test(src) || src.startsWith('https://cdn.jsdelivr.net/'), src);
+    if (!/^https?:/.test(src)) continue;
+    external++;
+    assert.ok(scriptSrc.includes(src), src);
   }
+  assert.ok(external >= 2, 'cytoscape and chart.js come from the CDN');
+  for (const s of scriptSrc) assert.ok(!/^https?:\/\/[^/]+\/?$/.test(s), `bare host in script-src: ${s}`);
 });
 
 test('the hashes follow the files: an edited inline script gets a new hash', () => {

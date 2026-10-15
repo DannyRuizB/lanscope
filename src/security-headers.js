@@ -10,9 +10,12 @@
 //
 // The CSP is built from what the pages actually load:
 //   - script: our own files, the two pinned CDN libraries (cytoscape, chart.js
-//     on cdn.jsdelivr.net), and the inline scripts in index.html / login.html
-//     allowed by their sha256 hash — computed here from the files themselves
-//     at startup, so editing an inline script cannot silently break the page.
+//     on cdn.jsdelivr.net) by their EXACT URL, and the inline scripts in
+//     index.html / login.html allowed by their sha256 hash — all read from the
+//     files themselves at startup, so editing a page cannot silently break it.
+//     Not the whole CDN host: jsdelivr serves every npm package and every
+//     public GitHub repo, so allowing the host would let an injected
+//     <script src> load anything anyone has published.
 //   - style: 'self' plus 'unsafe-inline' — the UI builds markup with style
 //     attributes; style injection is a much smaller risk than script, and the
 //     script side is the one this policy is about.
@@ -26,7 +29,15 @@ const crypto = require("crypto");
 const fs = require("fs");
 const path = require("path");
 
-const CDN = "https://cdn.jsdelivr.net";
+// The absolute (https://) src of every external <script> in the given HTML —
+// each becomes a source expression of its own, matched by full path.
+function externalScriptUrls(html) {
+  const urls = [];
+  for (const [, src] of html.matchAll(/<script\s[^>]*\bsrc\s*=\s*"(https:\/\/[^"\s;,]+)"/gi)) {
+    if (!urls.includes(src)) urls.push(src);
+  }
+  return urls;
+}
 
 // sha256 hashes of every inline <script> (no src attribute) in the given HTML.
 function inlineScriptHashes(html) {
@@ -41,10 +52,10 @@ function inlineScriptHashes(html) {
   return hashes;
 }
 
-function buildCsp(scriptHashes) {
+function buildCsp(scriptHashes, scriptUrls = []) {
   return [
     "default-src 'self'",
-    `script-src 'self' ${CDN} ${scriptHashes.join(" ")}`.trim(),
+    ["script-src 'self'", ...scriptUrls, ...scriptHashes].join(" "),
     "style-src 'self' 'unsafe-inline'",
     "img-src 'self' data: blob:",
     "font-src 'self'",
@@ -58,11 +69,13 @@ function buildCsp(scriptHashes) {
 
 function securityHeaders({ publicDir = path.join(__dirname, "public"), pages = ["index.html", "login.html"] } = {}) {
   const hashes = [];
+  const urls = [];
   for (const page of pages) {
     const html = fs.readFileSync(path.join(publicDir, page), "utf8");
     for (const h of inlineScriptHashes(html)) if (!hashes.includes(h)) hashes.push(h);
+    for (const u of externalScriptUrls(html)) if (!urls.includes(u)) urls.push(u);
   }
-  const csp = buildCsp(hashes);
+  const csp = buildCsp(hashes, urls);
   return function setSecurityHeaders(req, res, next) {
     res.setHeader("Content-Security-Policy", csp);
     res.setHeader("X-Content-Type-Options", "nosniff");
@@ -74,4 +87,4 @@ function securityHeaders({ publicDir = path.join(__dirname, "public"), pages = [
   };
 }
 
-module.exports = { securityHeaders, buildCsp, inlineScriptHashes };
+module.exports = { securityHeaders, buildCsp, inlineScriptHashes, externalScriptUrls };
