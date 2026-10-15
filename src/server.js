@@ -53,6 +53,7 @@ const {
   requireAuth, generateToken, hashToken, clientAddress,
   safeEqual, makeSessionCookie, verifySessionCookie, readCookie, SESSION_COOKIE,
 } = require("./auth");
+const { securityHeaders } = require("./security-headers");
 const { createLoginThrottle } = require("./login-throttle");
 const { buildMetrics } = require("./metrics");
 const PKG_VERSION = require("../package.json").version;
@@ -105,6 +106,10 @@ const loginThrottle = createLoginThrottle({
 });
 
 const app = express();
+// v1.53.0 — CSP, anti-framing, nosniff and friends on EVERY response,
+// including the login page and the 401s (see src/security-headers.js).
+app.disable("x-powered-by");
+app.use(securityHeaders());
 app.use(express.json({ limit: "32kb" }));
 
 // The login page, the session probe and the login/logout endpoints live
