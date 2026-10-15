@@ -45,7 +45,7 @@ LanScope sits on top of `nmap` and exposes a web UI on the local host. Realistic
 
 LanScope already applies a few baseline hardening measures:
 
-- `nmap` runs with file capabilities (`cap_net_raw`, `cap_net_admin`, `cap_net_bind_service`) and not as root inside the container.
+- The server and `nmap` run as the unprivileged `node` user, not root (since v1.54.0 — before that the image had no `USER` and everything ran as root, with `NET_ADMIN` effective on the host's network stack). The server process holds no capabilities at all; `nmap` gets `cap_net_raw`, `cap_net_admin` and `cap_net_bind_service` as file capabilities, only while it runs. The entrypoint starts as root just long enough to hand a data volume written by an older version to `node`, then drops privileges with `su-exec`.
 - All `nmap` invocations go through `execFile` with an explicit argument array — never through a shell.
 - CIDR / port / timing / scan-technique / NSE-script / discovery-flag inputs are validated against strict allowlists before reaching `execFile`.
 - NSE script categories `vuln`, `exploit`, `brute`, `intrusive`, `dos` are deliberately not exposed.

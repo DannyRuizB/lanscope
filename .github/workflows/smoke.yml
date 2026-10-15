@@ -277,6 +277,56 @@ jobs:
           test "$code" = "200"
           docker rm -f lanscope-smoke-auth
 
+      - name: Runs as node, and nmap still scans (v1.54.0)
+        run: |
+          set -euo pipefail
+          # 1. The server is uid 1000 with no effective capabilities.
+          status=$(docker exec lanscope-smoke cat /proc/1/status)
+          echo "$status" | grep -E '^(Uid|CapEff)'
+          echo "$status" | grep -qE '^Uid:\s+1000\s+1000\s+1000\s+1000$'
+          echo "$status" | grep -qE '^CapEff:\s+0000000000000000$'
+
+          # 2. With the compose file's two capabilities, nmap - started by the
+          # server, as node - still gets raw sockets: a SYN scan answers
+          # syn-ack on the container's own port.
+          docker run -d --name lanscope-caps -p 3032:3032 -e PORT=3032 \
+            --cap-add NET_RAW --cap-add NET_ADMIN lanscope:smoke
+          for i in $(seq 1 30); do curl -fsS -o /dev/null http://localhost:3032/api/config 2>/dev/null && break; sleep 1; done
+          scan=$(curl -fsS -X POST -H 'content-type: application/json' -d '{"cidr":"127.0.0.1/32"}' http://localhost:3032/api/scan)
+          hid=$(echo "$scan" | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>console.log(JSON.parse(s).hosts[0].id))')
+          ports=$(curl -fsS -X POST -H 'content-type: application/json' \
+            -d '{"scanType":"syn","ports":{"mode":"range","value":"3032"}}' "http://localhost:3032/api/hosts/$hid/portscan")
+          echo "$ports"
+          echo "$ports" | grep -q '"state":"open","state_reason":"syn-ack"'
+          docker rm -f lanscope-caps
+
+          # 3. Without NET_ADMIN the scan fails with the fix spelled out, not
+          # a bare "spawn EPERM".
+          code=$(curl -s -o /tmp/eperm.json -w '%{http_code}' -X POST -H 'content-type: application/json' \
+            -d '{"cidr":"127.0.0.1/32"}' http://localhost:3030/api/scan)
+          cat /tmp/eperm.json; echo
+          test "$code" = "500"
+          grep -q 'NET_RAW and NET_ADMIN' /tmp/eperm.json
+
+          # 4. A volume from <= 1.53 (directory and database owned by root,
+          # as that image left them) is taken over at start and the server
+          # comes up on it.
+          docker volume create lanscope-legacy
+          docker run --rm -u 0 --entrypoint sh -e DB_PATH=/var/lib/lanscope/lanscope.db \
+            -v lanscope-legacy:/var/lib/lanscope lanscope:smoke \
+            -c 'node -e "require(\"./src/db\")" && chown -R 0:0 /var/lib/lanscope'
+          docker run --rm -v lanscope-legacy:/d alpine ls -lna /d
+          docker run -d --name lanscope-legacy -p 3033:3033 -e PORT=3033 \
+            -e DB_PATH=/var/lib/lanscope/lanscope.db -v lanscope-legacy:/var/lib/lanscope lanscope:smoke
+          for i in $(seq 1 30); do curl -fsS -o /dev/null http://localhost:3033/api/scans 2>/dev/null && break; sleep 1; done
+          curl -fsS -o /dev/null http://localhost:3033/api/scans
+          docker logs lanscope-legacy 2>&1 | grep 'handed to the node user: /var/lib/lanscope /var/lib/lanscope/lanscope.db'
+          owners=$(docker exec lanscope-legacy sh -c 'stat -c %u /var/lib/lanscope /var/lib/lanscope/lanscope.db*' | sort -u)
+          echo "owners: $owners"
+          test "$owners" = "1000"
+          docker rm -f lanscope-legacy
+          docker volume rm lanscope-legacy
+
       - name: Container logs on failure
         if: failure()
         run: docker logs lanscope-smoke
