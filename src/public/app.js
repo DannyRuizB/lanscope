@@ -2328,6 +2328,23 @@ window.addEventListener("hashchange", () => {
   if (lastScan) renderScan(lastScan);
 });
 
+// v1.55.0 — `/` jumps to the host search, the way GitHub, YouTube and most
+// docs sites do. Only when nothing else wants the key: not while typing in a
+// field, not with a modifier, not behind an open modal, and only when the box
+// is on screen (it lives in the results header). Existing text is selected,
+// so typing replaces the query and an arrow key keeps it.
+document.addEventListener("keydown", (e) => {
+  if (e.key !== "/" || e.ctrlKey || e.metaKey || e.altKey || e.isComposing) return;
+  const box = els.hostSearch;
+  if (!box || box.offsetParent === null) return;
+  const t = e.target;
+  if (t instanceof HTMLElement && (t.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName))) return;
+  if (document.querySelector(".modal-root:not([hidden])")) return;
+  e.preventDefault();
+  box.focus();
+  box.select();
+});
+
 // On load: a link with #q=... arrives filtered. Set it before the first render.
 if (els.hostSearch) {
   const initial = readQueryFromHash();
