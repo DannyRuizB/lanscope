@@ -48,7 +48,7 @@ A practical systems-and-networking project. Skills on display:
 
 - **Linux host** with the LAN you want to scan attached directly (Wi-Fi or Ethernet). LanScope uses `network_mode: host`, which on Docker Desktop for macOS / Windows would only see the Docker VM's internal network, not your real LAN. **Windows 11 22H2+** users can run LanScope via WSL2 with mirrored networking — see [Windows (via WSL2)](#windows-via-wsl2). macOS still requires a Linux VM with a bridged adapter; see the [FAQ](#faq).
 - **Docker Engine + Docker Compose v2** installed. `docker --version` should print 24.x or newer.
-- **A few minutes**. No build is needed — the prebuilt multi-arch image lives on GHCR (`linux/amd64` + `linux/arm64`, so Raspberry Pi 4 / 5 work out of the box).
+- **A few minutes**. No build is needed — the prebuilt multi-arch image lives on GHCR (`linux/amd64` + `linux/arm64`, so Raspberry Pi 4 / 5 work out of the box). Both are **run**, not just built: the smoke test builds and probes the image on a native arm64 runner as well as amd64, and every published tag is pulled on both and must scan as `node` with nmap's raw sockets working (`verify-image` workflow).
 
 ### Quickstart (recommended)
 
@@ -471,7 +471,7 @@ npm install   # dev deps
 npm test      # node --test over test/*.test.js
 ```
 
-CI runs ESLint **and** this suite on every push and pull request (the separate smoke workflow exercises the live container).
+CI runs ESLint **and** this suite on every push and pull request (the separate smoke workflow exercises the live container, on amd64 **and** native arm64; `verify-image` pulls each published tag on both architectures and runs nmap in it).
 
 ## About
 
