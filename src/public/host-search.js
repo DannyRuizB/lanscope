@@ -49,6 +49,15 @@
 // cannot be used: a reversed range (`8100-8000`), a port outside 1-65535 or
 // an empty item (`22,,80`) matches NOTHING. Negation reads as "no open port
 // in it": `-tcp:1-1023` is the hosts with nothing open below 1024.
+//
+// v1.56.0 — `is:randommac`: a LOCALLY ADMINISTERED address (bit 0x02 of the
+// first octet), set by software instead of burnt in by a manufacturer - a
+// phone's private Wi-Fi address, Windows' random hardware addresses, a
+// container. nmap has no vendor for it (measured: 02:11:22:… and Docker's
+// own F6:23:E1:… came back without one, B8:27:EB:… as the Raspberry Pi
+// Foundation), which is why such hosts show an empty vendor. Not every one
+// is vendorless: nmap's prefix list names 20 locally administered blocks,
+// QEMU/KVM's 52:54:00 among them, and those VMs match too.
 (function (global) {
   "use strict";
 
@@ -73,11 +82,22 @@
     return parts.filter(Boolean).join(" ").toLowerCase();
   }
 
+  // True for a unicast MAC whose locally-administered bit is set. A MAC that
+  // is not 6 octets, or a multicast one (bit 0x01 - never a host's own), is
+  // not judged.
+  function isRandomMac(mac) {
+    const s = String(mac || "").trim();
+    if (!/^[0-9a-f]{2}(?:[:-]?[0-9a-f]{2}){5}$/i.test(s)) return false;
+    const first = parseInt(s.slice(0, 2), 16);
+    return (first & 0x02) !== 0 && (first & 0x01) === 0;
+  }
+
   // v1.44.0 — `is:timedout`: hosts whose TCP or UDP port scan hit the
   // per-host timeout (v1.41 records it). Their port list is a PARTIAL answer:
   // "0 open" there means "unknown", and this is how to list them all.
   const IS = {
     timedout: (host) => !!(host.port_timedout || host.udp_port_timedout),
+    randommac: (host) => isRandomMac(host.mac),
     up: (host) => host.status === "up",
     down: (host) => host.status === "down",
     labeled: (host, label) => !!(label && String(label).trim()),
@@ -248,7 +268,7 @@
       .some((t) => DIFF_KEYWORDS.has(t.startsWith("-") ? t.slice(1) : t));
   }
 
-  const api = { matchHost, searchHosts, tokenize, needsComparison };
+  const api = { matchHost, searchHosts, tokenize, needsComparison, isRandomMac };
   if (typeof module !== "undefined" && module.exports) module.exports = api;
   else global.HostSearch = api;
 })(typeof window !== "undefined" ? window : globalThis);
