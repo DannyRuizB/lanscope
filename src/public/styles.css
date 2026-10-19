@@ -787,6 +787,11 @@ button.ghost.danger:hover {
 .hosts-table td.muted {
   color: var(--text-mute);
 }
+/* v1.56.0 — "random MAC" in the vendor column: an explanation, not a name */
+.hosts-table td.vendor-random {
+  font-style: italic;
+  cursor: help;
+}
 
 /* Action columns (OS / Ports / UDP) — header and cell both centered
    so the button doesn't sit on the right of an empty cell with the

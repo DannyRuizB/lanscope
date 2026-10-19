@@ -494,6 +494,16 @@ function renderLatencyCell(h) {
   return `<td class="latency-cell" title="${title}">${v === null ? '<span class="muted">—</span>' : v}${spark}</td>`;
 }
 
+// v1.56.0 — an empty vendor next to a locally administered MAC is not an
+// unknown manufacturer: there is none to look up. Say so instead of a dash.
+function renderVendorCell(h) {
+  if (h.vendor) return `<td>${escapeHtml(h.vendor)}</td>`;
+  if (HostSearch.isRandomMac(h.mac)) {
+    return `<td class="muted vendor-random" title="Locally administered MAC: set by software, not by a manufacturer (a phone's private Wi-Fi address, a randomized Windows adapter, a container or VM), so there is no vendor to look up. is:randommac lists them.">random MAC</td>`;
+  }
+  return `<td class="muted">—</td>`;
+}
+
 function renderHostnameCell(h) {
   const l = hostLabels.get(h.ip);
   const editBtn = `<button class="ghost small label-btn" data-ip="${escapeHtml(h.ip)}" title="${l ? "Edit label / notes" : "Add label / notes"}" aria-label="Edit label for ${escapeHtml(h.ip)}">✎</button>` +
@@ -605,7 +615,7 @@ function renderDisappearedRow(h) {
     <tr class="host-row diff-disappeared" data-disappeared-ip="${escapeHtml(h.ip)}">
       <td class="ip">${escapeHtml(h.ip)}</td>
       <td class="${h.mac ? "mac-cell" : "muted"}">${escapeHtml(h.mac) || "—"}${renderWakeButton(h)}</td>
-      <td class="${h.vendor ? "" : "muted"}">${escapeHtml(h.vendor) || "—"}</td>
+      ${renderVendorCell(h)}
       ${renderHostnameCell(h)}
       <td class="muted">${escapeHtml(h.reason) || "—"}</td>
       ${renderLatencyCell(h)}
@@ -652,7 +662,7 @@ function renderHostRow(h) {
     <tr class="host-row${rowClass}" data-host-id="${h.id}">
       <td class="ip">${escapeHtml(h.ip)}${reasonBadge}</td>
       <td class="${h.mac ? "mac-cell" : "muted"}">${escapeHtml(h.mac) || "—"}${renderWakeButton(h)}</td>
-      <td class="${h.vendor ? "" : "muted"}">${escapeHtml(h.vendor) || "—"}</td>
+      ${renderVendorCell(h)}
       ${renderHostnameCell(h)}
       <td class="muted">${escapeHtml(h.reason) || "—"}</td>
       ${renderLatencyCell(h)}

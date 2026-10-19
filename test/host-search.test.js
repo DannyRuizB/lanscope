@@ -4,7 +4,7 @@
 // so it runs under node --test directly (no sandbox, no browser).
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
-const { matchHost, searchHosts } = require('../src/public/host-search');
+const { matchHost, searchHosts, isRandomMac } = require('../src/public/host-search');
 
 const HOSTS = [
   {
@@ -106,6 +106,32 @@ test('is:timedout is a keyword, not a substring: a host named "timedout" is not 
   const hosts = [{ ip: '10.0.0.5', hostname: 'is-timedout-box', port_timedout: 0 }];
   assert.equal(searchHosts(hosts, 'is:timedout').length, 0);
   assert.equal(searchHosts(hosts, 'timedout').length, 1);
+});
+
+test('is:randommac follows the locally administered bit, not the vendor field', () => {
+  const hosts = [
+    { ip: '10.1.0.1', mac: '02:11:22:33:44:55', vendor: '' },
+    { ip: '10.1.0.2', mac: 'f6:23:e1:c4:07:3e' }, // Docker's own random MAC, lowercase
+    { ip: '10.1.0.3', mac: '52:54:00:12:34:56', vendor: 'QEMU virtual NIC' }, // local AND named by nmap
+    { ip: '10.1.0.4', mac: 'B8:27:EB:12:34:56', vendor: 'Raspberry Pi Foundation' },
+    { ip: '10.1.0.5', mac: 'DA-A1-19-00-00-01' },
+    { ip: '10.1.0.6' }, // no MAC: the scanner itself, or a host past a router
+    { ip: '10.1.0.7', mac: '01:00:5E:00:00:FB' }, // multicast, never a host's own
+  ];
+  assert.deepEqual(searchHosts(hosts, 'is:randommac').map((h) => h.ip), ['10.1.0.1', '10.1.0.2', '10.1.0.3', '10.1.0.5']);
+  assert.deepEqual(searchHosts(hosts, '-is:randommac').map((h) => h.ip), ['10.1.0.4', '10.1.0.6', '10.1.0.7']);
+  assert.deepEqual(searchHosts(hosts, 'is:randommac -vendor:qemu').map((h) => h.ip), ['10.1.0.1', '10.1.0.2', '10.1.0.5']);
+});
+
+test('isRandomMac judges only a well-formed unicast MAC', () => {
+  for (const d of '26AE') assert.equal(isRandomMac(`0${d}:00:00:00:00:01`), true, `0${d}`);
+  for (const d of '0148C') assert.equal(isRandomMac(`0${d}:00:00:00:00:01`), false, `0${d}`);
+  assert.equal(isRandomMac('020000000000'), true);
+  assert.equal(isRandomMac('03:00:00:00:00:00'), false); // local but multicast
+  assert.equal(isRandomMac('02:11:22:33:44'), false);
+  assert.equal(isRandomMac('zz:11:22:33:44:55'), false);
+  assert.equal(isRandomMac(''), false);
+  assert.equal(isRandomMac(null), false);
 });
 
 // v1.45.0 — terms, keywords and negation.
