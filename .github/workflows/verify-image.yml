@@ -1,0 +1,87 @@
+name: Verify published image
+
+# The release builds linux/amd64 and linux/arm64 on one amd64 runner (arm64
+# under QEMU) and pushes both - and nothing ever RAN what was pushed. This
+# pulls the published tag on a runner of each architecture, checks the
+# registry handed over the right one, and runs the probe the smoke test runs
+# on a source build: the server is uid 1000 with no capabilities, and with
+# the compose file's NET_RAW + NET_ADMIN nmap (file capabilities, started by
+# the server as node) still gets raw sockets - a SYN scan answers syn-ack.
+on:
+  workflow_run:
+    workflows: ["Publish container image"]
+    types: [completed]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Image tag to verify (default: the one docker-compose.yml pins)"
+        required: false
+  pull_request:
+    paths: [".github/workflows/verify-image.yml"]
+
+permissions:
+  contents: read
+
+jobs:
+  run-published:
+    if: github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success'
+    strategy:
+      fail-fast: false
+      matrix:
+        runner: [ubuntu-latest, ubuntu-24.04-arm]
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Which tag
+        id: tag
+        env:
+          INPUT_TAG: ${{ inputs.tag }}
+          RUN_TAG: ${{ github.event.workflow_run.head_branch }}
+        run: |
+          t="$INPUT_TAG"
+          [ -n "$t" ] || t="$RUN_TAG"
+          [ -n "$t" ] || t=$(grep -oE 'lanscope:[0-9]+\.[0-9]+\.[0-9]+' docker-compose.yml | head -1 | cut -d: -f2)
+          t="${t#v}"
+          [ -n "$t" ] || { echo "::error::no tag to verify"; exit 1; }
+          echo "tag=$t" >> "$GITHUB_OUTPUT"
+          echo "verifying ghcr.io/dannyruizb/lanscope:$t on $(uname -m)"
+
+      - name: Pull it, and check the registry handed over this architecture
+        env:
+          TAG: ${{ steps.tag.outputs.tag }}
+        run: |
+          img="ghcr.io/dannyruizb/lanscope:$TAG"
+          docker pull "$img"
+          arch=$(docker image inspect -f '{{.Architecture}}' "$img")
+          echo "runner $(uname -m), image $arch"
+          case "$(uname -m):$arch" in
+            x86_64:amd64|aarch64:arm64) ;;
+            *) echo "::error::pulled a $arch image on $(uname -m)"; exit 1;;
+          esac
+
+      - name: Runs as node, and nmap scans with the compose capabilities
+        env:
+          TAG: ${{ steps.tag.outputs.tag }}
+        run: |
+          set -euo pipefail
+          img="ghcr.io/dannyruizb/lanscope:$TAG"
+          docker run -d --name lanscope-published -p 3034:3034 -e PORT=3034 \
+            --cap-add NET_RAW --cap-add NET_ADMIN "$img"
+          for i in $(seq 1 60); do curl -fsS -o /dev/null http://localhost:3034/api/config 2>/dev/null && break; sleep 1; done
+          status=$(docker exec lanscope-published cat /proc/1/status)
+          echo "$status" | grep -E '^(Uid|CapEff)'
+          echo "$status" | grep -qE '^Uid:\s+1000\s+1000\s+1000\s+1000$'
+          echo "$status" | grep -qE '^CapEff:\s+0000000000000000$'
+          scan=$(curl -fsS -X POST -H 'content-type: application/json' -d '{"cidr":"127.0.0.1/32"}' http://localhost:3034/api/scan)
+          hid=$(echo "$scan" | python3 -c 'import json,sys; print(json.load(sys.stdin)["hosts"][0]["id"])')
+          ports=$(curl -fsS -X POST -H 'content-type: application/json' \
+            -d '{"scanType":"syn","ports":{"mode":"range","value":"3034"}}' "http://localhost:3034/api/hosts/$hid/portscan")
+          echo "$ports"
+          echo "$ports" | grep -q '"state":"open","state_reason":"syn-ack"'
+          echo "ghcr.io/dannyruizb/lanscope:$TAG on $(uname -m): uid 1000, no capabilities, nmap SYN scan answered syn-ack"
+
+      - name: Container logs on failure
+        if: failure()
+        run: docker logs lanscope-published || true
