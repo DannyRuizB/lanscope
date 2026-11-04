@@ -1263,7 +1263,34 @@ app.delete("/api/alerts/:id", (req, res) => {
   res.status(204).end();
 });
 
-app.listen(PORT, () => {
+const server = app.listen(PORT, () => {
   console.log(`LanScope listening on http://0.0.0.0:${PORT}`);
   scheduler.init();
 });
+
+// v1.57.0 — stop cleanly. In the container node is PID 1, and the kernel gives
+// PID 1 no default action for SIGTERM: up to 1.56.0 `docker stop` sat out its
+// 10-second grace period and SIGKILLed the server (exit 137, measured 10.3 s),
+// so the database was never closed and its write-ahead log never folded back
+// in — after a stop, lanscope.db was a 4 KiB header and the schema and every
+// row lived only in lanscope.db-wal. Closing the database checkpoints the log
+// into the file and removes it. Whatever is in flight (an nmap run, a response
+// being written) is abandoned, exactly as the SIGKILL did, ten seconds sooner.
+let stopping = false;
+function shutdown(signal) {
+  if (stopping) return;
+  stopping = true;
+  console.log(`[lanscope] ${signal}: closing the database and exiting`);
+  scheduler.stop();
+  server.close();
+  let code = 0;
+  try {
+    db.close();
+  } catch (e) {
+    console.error(`[lanscope] closing the database failed: ${e.message}`);
+    code = 1;
+  }
+  process.exit(code);
+}
+process.on("SIGTERM", () => shutdown("SIGTERM"));
+process.on("SIGINT", () => shutdown("SIGINT"));

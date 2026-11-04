@@ -322,6 +322,7 @@ LanScope's direction: cover as many `nmap` options as possible behind a visual U
 - [x] **v1.54.0** — **The server and nmap run as `node`, not root.** The FAQ and SECURITY.md have long said nmap runs as the unprivileged `node` user, and the Dockerfile gave the binary file capabilities for exactly that — but the image had no `USER`, so everything ran as **root** (measured on the published 1.53.0: uid 0, `Config.User` empty), and with `network_mode: host` that root held `NET_ADMIN` on the **host's** network stack (it could `ip link add` an interface; as `node` that is *Operation not permitted*). A new entrypoint starts as root only to hand the database directory and its SQLite files to `node` — so a volume written by an older version keeps working, with one log line naming what it took over — then drops privileges for good with `su-exec`; started with `user:` it just runs. Two things the switch needed, both **measured** before writing: nmap only trusts uid 0, so without `NMAP_PRIVILEGED` (now set in the image) `-sS` and `-O` quit with *requires root privileges* and — worse, silently — the ping sweep came back with **no MAC addresses**; and as `node`, a container without `NET_ADMIN` cannot even exec nmap (*spawn EPERM*, which Node throws synchronously and used to reach the UI bare) — the error now names the fix, as does nmap's *Couldn't open a raw socket* under `no-new-privileges`. **e2e** against a target on a bridge network, as the compose file runs it: the server is uid 1000 with `CapEff` 0, the nmap it spawns is `node`, the sweep reports MACs, a SYN scan answers `syn-ack` and OS detection matches *Linux 6.18* (96%); a volume scanned by 1.53.0 as root is handed over on first start and its scan is still there, and a restart hands over nothing. The smoke workflow checks the uid and capabilities, a SYN scan as `node`, the missing-`NET_ADMIN` message and the takeover of a root-owned volume.
 - [x] **v1.55.0** — **`/` jumps to the host search**, the way GitHub, YouTube and most docs sites do: the box gets focus with any query already in it selected, so typing replaces it and an arrow key keeps it. The key is only taken when nothing else wants it — not while typing in another field (a `192.168.1.0/24` target still types its slash), not with Ctrl/Alt/Meta, not behind an open dialog, and not before a scan is open (the box is hidden then). The placeholder says so (*Search hosts… ( / )*) and the input carries `aria-keyshortcuts="/"`. Measured in headless Chrome over CDP against the seeded demo: every case above, plus that `Escape` in the box (native `type="search"`) clears it and the table, the *N of M* count and the `#q=` link follow.
 - [x] **v1.56.0** — **Random MACs are named, and `is:randommac` lists them.** A host with a MAC but an empty vendor looked like a lookup that failed; usually there is nothing to look up. A **locally administered** address (bit `0x02` of the first octet) is set by software — a phone's private Wi-Fi address, Windows' random hardware addresses, a container or a VM — and no manufacturer owns it. The vendor column now says *random MAC* (italic, with a tooltip saying why) where `nmap` gave no vendor for such an address, and **`is:randommac`** in the search box lists every locally administered one; like every keyword it negates, composes, travels in the `#q=` link and in the filtered export. A MAC `nmap` does name keeps its name: its prefix list has **20 locally administered blocks**, QEMU/KVM's `52:54:00` (*QEMU virtual NIC*) among them, and those VMs match `is:randommac` too (`is:randommac -vendor:qemu` leaves them out). **Measured** with a real scan of a Docker bridge network from the image built on this branch: `02:11:22:…` and Docker's own random `FE:2E:83:…` and gateway `C6:26:6C:…` came back without a vendor and read *random MAC*; `B8:27:EB:…` stayed *Raspberry Pi Foundation* and `52:54:00:…` *QEMU virtual NIC*; the scanner's own row (no MAC) kept its dash. In headless Chrome over CDP: `is:randommac` *4 of 6*, `-is:randommac` 2, `is:randommac -vendor:qemu` 3, a fresh load of `#q=is%3Arandommac` 4, and the filtered JSON export the same four hosts. Multicast MACs (bit `0x01`, never a host's own) and malformed ones are not judged. Tests 279 → **281**.
+- [x] **v1.57.0** — **A backup that holds your data, and a stop that is clean.** The FAQ's backup recipe failed three ways at once, all measured on the published 1.56.0: it mounted a volume called `lanscope-data`, but Compose names it `lanscope_lanscope-data`, so the command created an empty volume and found no file; with the right volume, the `lanscope.db` it copied was a **4 KiB header with no tables** — SQLite runs in WAL mode and the schema and every row were still in `lanscope.db-wal`; and stopping the container first did not help, because **there was no clean stop**: node is PID 1 in the container, PID 1 gets no default action for `SIGTERM`, so `docker stop` waited its 10 seconds and SIGKILLed the server (10.3 s, exit 137) and the log was never folded back. Restoring "in the reverse direction" did not restore either: the old log next to the copied-in file was replayed over it (a 3-label backup came back with 5). And the WAL troubleshooting entry called `sqlite3`, which the image does not have. Now: the server closes the database on `SIGTERM` / `SIGINT` — **`docker stop` takes 0.3 s, exits 0, and leaves `lanscope.db` alone holding everything**, including on a volume that 1.56.0 left with an orphaned log; **`docker exec lanscope node src/backup.js > file.db`** takes a consistent copy while LanScope runs (`VACUUM INTO` from a read-only connection, so the root that `docker exec` runs as leaves nothing in the volume; the copy is integrity-checked, a terminal is refused instead of filled with binary) and **`--check`** replaces the missing `sqlite3`; the FAQ restores through `--volumes-from` (no volume name to guess) and deletes the stale `-wal` / `-shm`, and the entrypoint's hand-over message names a restore as a cause. **Measured** on the image built from this branch: live backup 3 of 3 labels with nothing root-owned left in the volume, stop 0.34 s with exit 0, the bare main file 5 of 5 afterwards, the documented restore back to 3 and writable. The smoke workflow now runs the backup, the stop and the restore on both architectures. Tests 281 → **290** (the two stop tests fail on 1.56.0: killed by the signal, not exited).
 
 ## FAQ
 
@@ -359,17 +360,29 @@ scrape_configs:
 ```
 
 ### Where is my data stored?
-Locally, in a single SQLite file inside the Docker named volume `lanscope-data` (mounted at `/var/lib/lanscope/lanscope.db` in the container). Nothing leaves the machine. No telemetry, no analytics, no remote calls beyond what `nmap` itself sends across the LAN.
+Locally, in a SQLite database at `/var/lib/lanscope/lanscope.db` inside the container, on the named volume the compose file declares as `lanscope-data`. Compose prefixes volume names with the project, so on disk it is `lanscope_lanscope-data` when the file lives in `~/lanscope/` (the quickstart prints it: `Volume "lanscope_lanscope-data" Created`) — the recipes below go through the container instead, so they work whatever the folder is called. Nothing leaves the machine. No telemetry, no analytics, no remote calls beyond what `nmap` itself sends across the LAN.
 
 ### How do I back up my scans?
-Copy the SQLite file out of the volume:
+Ask the running container for a consistent copy (v1.57.0):
 
 ```bash
-docker run --rm -v lanscope-data:/data -v "$PWD":/backup alpine \
-  cp /data/lanscope.db /backup/lanscope-$(date +%F).db
+docker exec lanscope node src/backup.js > lanscope-$(date +%F).db
 ```
 
-Restoring is the reverse direction. The file is a regular SQLite database; you can also open it with the `sqlite3` CLI to inspect or export tables.
+It works while LanScope runs and scans, prints a summary on stderr (`integrity ok; 12 scans, 140 hosts, 3 host_labels, …`), and the file is a standalone SQLite database you can open with the `sqlite3` CLI. Run it from a Linux shell (WSL included): PowerShell 5's `>` re-encodes binary output and ruins the file.
+
+**Don't copy `lanscope.db` out of the volume.** SQLite runs in WAL mode, so the newest data — on a young install, the schema itself — sits in `lanscope.db-wal` until a checkpoint folds it back. Up to v1.56.0 this FAQ said to copy the main file, and that copy had **no tables at all** (measured, with the server running and after a stop); the backup above goes through SQLite and gets everything.
+
+To restore, stop LanScope, put the file back as `lanscope.db` **and delete any `-wal` / `-shm` next to it** — a log left over from the old database is replayed on top of the restored one (measured on 1.56.0: a restored 3-label backup came back with the 5 labels of the log), then start:
+
+```bash
+docker compose stop
+docker run --rm --volumes-from lanscope -v "$PWD":/backup alpine sh -c \
+  'cd /var/lib/lanscope && rm -f lanscope.db-wal lanscope.db-shm && cp /backup/lanscope-2026-11-02.db lanscope.db'
+docker compose start
+```
+
+The restored file arrives owned by root; the container hands it to the `node` user on start (the log says so).
 
 ### Why doesn't Wake-on-LAN wake my device?
 
@@ -447,13 +460,15 @@ That's `nmap` working as documented: `-Pn` tells it to skip the discovery phase 
 The GHCR package is set to **public** so anonymous pulls should just work. If you're getting `unauthorized` anyway, you probably have stale credentials cached from a previous `docker login ghcr.io`. Try `docker logout ghcr.io && docker pull ghcr.io/dannyruizb/lanscope:latest`. If you're behind a corporate proxy, GHCR is reached via `pkg-containers.githubusercontent.com` and you may need to allow that.
 
 ### Container died and now I see `lanscope.db-shm` / `lanscope.db-wal` files
-SQLite runs in WAL mode (`PRAGMA journal_mode = WAL`), so a crash leaves the write-ahead log files. They're not corruption — they get checkpointed on the next clean shutdown. To force a checkpoint without restarting:
+SQLite runs in WAL mode (`PRAGMA journal_mode = WAL`): while LanScope runs, the write-ahead log holds the newest data, and a crash or a `docker kill` leaves it behind. That's not corruption — the next start reads it, and since **v1.57.0** a clean stop (`docker compose stop` / `down` / `restart`, Ctrl-C) closes the database, which folds the log into `lanscope.db` and deletes both files. Up to v1.56.0 there was no clean stop: the server ignored `SIGTERM`, `docker stop` waited its 10 seconds and killed it (exit 137), and the log simply stayed. Never delete the two files while their database is in use, and don't copy `lanscope.db` without them — use the backup command in the FAQ.
+
+If you suspect actual corruption, check the database in place (the image has no `sqlite3` CLI; this FAQ used to suggest one):
 
 ```bash
-docker exec lanscope sqlite3 /var/lib/lanscope/lanscope.db 'PRAGMA wal_checkpoint(TRUNCATE);'
+docker exec lanscope node src/backup.js --check
 ```
 
-If you suspect actual corruption, run `PRAGMA integrity_check;` against the same database; a healthy DB returns `ok`.
+A healthy database prints `integrity ok` and the row counts.
 
 ## Stack
 
@@ -464,7 +479,7 @@ If you suspect actual corruption, run `PRAGMA integrity_check;` against the same
 
 ## Tests
 
-A [`node:test`](https://nodejs.org/api/test.html) suite covers the pure parts of the scanner — the input validators that guard everything reaching the nmap argv (`validateCidr`, `validatePortsSpec`, `validateDiscovery`, …) and the nmap-XML parsers (`parseHosts`, `parsePorts`, `parseHostScripts`, `parseOsMatches`), fed hand-written `nmap -oX` fixtures. No nmap binary, no network, no host touched — so it runs anywhere, including CI.
+A [`node:test`](https://nodejs.org/api/test.html) suite covers the pure parts of the scanner — the input validators that guard everything reaching the nmap argv (`validateCidr`, `validatePortsSpec`, `validateDiscovery`, …) and the nmap-XML parsers (`parseHosts`, `parsePorts`, `parseHostScripts`, `parseOsMatches`), fed hand-written `nmap -oX` fixtures. No nmap binary, no network, no host touched — so it runs anywhere, including CI. The database tests use throwaway SQLite files; the clean-stop test starts the real server once on one of them and signals it.
 
 ```bash
 npm install   # dev deps
