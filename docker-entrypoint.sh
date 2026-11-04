@@ -9,8 +9,10 @@
 #
 # Up to v1.53.0 everything ran as root, so an existing data volume holds a
 # root-owned database. Starting as root here lets us hand the database
-# directory and the SQLite files to `node` once, then drop privileges for
-# good with su-exec. Started as any other user (`user:` in compose,
+# directory and the SQLite files to `node` (whatever `node` cannot write yet,
+# checked on every start), then drop privileges for good with su-exec. A
+# database put back by the README's restore recipe - copied in as root - is
+# handed over the same way. Started as any other user (`user:` in compose,
 # `docker run --user`), it just runs the command.
 set -eu
 
@@ -38,7 +40,7 @@ if [ "$(id -u)" = "0" ]; then
   done
   shift
   if [ -n "$handed" ]; then
-    echo "lanscope: handed to the node user:$handed (written by LanScope <= 1.53, which ran as root)"
+    echo "lanscope: handed to the node user:$handed (root-owned: left by LanScope <= 1.53, which ran as root, or copied in by a restore)"
   fi
   exec su-exec node "$@"
 fi

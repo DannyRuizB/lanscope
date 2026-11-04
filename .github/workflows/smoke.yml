@@ -334,10 +334,78 @@ jobs:
           docker rm -f lanscope-legacy
           docker volume rm lanscope-legacy
 
+      - name: Backup, clean stop and restore (v1.57.0)
+        run: |
+          set -euo pipefail
+          # The README's recipes on a compose-like setup: a named volume and
+          # DB_PATH under /var/lib/lanscope. (Outputs are captured before they
+          # are searched: `producer | grep -q` under pipefail can fail on the
+          # producer's SIGPIPE when grep stops reading early.)
+          docker volume create lanscope-backup
+          docker run -d --name lanscope-backup -p 3034:3034 -e PORT=3034 \
+            -e DB_PATH=/var/lib/lanscope/lanscope.db -v lanscope-backup:/var/lib/lanscope lanscope:smoke
+          up() {
+            for i in $(seq 1 30); do curl -fsS -o /dev/null http://localhost:3034/api/config 2>/dev/null && return 0; sleep 1; done
+            return 1
+          }
+          label() {
+            curl -fsS -o /dev/null -X PUT -H 'content-type: application/json' \
+              -d "{\"cidr\":\"192.168.0.0/24\",\"ip\":\"192.168.0.$1\",\"label\":\"smoke-$1\"}" \
+              http://localhost:3034/api/labels
+          }
+          labels_in() {
+            python3 -c 'import sqlite3, sys; print(sqlite3.connect(sys.argv[1]).execute("select count(*) from host_labels").fetchone()[0])' "$1"
+          }
+          up
+          label 1; label 2; label 3
+
+          # 1. A consistent copy while it runs - the rows are still in the WAL.
+          docker exec lanscope-backup node src/backup.js > /tmp/b3.db
+          test "$(labels_in /tmp/b3.db)" = 3
+          check=$(docker exec lanscope-backup node src/backup.js --check)
+          echo "$check"
+          grep -q 'integrity ok' <<<"$check"
+          # docker exec runs as root; the read-only backup leaves nothing root-owned.
+          owners=$(docker exec lanscope-backup sh -c 'stat -c %u /var/lib/lanscope /var/lib/lanscope/lanscope.db*' | sort -u)
+          test "$owners" = "1000"
+
+          # 2. A clean stop: exit 0 well inside docker's 10 s grace (1.56.0 was
+          # SIGKILLed at 10 s, exit 137), and the main file alone holds it all.
+          label 4; label 5
+          t0=$(date +%s)
+          docker stop lanscope-backup
+          took=$(( $(date +%s) - t0 ))
+          echo "stop took ${took}s"
+          test "$took" -lt 5
+          test "$(docker inspect -f '{{.State.ExitCode}}' lanscope-backup)" = 0
+          logs=$(docker logs lanscope-backup 2>&1)
+          grep -q '\[lanscope\] SIGTERM: closing the database' <<<"$logs"
+          files=$(docker run --rm --volumes-from lanscope-backup alpine ls /var/lib/lanscope)
+          echo "left in the volume: $files"
+          test "$files" = "lanscope.db"
+          docker cp lanscope-backup:/var/lib/lanscope/lanscope.db /tmp/main-only.db
+          test "$(labels_in /tmp/main-only.db)" = 5
+
+          # 3. The README's restore (stale -wal/-shm removed), back to 3 labels,
+          # handed to node on start, and writable again.
+          docker run --rm --volumes-from lanscope-backup -v /tmp:/backup alpine sh -c \
+            'cd /var/lib/lanscope && rm -f lanscope.db-wal lanscope.db-shm && cp /backup/b3.db lanscope.db'
+          docker start lanscope-backup
+          up
+          n=$(curl -fsS "http://localhost:3034/api/labels?cidr=192.168.0.0%2F24" | python3 -c 'import json, sys; print(len(json.load(sys.stdin)["labels"]))')
+          test "$n" = 3
+          logs=$(docker logs lanscope-backup 2>&1)
+          grep -q 'or copied in by a restore' <<<"$logs"
+          label 6
+          docker rm -f lanscope-backup
+          docker volume rm lanscope-backup
+
       - name: Container logs on failure
         if: failure()
-        run: docker logs lanscope-smoke
+        run: |
+          docker logs lanscope-smoke
+          docker logs lanscope-backup || true
 
       - name: Cleanup
         if: always()
-        run: docker rm -f lanscope-smoke || true
+        run: docker rm -f lanscope-smoke lanscope-backup || true

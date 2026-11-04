@@ -1653,7 +1653,15 @@ function touchApiToken(id) {
   );
 }
 
+// v1.57.0 — closing the last connection checkpoints the write-ahead log into
+// the database file and deletes lanscope.db-wal / -shm, so the file on disk is
+// the whole database again. server.js calls this on SIGTERM / SIGINT.
+function close() {
+  if (db.open) db.close();
+}
+
 module.exports = {
+  close,
   getNetworkExclusions,
   setNetworkExclusions,
   listAllNetworkExclusions,
