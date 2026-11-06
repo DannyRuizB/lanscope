@@ -31,6 +31,9 @@ test('nmapFailure: spawn EPERM names the missing capability', () => {
   const e = nmapFailure(err, '');
   assert.match(e.message, /^nmap could not start \(EPERM\)/);
   assert.match(e.message, /NET_RAW and NET_ADMIN/);
+  // v1.58.0 — measured: cap_drop ALL with only those two back is the same
+  // EPERM, because nmap's file capabilities also name NET_BIND_SERVICE.
+  assert.match(e.message, /NET_BIND_SERVICE as well if the container drops Docker's default capabilities \(cap_drop: ALL\)/);
   // "spawn nmap" is how Node spells it for other codes: same treatment
   assert.match(nmapFailure(Object.assign(new Error('x'), { code: 'EPERM', syscall: 'spawn nmap' }), '').message, /NET_ADMIN/);
 });

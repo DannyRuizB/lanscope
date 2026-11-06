@@ -375,7 +375,11 @@ function parseHosts(xml) {
 //     capabilities it cannot grant, and Node says only "spawn EPERM";
 //   - no-new-privileges is set: file capabilities are ignored, so nmap starts
 //     and says "Couldn't open a raw socket".
-const RAW_SOCKET_HINT = "nmap runs as the unprivileged node user and needs the container to have both NET_RAW and NET_ADMIN (cap_add in docker-compose.yml), without no-new-privileges (it disables the file capabilities nmap uses)";
+// v1.58.0 — a third way to the EPERM, measured: `cap_drop: [ALL]` (the
+// compose file now does it) also takes NET_BIND_SERVICE, the third file
+// capability on nmap - with NET_RAW and NET_ADMIN back but not that one, the
+// exec is refused just the same. The hint names it for that case.
+const RAW_SOCKET_HINT = "nmap runs as the unprivileged node user and needs the container to have both NET_RAW and NET_ADMIN (cap_add in docker-compose.yml) - and NET_BIND_SERVICE as well if the container drops Docker's default capabilities (cap_drop: ALL) - without no-new-privileges (it disables the file capabilities nmap uses)";
 function nmapFailure(err, stderr) {
   if (err && err.code === "EPERM" && String(err.syscall || "").startsWith("spawn")) {
     return new Error(`nmap could not start (EPERM): ${RAW_SOCKET_HINT}`);

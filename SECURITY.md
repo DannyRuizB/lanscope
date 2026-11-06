@@ -46,6 +46,7 @@ LanScope sits on top of `nmap` and exposes a web UI on the local host. Realistic
 LanScope already applies a few baseline hardening measures:
 
 - The server and `nmap` run as the unprivileged `node` user, not root (since v1.54.0 — before that the image had no `USER` and everything ran as root, with `NET_ADMIN` effective on the host's network stack). The server process holds no capabilities at all; `nmap` gets `cap_net_raw`, `cap_net_admin` and `cap_net_bind_service` as file capabilities, only while it runs. The entrypoint starts as root just long enough to hand a data volume written by an older version to `node`, then drops privileges with `su-exec`.
+- Since v1.58.0 the supplied `docker-compose.yml` drops all of Docker's default capabilities and adds back only `NET_RAW`, `NET_ADMIN`, `NET_BIND_SERVICE` (nmap's file capabilities), `SETUID`, `SETGID` (the drop to `node`) and `CHOWN` (handing a root-owned database to `node`) — each measured by removing it; the root filesystem is read-only (`tmpfs` `/tmp`), `pids_limit: 128`, logs rotate, and the image's `HEALTHCHECK` probes `GET /healthz`, which says only ok / unavailable. `no-new-privileges` stays off on purpose: it strips nmap's file capabilities.
 - All `nmap` invocations go through `execFile` with an explicit argument array — never through a shell.
 - CIDR / port / timing / scan-technique / NSE-script / discovery-flag inputs are validated against strict allowlists before reaching `execFile`.
 - NSE script categories `vuln`, `exploit`, `brute`, `intrusive`, `dos` are deliberately not exposed.

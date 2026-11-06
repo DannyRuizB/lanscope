@@ -4,9 +4,12 @@ name: Verify published image
 # under QEMU) and pushes both - and nothing ever RAN what was pushed. This
 # pulls the published tag on a runner of each architecture, checks the
 # registry handed over the right one, and runs the probe the smoke test runs
-# on a source build: the server is uid 1000 with no capabilities, and with
-# the compose file's NET_RAW + NET_ADMIN nmap (file capabilities, started by
-# the server as node) still gets raw sockets - a SYN scan answers syn-ack.
+# on a source build: the server is uid 1000 with no capabilities, and under
+# the compose file's settings - since v1.58.0 every default capability
+# dropped and six added back, a read-only root with a tmpfs /tmp, a pids
+# limit - nmap (file capabilities, started by the server as node) still gets
+# raw sockets: a SYN scan answers syn-ack. An image with a HEALTHCHECK
+# (>= 1.58.0) must also report healthy.
 on:
   workflow_run:
     workflows: ["Publish container image"]
@@ -61,15 +64,25 @@ jobs:
             *) echo "::error::pulled a $arch image on $(uname -m)"; exit 1;;
           esac
 
-      - name: Runs as node, and nmap scans with the compose capabilities
+      - name: Runs as node, and nmap scans under the compose settings
         env:
           TAG: ${{ steps.tag.outputs.tag }}
         run: |
           set -euo pipefail
           img="ghcr.io/dannyruizb/lanscope:$TAG"
           docker run -d --name lanscope-published -p 3034:3034 -e PORT=3034 \
-            --cap-add NET_RAW --cap-add NET_ADMIN "$img"
+            -e DB_PATH=/var/lib/lanscope/lanscope.db -v lanscope-published-data:/var/lib/lanscope \
+            --cap-drop ALL --cap-add NET_RAW --cap-add NET_ADMIN --cap-add NET_BIND_SERVICE \
+            --cap-add SETUID --cap-add SETGID --cap-add CHOWN \
+            --read-only --tmpfs /tmp --pids-limit 128 "$img"
           for i in $(seq 1 60); do curl -fsS -o /dev/null http://localhost:3034/api/config 2>/dev/null && break; sleep 1; done
+          if [ -n "$(docker inspect -f '{{if .Config.Healthcheck}}yes{{end}}' "$img")" ]; then
+            for i in $(seq 1 60); do [ "$(docker inspect -f '{{.State.Health.Status}}' lanscope-published)" = healthy ] && break; sleep 1; done
+            docker inspect -f 'health={{.State.Health.Status}}' lanscope-published
+            test "$(docker inspect -f '{{.State.Health.Status}}' lanscope-published)" = healthy
+          else
+            echo "$img has no HEALTHCHECK (added in 1.58.0) - health not checked"
+          fi
           status=$(docker exec lanscope-published cat /proc/1/status)
           echo "$status" | grep -E '^(Uid|CapEff)'
           echo "$status" | grep -qE '^Uid:\s+1000\s+1000\s+1000\s+1000$'
@@ -80,7 +93,7 @@ jobs:
             -d '{"scanType":"syn","ports":{"mode":"range","value":"3034"}}' "http://localhost:3034/api/hosts/$hid/portscan")
           echo "$ports"
           echo "$ports" | grep -q '"state":"open","state_reason":"syn-ack"'
-          echo "ghcr.io/dannyruizb/lanscope:$TAG on $(uname -m): uid 1000, no capabilities, nmap SYN scan answered syn-ack"
+          echo "ghcr.io/dannyruizb/lanscope:$TAG on $(uname -m): uid 1000, no capabilities, six container capabilities, read-only root, nmap SYN scan answered syn-ack"
 
       - name: Container logs on failure
         if: failure()

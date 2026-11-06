@@ -282,6 +282,9 @@ jobs:
           test "$code" = "401"
           code=$(curl -s -o /dev/null -w '%{http_code}' -u smoke:smoke-pass http://localhost:3031/api/scans)
           test "$code" = "200"
+          # v1.58.0 - the HEALTHCHECK's door: open without a credential (or
+          # an auth-on container would be unhealthy forever), ok and no more.
+          test "$(curl -fsS http://localhost:3031/healthz)" = '{"status":"ok"}'
           docker rm -f lanscope-smoke-auth
 
       - name: Runs as node, and nmap still scans (v1.54.0)
@@ -400,12 +403,50 @@ jobs:
           docker rm -f lanscope-backup
           docker volume rm lanscope-backup
 
+      - name: The shipped docker-compose.yml, hardening included (v1.58.0)
+        run: |
+          set -euo pipefail
+          # The compose file the README hands out, run as written and built
+          # from this checkout. network_mode host puts it on the runner's own
+          # port 3030, so the first container makes room. `--wait` returns
+          # only once the image's HEALTHCHECK reports healthy.
+          docker rm -f lanscope-smoke
+          docker compose -p lsci up -d --build --wait --wait-timeout 120
+          docker inspect -f 'health={{.State.Health.Status}} capdrop={{.HostConfig.CapDrop}} capadd={{.HostConfig.CapAdd}} read_only={{.HostConfig.ReadonlyRootfs}} pids={{.HostConfig.PidsLimit}} log={{.HostConfig.LogConfig.Config}}' lanscope
+          test "$(docker inspect -f '{{.State.Health.Status}}' lanscope)" = healthy
+          test "$(docker inspect -f '{{.HostConfig.ReadonlyRootfs}}' lanscope)" = true
+          test "$(docker inspect -f '{{.HostConfig.PidsLimit}}' lanscope)" = 128
+          # Every default capability dropped, six back. The server is node
+          # with nothing effective; nmap still gets raw sockets - its file
+          # capabilities are all in the bounding set - and a SYN scan of the
+          # server's own port answers syn-ack.
+          docker exec lanscope grep -E '^(Uid|CapEff|CapBnd)' /proc/1/status
+          docker exec lanscope grep -qE '^CapEff:\s+0000000000000000$' /proc/1/status
+          scan=$(curl -fsS -X POST -H 'content-type: application/json' -d '{"cidr":"127.0.0.1/32"}' http://127.0.0.1:3030/api/scan)
+          hid=$(echo "$scan" | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>console.log(JSON.parse(s).hosts[0].id))')
+          ports=$(curl -fsS -X POST -H 'content-type: application/json' \
+            -d '{"scanType":"syn","ports":{"mode":"range","value":"3030"}}' "http://127.0.0.1:3030/api/hosts/$hid/portscan")
+          echo "$ports"
+          echo "$ports" | grep -q '"state":"open","state_reason":"syn-ack"'
+          # The live backup on a read-only root: its scratch file goes to
+          # the tmpfs /tmp, the copy comes out whole.
+          docker exec lanscope node src/backup.js > /tmp/compose-backup.db
+          test -s /tmp/compose-backup.db
+          docker exec lanscope node src/backup.js --check
+          # And a clean stop under the same settings.
+          docker compose -p lsci stop
+          test "$(docker inspect -f '{{.State.ExitCode}}' lanscope)" = 0
+          docker compose -p lsci down -v
+
       - name: Container logs on failure
         if: failure()
         run: |
-          docker logs lanscope-smoke
+          docker logs lanscope-smoke || true
           docker logs lanscope-backup || true
+          docker logs lanscope || true
 
       - name: Cleanup
         if: always()
-        run: docker rm -f lanscope-smoke lanscope-backup || true
+        run: |
+          docker rm -f lanscope-smoke lanscope-backup || true
+          docker compose -p lsci down -v || true

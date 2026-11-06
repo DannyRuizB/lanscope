@@ -1653,6 +1653,14 @@ function touchApiToken(id) {
   );
 }
 
+// v1.58.0 — the health probe's question: can the database be read? One read
+// of the schema page (sqlite_master), so an unreadable or damaged file throws
+// instead of the probe reporting ok from a server that cannot answer a query.
+const pingStmt = db.prepare("SELECT count(*) AS n FROM sqlite_master");
+function ping() {
+  return pingStmt.get().n;
+}
+
 // v1.57.0 — closing the last connection checkpoints the write-ahead log into
 // the database file and deletes lanscope.db-wal / -shm, so the file on disk is
 // the whole database again. server.js calls this on SIGTERM / SIGINT.
@@ -1662,6 +1670,7 @@ function close() {
 
 module.exports = {
   close,
+  ping,
   getNetworkExclusions,
   setNetworkExclusions,
   listAllNetworkExclusions,
