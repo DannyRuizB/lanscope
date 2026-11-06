@@ -43,6 +43,15 @@ ENV PORT=3030
 
 EXPOSE 3030
 
+# v1.58.0 — `docker ps` says healthy only while the server answers AND can
+# read its database (GET /healthz, open without a credential, see
+# src/health.js). busybox wget is already in the image and exits non-zero on
+# any non-2xx answer; shell form so ${PORT} follows the env var. 127.0.0.1
+# works with the compose file's `network_mode: host` too (the server listens
+# on every address).
+HEALTHCHECK --interval=30s --timeout=5s --start-period=15s --retries=3 \
+  CMD wget -q -O /dev/null "http://127.0.0.1:${PORT:-3030}/healthz" || exit 1
+
 # v1.54.0 — the server and its nmap run as `node`, not root (the entrypoint
 # takes over a root-owned volume from older versions, then drops privileges).
 ENTRYPOINT ["lanscope-entrypoint"]

@@ -56,6 +56,7 @@ const {
 const { securityHeaders } = require("./security-headers");
 const { createLoginThrottle } = require("./login-throttle");
 const { buildMetrics } = require("./metrics");
+const { healthz } = require("./health");
 const PKG_VERSION = require("../package.json").version;
 
 const PORT = parseInt(process.env.PORT, 10) || 3030;
@@ -126,6 +127,11 @@ app.get("/api/session", (req, res) => {
 app.get("/login", (req, res) => {
   res.sendFile(path.join(__dirname, "public", "login.html"));
 });
+
+// v1.58.0 — the container's HEALTHCHECK (see the Dockerfile) has no
+// credential, so its door is open too; it answers ok / unavailable and
+// nothing else (src/health.js).
+app.get("/healthz", healthz(db.ping));
 
 // v1.52.1 — the login page's stylesheet must be reachable before login too.
 // Behind the gate it answered 401 + `WWW-Authenticate: Basic`, so with auth on

@@ -4,9 +4,35 @@ services:
     image: ghcr.io/dannyruizb/lanscope:1.57.0
     container_name: lanscope
     network_mode: host
+    # v1.58.0 — Docker's 14 default capabilities dropped, back only the six
+    # LanScope uses (each one measured by taking it away): NET_RAW,
+    # NET_ADMIN and NET_BIND_SERVICE because nmap's file capabilities name
+    # all three and the kernel refuses to exec it ("nmap could not start
+    # (EPERM)") when any is missing from the container; SETUID and SETGID
+    # for the entrypoint's drop to the `node` user; CHOWN to hand it a
+    # root-owned database (a volume from <= 1.53, or a restored backup).
+    cap_drop:
+      - ALL
     cap_add:
       - NET_RAW
       - NET_ADMIN
+      - NET_BIND_SERVICE
+      - SETUID
+      - SETGID
+      - CHOWN
+    # Nothing outside the volume is written (docker diff stays empty through
+    # scans and a backup); the backup's scratch file lives in /tmp.
+    read_only: true
+    tmpfs:
+      - /tmp
+    # A /24 sweep, a SYN + version + NSE scan, OS and UDP scans peaked at
+    # 22 processes and threads; 128 leaves room and stops a runaway.
+    pids_limit: 128
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
     restart: unless-stopped
     environment:
       PORT: 3030
