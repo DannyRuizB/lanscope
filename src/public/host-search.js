@@ -58,6 +58,22 @@
 // Foundation), which is why such hosts show an empty vendor. Not every one
 // is vendorless: nmap's prefix list names 20 locally administered blocks,
 // QEMU/KVM's 52:54:00 among them, and those VMs match too.
+//
+// v1.59.0 — what runs on a port: `service:` and `product:`. Everything -sV
+// learns was stored and shown, but the search could not ask for it: `nginx`,
+// `ssh` and `http` found nothing on the demo seed. Now the free text also
+// covers the service name and product of every OPEN port (TCP or UDP), and
+// two keywords are exact about it:
+//   - `service:http` - nmap's service name, with or without TLS: `http`
+//     and `ssl/http` (the scanner keeps nmap's tunnel since this version).
+//     `service:ssl/http` is only the TLS ones, and `service:ssl` every port
+//     speaking TLS. A list works like a port list: `service:http,https`.
+//   - `product:openssh` - a substring of product and version: `product:"openssh 7"`
+//     finds the 7.x boxes.
+// Same rules as every keyword: open ports only, an unusable value (`service:`,
+// `service:http,,ssh`) matches nothing. The version stays out of the free
+// text on purpose: `1.4` would otherwise match every 1.4.x somewhere. None
+// of the counts the README measured (22, 192.168.1.1, pi, apple) moves.
 (function (global) {
   "use strict";
 
@@ -79,7 +95,29 @@
     for (const p of host.udp_ports || []) {
       if (p.state === "open") parts.push(String(p.port));
     }
+    // v1.59.0: what -sV named on those open ports (not the version).
+    for (const p of openPorts(host)) parts.push(p.service, p.product);
     return parts.filter(Boolean).join(" ").toLowerCase();
+  }
+
+  // Every OPEN port, TCP then UDP - the only ones a service keyword reads.
+  function openPorts(host) {
+    return [...(host.ports || []), ...(host.udp_ports || [])].filter((p) => p.state === "open");
+  }
+
+  // The names a `service:` value can use for a port: `ssl/http` answers to
+  // `ssl/http`, `http` and `ssl`; a plain `ssh` to `ssh`.
+  function serviceNames(p) {
+    const s = String(p.service || "").toLowerCase();
+    if (!s) return [];
+    const slash = s.indexOf("/");
+    return slash > 0 ? [s, s.slice(0, slash), s.slice(slash + 1)] : [s];
+  }
+
+  // `service:` value as a list of names, or null if any item is unusable.
+  function serviceList(v) {
+    const items = v.split(",");
+    return items.every((x) => /^[a-z0-9][a-z0-9._+-]*(?:\/[a-z0-9][a-z0-9._+-]*)?$/.test(x)) ? items : null;
   }
 
   // True for a unicast MAC whose locally-administered bit is set. A MAC that
@@ -213,6 +251,11 @@
     },
     ports: (host, v) => compares(openTcpCount(host), v),
     latency: (host, v) => compares(host.latency_ms, v),
+    service: (host, v) => {
+      const want = serviceList(v);
+      return want !== null && openPorts(host).some((p) => serviceNames(p).some((n) => want.includes(n)));
+    },
+    product: (host, v) => openPorts(host).some((p) => has([p.product, p.version].filter(Boolean).join(" "), v)),
   };
 
   function matchTerm(host, term, label, hay, diff) {

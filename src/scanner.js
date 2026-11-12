@@ -439,6 +439,20 @@ function runPingSweep(cidr, opts = {}) {
   });
 }
 
+// v1.59.0 — a service behind TLS, spelled the way nmap's own output spells
+// it: `ssl/http`. The XML splits it in two - `<service name="http"
+// tunnel="ssl">` - and keeping only the name made a TLS web UI on a
+// non-standard port read as plain `http` and link as `http://`. Measured
+// with nmap 7.99 (`-sT -sV --version-light`, a Python server on 8443 behind
+// TLS): name="http" tunnel="ssl"; the `http://` link it got answered
+// "connection reset by peer", `https://` answered 200. On 443 the same
+// server came back as the port table's guess, name="https" tunnel="ssl"
+// (no product): that is `ssl/https`.
+function serviceName(svc) {
+  if (!svc.name || typeof svc.name !== "string") return null;
+  return typeof svc.tunnel === "string" && svc.tunnel ? `${svc.tunnel}/${svc.name}` : svc.name;
+}
+
 function parsePorts(xml) {
   const doc = xmlParser.parse(xml);
   const hosts = doc?.nmaprun?.host || [];
@@ -456,7 +470,7 @@ function parsePorts(xml) {
       protocol: p.protocol || "tcp",
       state: p.state?.state || "unknown",
       state_reason: p.state?.reason || null,
-      service: svc.name || null,
+      service: serviceName(svc),
       product: svc.product || null,
       version: svc.version || null,
       extra: extra || null,
