@@ -377,3 +377,77 @@ test('ports: / latency: with a value they cannot use match nothing', () => {
   assert.deepEqual(mips('latency:>5'), ['2', '4']);
   assert.deepEqual(mips('ports:>=2'), ['1']);
 });
+
+// v1.59.0 — service: and product:, and the free text over what -sV named.
+const SVC = [
+  {
+    ip: '10.0.0.1', hostname: 'nas',
+    ports: [
+      { port: 22, state: 'open', service: 'ssh', product: 'OpenSSH', version: '7.4' },
+      { port: 5001, state: 'open', service: 'ssl/http', product: 'Synology DSM' },
+      { port: 23, state: 'closed', service: 'telnet', product: 'BusyBox telnetd' },
+    ],
+  },
+  {
+    ip: '10.0.0.2', hostname: 'web',
+    ports: [
+      { port: 80, state: 'open', service: 'http', product: 'nginx', version: '1.27.1' },
+      { port: 443, state: 'open', service: 'ssl/https' },
+    ],
+    udp_ports: [{ port: 161, state: 'open', service: 'snmp', product: 'net-snmp', version: '5.9' }],
+  },
+  {
+    ip: '10.0.0.3', hostname: 'pi',
+    ports: [{ port: 22, state: 'open', service: 'ssh', product: 'OpenSSH', version: '9.6p1 Ubuntu 3ubuntu13.1' }],
+    udp_ports: [{ port: 53, state: 'open|filtered', service: 'domain', product: 'dnsmasq' }],
+  },
+];
+const svcIps = (q) => searchHosts(SVC, q).map((h) => h.ip);
+
+test('free text covers service and product of OPEN ports, not their version', () => {
+  assert.deepEqual(svcIps('nginx'), ['10.0.0.2']);
+  assert.deepEqual(svcIps('openssh'), ['10.0.0.1', '10.0.0.3']);
+  assert.deepEqual(svcIps('synology'), ['10.0.0.1']);
+  assert.deepEqual(svcIps('net-snmp'), ['10.0.0.2']); // UDP that answered
+  // a closed port's service and product are not indexed, nor open|filtered UDP
+  assert.deepEqual(svcIps('telnet'), []);
+  assert.deepEqual(svcIps('busybox'), []);
+  assert.deepEqual(svcIps('dnsmasq'), []);
+  // the version stays out of the free text
+  assert.deepEqual(svcIps('1.27'), []);
+});
+
+test('service: is nmap\'s name, with or without TLS; ssl/… and ssl narrow it', () => {
+  assert.deepEqual(svcIps('service:ssh'), ['10.0.0.1', '10.0.0.3']);
+  // ssl/http answers to http; plain http too
+  assert.deepEqual(svcIps('service:http'), ['10.0.0.1', '10.0.0.2']);
+  assert.deepEqual(svcIps('service:ssl/http'), ['10.0.0.1']);
+  assert.deepEqual(svcIps('service:https'), ['10.0.0.2']);
+  assert.deepEqual(svcIps('service:ssl'), ['10.0.0.1', '10.0.0.2']);
+  assert.deepEqual(svcIps('SERVICE:SSH'), ['10.0.0.1', '10.0.0.3']); // case-insensitive
+  assert.deepEqual(svcIps('service:snmp'), ['10.0.0.2']); // UDP counts
+  // exact, not a substring: htt and sh are nothing
+  assert.deepEqual(svcIps('service:htt'), []);
+  assert.deepEqual(svcIps('service:sh'), []);
+  // closed and open|filtered never count
+  assert.deepEqual(svcIps('service:telnet'), []);
+  assert.deepEqual(svcIps('service:domain'), []);
+});
+
+test('service: takes a list; a value it cannot use matches nothing', () => {
+  assert.deepEqual(svcIps('service:https,ssh'), ['10.0.0.1', '10.0.0.2', '10.0.0.3']);
+  assert.deepEqual(svcIps('-service:ssl'), ['10.0.0.3']);
+  for (const bad of ['service:', 'service:ssh,,http', 'service:,ssh', 'service:ssh/', 'service:a/b/c', 'service:ss*']) {
+    assert.deepEqual(svcIps(bad), [], bad);
+  }
+});
+
+test('product: is a substring of product and version of an open port', () => {
+  assert.deepEqual(svcIps('product:openssh'), ['10.0.0.1', '10.0.0.3']);
+  assert.deepEqual(svcIps('product:"openssh 7"'), ['10.0.0.1']);
+  assert.deepEqual(svcIps('product:"openssh 9.6"'), ['10.0.0.3']);
+  assert.deepEqual(svcIps('product:nginx product:1.27'), ['10.0.0.2']);
+  assert.deepEqual(svcIps('-product:openssh'), ['10.0.0.2']);
+  assert.deepEqual(svcIps('product:busybox'), []); // closed
+  assert.deepEqual(svcIps('product:'), []);
+});

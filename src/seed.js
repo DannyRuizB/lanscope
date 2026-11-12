@@ -38,7 +38,7 @@ const ROUTER = {
     { port: 22, protocol: "tcp", state: "open", state_reason: "syn-ack", service: "ssh", product: "Dropbear sshd", version: "2020.81", extra: "protocol 2.0" },
     { port: 53, protocol: "tcp", state: "open", state_reason: "syn-ack", service: "domain", product: "dnsmasq", version: "2.85" },
     { port: 80, protocol: "tcp", state: "open", state_reason: "syn-ack", service: "http", product: "lighttpd", version: "1.4.59" },
-    { port: 443, protocol: "tcp", state: "open", state_reason: "syn-ack", service: "https", product: "lighttpd", version: "1.4.59" },
+    { port: 443, protocol: "tcp", state: "open", state_reason: "syn-ack", service: "ssl/http", product: "lighttpd", version: "1.4.59" },
   ],
 };
 
@@ -56,9 +56,9 @@ const NAS = {
   ports: [
     { port: 22, protocol: "tcp", state: "open", service: "ssh", product: "OpenSSH", version: "7.4" },
     { port: 80, protocol: "tcp", state: "open", service: "http", product: "nginx" },
-    { port: 443, protocol: "tcp", state: "open", service: "https", product: "nginx" },
+    { port: 443, protocol: "tcp", state: "open", service: "ssl/http", product: "nginx" },
     { port: 5000, protocol: "tcp", state: "open", service: "http", product: "Synology DSM" },
-    { port: 5001, protocol: "tcp", state: "open", service: "https", product: "Synology DSM" },
+    { port: 5001, protocol: "tcp", state: "open", service: "ssl/http", product: "Synology DSM" },
   ],
 };
 
@@ -162,7 +162,7 @@ const SMART_TV = {
   ],
   ports: [
     { port: 8001, protocol: "tcp", state: "open", service: "http", product: "Samsung Smart TV" },
-    { port: 8002, protocol: "tcp", state: "open", service: "https" },
+    { port: 8002, protocol: "tcp", state: "open", service: "ssl/https" },
     { port: 9197, protocol: "tcp", state: "open", service: "upnp" },
   ],
 };
@@ -177,7 +177,7 @@ const CHROMECAST = {
   reason: "arp-response",
   ports: [
     { port: 8008, protocol: "tcp", state: "open", service: "http", product: "Google Chromecast" },
-    { port: 8009, protocol: "tcp", state: "open", service: "https" },
+    { port: 8009, protocol: "tcp", state: "open", service: "ssl/https" },
   ],
 };
 
@@ -206,7 +206,7 @@ const PRINTER = {
   reason: "arp-response",
   ports: [
     { port: 80, protocol: "tcp", state: "open", service: "http", product: "HP LaserJet web admin" },
-    { port: 443, protocol: "tcp", state: "open", service: "https" },
+    { port: 443, protocol: "tcp", state: "open", service: "ssl/https" },
     { port: 631, protocol: "tcp", state: "open", service: "ipp", product: "CUPS" },
     { port: 9100, protocol: "tcp", state: "open", service: "jetdirect" },
   ],

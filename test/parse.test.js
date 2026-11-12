@@ -136,6 +136,35 @@ test('parsePorts joins extrainfo / ostype / cpe into one extra field', () => {
   assert.equal(S.parsePorts(xml)[0].extra, 'ssl · Linux · cpe:/a:nginx:nginx');
 });
 
+// v1.59.0 — the <service> lines below are copied from a real run (nmap 7.99,
+// `-sT -sV -T4 --version-light --reason`, a Python server answering HTTP on
+// 80/8080 and HTTPS on 443/8443). TLS is a separate attribute, tunnel="ssl";
+// keeping only name made 8443 read (and link) as plain http.
+test('parsePorts keeps nmap\'s TLS tunnel: ssl/http, ssl/https (real nmap 7.99 output)', () => {
+  const xml = `<nmaprun><host><address addr="10.250.9.10" addrtype="ipv4"/><ports>
+    <port protocol="tcp" portid="80"><state state="open" reason="syn-ack" reason_ttl="0"/><service name="http" product="SimpleHTTPServer" version="0.6" extrainfo="Python 3.14.8" method="probed" conf="10"><cpe>cpe:/a:python:simplehttpserver:0.6</cpe></service></port>
+    <port protocol="tcp" portid="443"><state state="open" reason="syn-ack" reason_ttl="0"/><service name="https" tunnel="ssl" method="table" conf="3"/></port>
+    <port protocol="tcp" portid="8443"><state state="open" reason="syn-ack" reason_ttl="0"/><service name="http" product="SimpleHTTPServer" version="0.6" extrainfo="Python 3.14.8" tunnel="ssl" method="probed" conf="10"><cpe>cpe:/a:python:simplehttpserver:0.6</cpe></service></port>
+  </ports></host></nmaprun>`;
+  const byPort = Object.fromEntries(S.parsePorts(xml).map((p) => [p.port, p]));
+  assert.equal(byPort[80].service, 'http');
+  assert.equal(byPort[443].service, 'ssl/https');
+  assert.equal(byPort[443].product, null);
+  assert.equal(byPort[8443].service, 'ssl/http');
+  assert.equal(byPort[8443].product, 'SimpleHTTPServer');
+  assert.equal(byPort[8443].version, '0.6');
+});
+
+test('parsePorts: a <service> without a name stays null, tunnel or not', () => {
+  const xml = `<nmaprun><host><address addr="10.0.0.9" addrtype="ipv4"/><ports>
+    <port protocol="tcp" portid="9999"><state state="open" reason="syn-ack"/><service tunnel="ssl" method="table" conf="3"/></port>
+    <port protocol="tcp" portid="9998"><state state="open" reason="syn-ack"/></port>
+  </ports></host></nmaprun>`;
+  const [a, b] = S.parsePorts(xml);
+  assert.equal(a.service, null);
+  assert.equal(b.service, null);
+});
+
 test('parsePorts handles UDP ports and composite states', () => {
   const xml = `<nmaprun><host><address addr="1.1.1.1" addrtype="ipv4"/><ports>
     <port protocol="udp" portid="53">

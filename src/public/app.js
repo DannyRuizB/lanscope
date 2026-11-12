@@ -755,9 +755,21 @@ const HTTPS_SERVICES = new Set([
   "ssl/https",
 ]);
 
+// v1.59.0 — the scanner now keeps nmap's TLS tunnel (`ssl/http`), so any
+// web service behind TLS - `ssl/http-proxy`, `ssl/http-alt` too - links as
+// https. Before, `ssl/…` never reached here and a TLS UI on 8443 got an
+// http:// link that the server reset.
+function tlsBare(svc) {
+  return svc.startsWith("ssl/") ? svc.slice(4) : null;
+}
+
 function portUrl(host, p) {
   if (!p.service || p.state !== "open") return null;
   const svc = p.service.toLowerCase();
+  const bare = tlsBare(svc);
+  if (bare !== null && (HTTP_SERVICES.has(bare) || HTTPS_SERVICES.has(bare))) {
+    return `https://${host.ip}:${p.port}`;
+  }
   if (HTTP_SERVICES.has(svc)) return `http://${host.ip}:${p.port}`;
   if (HTTPS_SERVICES.has(svc)) return `https://${host.ip}:${p.port}`;
   return null;
@@ -798,6 +810,9 @@ function portHint(host, p) {
   if (portUrl(host, p)) return null;
   const svc = (p.service || "").toLowerCase();
   if (svc && PORT_HINTS[svc]) return PORT_HINTS[svc];
+  // `ssl/imap` is IMAP over TLS: same client, say so.
+  const bare = tlsBare(svc);
+  if (bare && PORT_HINTS[bare]) return `${PORT_HINTS[bare]} (over TLS)`;
   return "Not HTTP/HTTPS — needs a protocol-specific client";
 }
 
